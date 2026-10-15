@@ -149,9 +149,11 @@ struct Session {
     agent: String,
     // The processes it runs in, for going to its window.
     chain: jump::Chain,
-    // The turn under way, and the last few that ended (Codex).
+    // The turn under way, the last few that ended (Codex), and the last few
+    // seen to start (Grok: an end of one of those, not the one under way, is late).
     turn: String,
     ended_turns: Vec<String>,
+    begun_turns: Vec<String>,
     // When its last event came (`at` moves too as an ending goes back to
     // rest), and when its ending was seen or its held time ran out: how
     // long it has been quiet. Out of sight as last looked at (is_shown).
@@ -185,6 +187,7 @@ impl Session {
             chain: Vec::new(),
             turn: String::new(),
             ended_turns: Vec::new(),
+            begun_turns: Vec::new(),
             event_at: now,
             seen_at: None,
             hidden: false,
@@ -386,10 +389,11 @@ impl Pet {
                     }
                     return Some(out);
                 }
-                // Grok's end of a turn before the one under way (a cancel is
-                // reported off its loop, after the next prompt at times): kept
-                // as ended, and nothing else.
-                if s.agent == "grok" && event == "turn-end" && !turn.is_empty() && !s.turn.is_empty() && turn != s.turn {
+                // Grok's end of a turn seen to start before the one under way
+                // (a cancel is reported off its loop, after the next prompt at
+                // times): kept as ended, and nothing else. A turn never seen
+                // to start (its prompt's hook lost) ends as any would.
+                if s.agent == "grok" && event == "turn-end" && turn != s.turn && s.begun_turns.contains(&turn) {
                     s.ended_turns.push(turn);
                     if s.ended_turns.len() > ENDED_TURNS {
                         s.ended_turns.remove(0);
@@ -418,6 +422,12 @@ impl Pet {
                 }
                 if event == "turn-start" && is_new_turn {
                     out.turns += 1;
+                    if !s.turn.is_empty() && !s.begun_turns.contains(&s.turn) {
+                        s.begun_turns.push(s.turn.clone());
+                        if s.begun_turns.len() > ENDED_TURNS {
+                            s.begun_turns.remove(0);
+                        }
+                    }
                     // The turn before never said it ended (stopped without a
                     // word, or Antigravity's still waiting on a task of its
                     // own): it worked until its last event.
@@ -680,6 +690,13 @@ mod tests {
         assert_eq!(pet.get(4)["mood"], "working");
         pet.apply(&grok!("stop-end-turn"), 5, Hold::Seen);
         assert_eq!(pet.get(6)["mood"], "done");
+        // A turn whose prompt never came here ends as any would.
+        let mut pet = Pet::default();
+        pet.apply(&grok!("prompt"), 1, Hold::Seen);
+        pet.apply(&grok!("stop-end-turn"), 2, Hold::Seen);
+        assert_eq!(pet.get(3)["mood"], "done");
+        pet.apply(&grok!("prompt-again"), 4, Hold::Seen);
+        assert_eq!(pet.get(5)["mood"], "done", "its end came: a late copy of its prompt starts nothing");
         // Its own turn's cancel stops it.
         let mut pet = Pet::default();
         pet.apply(&grok!("prompt"), 1, Hold::Seen);
