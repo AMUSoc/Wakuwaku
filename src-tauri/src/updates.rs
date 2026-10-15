@@ -15,8 +15,8 @@
 // GitHub gives for it, or Gitee's <exe>.sha256 when GitHub gives none (none
 // at all, the two differing, or the download another: not installed), put
 // where hers is, hers kept beside it as <name>.old.exe, and started with
-// --after-update <her pid>: it waits for her to be gone (the port, the
-// taskbar), and she quits as the menu does. A prompt waiting for an answer
+// --after-update <her pid>: it waits for her to be gone (the port), and
+// she quits as the menu does. A prompt waiting for an answer
 // is answered first. The old exe goes once the new one has run a minute;
 // should the new one not start, the old one is still there to be renamed
 // back (DEVELOPMENT.md).
@@ -673,7 +673,7 @@ pub fn start_again() -> Result<(), String> {
 }
 
 // After a minute's run, the exe an update left: gone (tried a few times:
-// the old one's taskbar guard may still have it open a moment).
+// the old one's guard may still have it open a moment).
 fn remove_old(sh: &Shared) {
     let Ok(exe) = std::env::current_exe() else { return };
     let old = old_path(&exe);
@@ -691,7 +691,7 @@ fn remove_old(sh: &Shared) {
 }
 
 // Started by an update (--after-update <pid>): that one waited for, at most
-// a minute, before she takes the port and the taskbar.
+// a minute, before she takes the port.
 pub fn wait_after_update(args: &[String]) {
     let Some(pid) = args.iter().position(|a| a == AFTER_UPDATE).and_then(|i| args.get(i + 1)).and_then(|p| p.parse::<u32>().ok()) else { return };
     *AFTER.lock().unwrap() = Some(pid);

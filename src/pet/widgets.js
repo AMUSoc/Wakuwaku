@@ -119,19 +119,6 @@
     return `#${c.map(v => v.toString(16).padStart(2, '0')).join('')}`
   }
 
-  // The readings in two rows, as the taskbar has its clock's time over the
-  // date: the machine's (CPU, memory, battery) over the network's; with only
-  // one kind, half over half.
-  function rowsOf(parts) {
-    const isNet = p => p.icon === 'down' || p.icon === 'up'
-    const net = parts.filter(isNet)
-    const rest = parts.filter(p => !isNet(p))
-    if (net.length && rest.length) return [rest, net]
-    const all = net.length ? net : rest
-    const half = Math.ceil(all.length / 2)
-    return [all.slice(0, half), all.slice(half)].filter(row => row.length)
-  }
-
   // A reading that wants a look: the CPU or the memory at 90% or more, the
   // battery (not charging) at 20% or less.
   function isHigh(p) {
@@ -140,24 +127,13 @@
     return p.icon === 'battery' && n <= 20
   }
 
-  // The rows as markup (the taskbar's): each reading its cell, in the
-  // text's own colour. The battery not: the tray has Windows' own, beside
-  // the network's and the sound's.
-  // One reading a row (a side bar's one column), or in two rows.
-  const rowsHTML = (w, column = false) =>
-    (column ? parts => parts.map(p => [p]) : rowsOf)((partsOf(w) || []).filter(p => p.icon !== 'battery' && p.icon !== 'bolt'))
-      .map(row => `<span class="wrow">${row.map(cellHTML).join('')}</span>`)
-      .join('')
-
   const api = {
     ICONS,
     icon,
     words,
     partsOf,
     partsHTML,
-    rowsOf,
     isHigh,
-    rowsHTML,
     shareOf,
     glyphOf,
     deepen,

@@ -118,9 +118,8 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
                 sh.apply(&msg);
             }
             // A prompt holds the answer until the person picks on the pet, the
-            // terminal settles it, or time runs out; out of sight (her
-            // taskbar on another display counts: main.rs asks_seen), it is
-            // the terminal's at once.
+            // terminal settles it, or time runs out; out of sight (main.rs
+            // asks_seen), it is the terminal's at once.
             let is_prompt = event["hook_event_name"] == "PermissionRequest";
             if is_prompt && !sh.asks_seen() {
                 sh.log("a prompt handed to the terminal: out of sight");

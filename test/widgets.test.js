@@ -24,23 +24,6 @@ test('a widget says its words, a built-in one in her language', () => {
   assert.equal(Widgets.words('en', short).value, '2 turns · 45 s · approvals —')
 })
 
-test("the monitor's readings in two rows: the machine's over the network's", () => {
-  const p = (icon, text = '1') => ({ icon, text })
-  const icons = rows => rows.map(row => row.map(x => x.icon))
-  assert.deepEqual(icons(Widgets.rowsOf([p('cpu'), p('memory'), p('down'), p('up')])), [['cpu', 'memory'], ['down', 'up']])
-  assert.deepEqual(icons(Widgets.rowsOf([p('cpu'), p('memory'), p('down'), p('up'), p('battery')])), [['cpu', 'memory', 'battery'], ['down', 'up']])
-  // One kind only: half over half.
-  assert.deepEqual(icons(Widgets.rowsOf([p('cpu'), p('memory')])), [['cpu'], ['memory']])
-  assert.deepEqual(icons(Widgets.rowsOf([p('down'), p('up')])), [['down'], ['up']])
-  assert.deepEqual(icons(Widgets.rowsOf([p('cpu'), p('memory'), p('battery')])), [['cpu', 'memory'], ['battery']])
-  assert.deepEqual(icons(Widgets.rowsOf([p('cpu')])), [['cpu']])
-  assert.deepEqual(Widgets.rowsOf([]), [])
-  // A side bar's one column: a reading a row, the battery left out as ever.
-  const monitor = { value: { parts: [p('cpu'), p('memory'), p('down'), p('up'), p('battery')] } }
-  assert.equal((Widgets.rowsHTML(monitor, true).match(/class="wrow"/g) || []).length, 4)
-  assert.equal((Widgets.rowsHTML(monitor).match(/class="wrow"/g) || []).length, 2)
-})
-
 test('a reading wants a look when the machine is nearly full or the battery low', () => {
   assert.equal(Widgets.isHigh({ icon: 'cpu', text: '90%' }), true)
   assert.equal(Widgets.isHigh({ icon: 'cpu', text: '89%' }), false)
@@ -48,13 +31,7 @@ test('a reading wants a look when the machine is nearly full or the battery low'
   assert.equal(Widgets.isHigh({ icon: 'battery', text: '20%' }), true)
   assert.equal(Widgets.isHigh({ icon: 'bolt', text: '5%' }), false)
   assert.equal(Widgets.isHigh({ icon: 'down', text: '999K' }), false)
-  assert.match(Widgets.rowsHTML({ value: { parts: [{ icon: 'cpu', text: '95%' }, { icon: 'down', text: '1.2M' }] } }), /^<span class="wrow"><span class="wcell high" style="--p:95%">.*95%.*<\/span><span class="wrow"><span class="wcell" style="--p:62%">.*1\.2M/)
-})
-
-test("the taskbar's monitor leaves the battery to the tray", () => {
-  const html = Widgets.rowsHTML({ value: { parts: [{ icon: 'cpu', text: '5%' }, { icon: 'battery', text: '72%' }, { icon: 'bolt', text: '40%' }, { icon: 'down', text: '1K' }] } })
-  assert.doesNotMatch(html, /72%|40%/)
-  assert.match(html, /5%.*1K/)
+  assert.match(Widgets.partsHTML({ value: { parts: [{ icon: 'cpu', text: '95%' }, { icon: 'down', text: '1.2M' }] } }), /^<span class="wcell high" style="--p:95%">.*95%.*<\/span><span class="wcell" style="--p:62%">.*1\.2M/)
 })
 
 test('a reading as full as it goes: a share as it is, a rate by its order of magnitude', () => {

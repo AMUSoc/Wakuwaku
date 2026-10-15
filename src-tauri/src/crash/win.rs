@@ -227,9 +227,8 @@ unsafe extern "system" fn on_crash(pointers: *mut ExceptionPointers) -> i32 {
         }
     }
     // Ended now, her exit code the exception's: left to Windows, its error
-    // reporting kept her (and the taskbar she held, which the guard gives
-    // back once she is gone) eight or nine seconds more for a dump nobody
-    // reads (2026-10-11). No WER entry in the event log for it.
+    // reporting kept her eight or nine seconds more for a dump nobody reads
+    // (2026-10-11). No WER entry in the event log for it.
     if !record.is_null() {
         // SAFETY: as above; this process's own pseudo-handle.
         unsafe { TerminateProcess(GetCurrentProcess(), (*record).code) };

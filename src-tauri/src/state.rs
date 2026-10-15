@@ -561,7 +561,7 @@ impl Pet {
     }
 
     // Every session in sight, the one that most wants you first: the island's
-    // open lines, the settings' list, the marks on the taskbar's buttons.
+    // open lines, the settings' list.
     pub fn list(&self) -> Value {
         let mut all: Vec<&Session> = self.shown().filter(|s| !s.id.is_empty() || s.mood != "idle").collect();
         all.sort_by(|a, b| priority(&b.mood).cmp(&priority(&a.mood)).then(b.at.cmp(&a.at)));

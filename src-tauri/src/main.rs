@@ -1,19 +1,15 @@
 // Wakuwaku: a transparent, frameless, always-on-top desktop pet that shows
-// what Claude Code is doing; its hooks report to a local port. The pages are
-// src/pet (her window and the island's), talking to this side through
-// src/pet/bridge.js.
+// what Claude Code, Codex and Antigravity are doing; their hooks report to a
+// local port. The pages are src/pet (her window and the island's), talking
+// to this side through src/pet/bridge.js.
 //
-// Where she is: her home (display) is the island at the top centre, or a
-// taskbar in place of Windows' own; she is in it, or out on the desktop
-// (out), and her home stays up and talks for her. The settings grow out of
-// her home; with none up, one rises for them.
+// Where she is: her home is the island at the top centre; she is in it, or
+// out on the desktop (out), and the island stays up and talks for her. The
+// settings grow out of the island; with none up, one rises for them.
 //
 //   pet.rs         her window: size, place, eyes, drags, being carried, walks
-//   island.rs      her home's window (island, taskbar), and the settings
-//   appbar.rs      the taskbar's strip, kept from other windows
-//   taskbar.rs     the taskbar's side of Windows: its own put away (shell.rs),
-//                  the tray taken over (systray.rs), the windows' buttons (tasks.rs),
-//                  the volume (audio.rs)
+//   island.rs      the island's window, and the settings
+//   backplate.rs   the acrylic blur under the island
 //   settings.rs    what the settings show and change
 //   pointer.rs     click-through, for both windows; screen.rs the work areas
 //   asks.rs        prompts answered on her or the island
@@ -23,11 +19,14 @@
 //   jump.rs        to a session's window, when you click the session
 //   tray.rs        the tray icon and the menu
 //   server.rs      the port the hooks report to
-//   state.rs       per-session moods; events.rs (Claude Code) and
-//                  events_codex.rs (Codex) hook events into messages
+//   state.rs       per-session moods; events.rs (Claude Code),
+//                  events_codex.rs (Codex) and events_agy.rs (Antigravity)
+//                  hook events into messages
 //   data.rs        her folder, settings and pets
-//   widgets.rs     plugins in the island: widgets from scripts, and the built-in ones
+//   widgets.rs     plugins in the island: widgets from scripts, and the built-in ones;
+//                  scripts.rs the plugins she runs for you
 //   tokens.rs      today's tokens, from Claude Code's, Codex's and Antigravity's own records
+//   crash.rs       crash reports, and her guard; updates.rs her updates
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod asks;
@@ -198,8 +197,8 @@ impl Shared {
         quiet
     }
 
-    // Another app is full screen (watched while the setting asks, or the taskbar is her home).
-    // The displays she is on (x, y, w, h): her island's or taskbar's, and
+    // Another app is full screen (watched while the setting asks).
+    // The displays she is on (x, y, w, h): her island's, and
     // hers while she is out. An app full screen on another is none of hers.
     pub fn displays(&self) -> Vec<(i32, i32, i32, i32)> {
         let mut on: Vec<(i32, i32, i32, i32)> = island::display(self).into_iter().collect();
@@ -284,7 +283,7 @@ impl Shared {
         // Windows' mode, for her island's look at the top of the screen.
         now["winLight"] = json!(wallpaper::look().0);
         // The widgets that have something to say: those on take their turns
-        // in the island while nothing needs you; any may be on the taskbar.
+        // in the island while nothing needs you.
         now["widgets"] = self.widgets_said();
         // Nothing connected (Claude Code, Codex, Antigravity): the island
         // says so, naming those on this computer, and a press on it opens
@@ -620,7 +619,7 @@ impl Shared {
 
 // --- Where she is -----------------------------------------------------------------
 
-// A new home: the island or the taskbar (she goes into it).
+// Her home: the island (she goes into it, back from the desktop).
 pub fn set_display(sh: &Arc<Shared>, display: &str) {
     if sh.setting("display").as_str() == Some(display) && !sh.flag("out") {
         return;
@@ -1102,7 +1101,7 @@ fn main() {
     }
 
     // Started by an update: the one it replaces waited for, so this one
-    // gets the port (and the taskbar), not just wakes that one.
+    // gets the port, not just wakes that one.
     updates::wait_after_update(&args);
 
     let dir = data::folder();

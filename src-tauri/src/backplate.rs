@@ -1,8 +1,8 @@
 // A blur of what is behind her island (zhoupengjie/Wakuwaku#20). The page's
 // own blur (style.css --i-blur, a backdrop-filter) blurs only what the page
-// draws: open above the taskbar, or at the top of the screen, there is
-// nothing of the page behind the island but other programs' windows, and a
-// see-through ground showed their words sharp through it. So a window of
+// draws: at the top of the screen there is nothing of the page behind the
+// island but other programs' windows, and a see-through ground showed
+// their words sharp through it. So a window of
 // our own goes right under the island's window, the island's shape, with
 // Windows' acrylic: DWM blurs whatever is behind it. The page's ground, at
 // its own opacity, lies over it, as Windows' own flyouts are made.

@@ -68,9 +68,6 @@ pub fn snapshot(sh: &Shared) -> Value {
             "backup": connection::backup_of(&connection::agy_hooks_file()).exists(),
             "seen": sh.agy_seen.load(Ordering::SeqCst) > 0,
         },
-        // How many displays there are: her taskbar on all of them is offered
-        // only with more than one (Look, taskbarDisplays).
-        "displayCount": sh.screens().areas.len(),
         "loginAtStart": connection::is_open_at_login(),
         // Windows' own mode and accent colour.
         "winLook": { "light": win_light, "accent": win_accent.map(|a| a.base) },

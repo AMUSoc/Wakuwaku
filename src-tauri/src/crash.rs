@@ -12,8 +12,8 @@
 //   - her pages' renderer (or WebView2's browser process) gone: its
 //     ProcessFailed; the page loaded again (the browser: she starts anew)
 // The guard makes the report as she ends; her next start, for a record no
-// guard saw (main.rs runs one while reports can be sent and are not off;
-// the taskbar home runs one anyway, shell.rs). A report is crashes/<time>-<kind>-<pid>.json, what is
+// guard saw (main.rs runs one while reports can be sent and are not off).
+// A report is crashes/<time>-<kind>-<pid>.json, what is
 // sent word for word: her version, Windows' and WebView2's, her home, how long
 // she ran, and the last lines of her log from the five minutes before, each
 // with what is theirs taken out (redact.rs). Her log goes to recent.log
@@ -156,7 +156,7 @@ pub fn install(data: &Path) {
         before(info);
         // Built to abort (release): ended now, with the code the abort's
         // fast fail would give, not after Windows' error reporting has kept
-        // her (and the taskbar) some seconds more.
+        // her some seconds more.
         #[cfg(all(windows, panic = "abort"))]
         win::end_with(0xC000_0409);
     }));
