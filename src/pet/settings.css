@@ -842,6 +842,12 @@
   background: var(--g2);
 }
 
+/* "On the desktop" before each agent's switch (settings.js agentPetsPart). */
+#island-settings .agent-out {
+  flex: none;
+  margin-left: 8px;
+}
+
 /* The agents a pet is set for (settings.js agentChips): pressed, on. */
 #island-settings .agent-chips {
   display: flex;

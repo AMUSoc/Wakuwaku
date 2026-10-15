@@ -239,9 +239,12 @@
   const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity', grok: 'Grok' }
 
   // Each agent's own pet (agentPets): the island draws a session as its
-  // agent's, one not set (or gone) as the pet in use (data.rs pet_for).
+  // agent's, one not set (or gone) as the pet in use (data.rs pet_for). And
+  // whether it is out on the desktop (desktop): a pet of its own there,
+  // showing its agent's sessions alone.
   function agentPetsPart() {
     const own = snap.settings.agentPets || {}
+    const out = snap.settings.desktop || {}
     const inUse = snap.pets.find(p => p.id === snap.settings.pet)
     const rows = Object.entries(AGENT_NAMES)
       .map(([agent, name]) => {
@@ -249,7 +252,8 @@
         const shown = pet || inUse
         const note = pet ? pet.name : T('s.agentPetDefault', { name: inUse ? inUse.name : '—' })
         return `<div class="r petrow">${shown ? thumb(36, shown.url, shown.version) : ''}<div class="grow"><div>${esc(name)}</div><div class="d">${esc(note)}</div></div>
-          ${pet ? `<button class="pbtn sm" data-agent-pet-clear="${agent}">${esc(T('s.agentPetClear'))}</button>` : ''}</div>`
+          ${pet ? `<button class="pbtn sm" data-agent-pet-clear="${agent}">${esc(T('s.agentPetClear'))}</button>` : ''}
+          <span class="d agent-out">${esc(T('s.agentOut'))}</span><button class="sw${out[agent] ? ' on' : ''}" data-agent-out="${agent}" title="${esc(T('s.agentOut'))}"></button></div>`
       })
       .join('')
     return `${sec(T('s.agentPets'))}<div class="grp">${rows}<div class="note">${esc(T('s.agentPetsNote'))}</div></div>`
@@ -1328,6 +1332,13 @@
     if (crashButton && !crashButton.disabled) return window.pet.settings.crash(crashButton.dataset.crash).then(got => ((snap = got), draw()))
     const use = at('[data-use]')
     if (use) return patch({ pet: use.dataset.use })
+    // An agent's pet out on the desktop, or home.
+    const agentOut = at('[data-agent-out]')
+    if (agentOut) {
+      const agent = agentOut.dataset.agentOut
+      const desktop = snap.settings.desktop || {}
+      return patch({ desktop: { ...desktop, [agent]: desktop[agent] !== true } })
+    }
     // An agent's own pet: set, or (pressed again, or Default) the pet in use.
     const agentPet = at('[data-agent-pet]')
     const agentClear = at('[data-agent-pet-clear]')

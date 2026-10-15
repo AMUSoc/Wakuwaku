@@ -41,6 +41,9 @@ let spriteVersion = 2
 // island.js); in the island's, she is not drawn here.
 const ROLE = new URLSearchParams(location.search).get('role') === 'island' ? 'island' : 'pet'
 const isIsland = () => ROLE === 'island'
+// Out on the desktop, whose pet she is (pet.rs: one window for each agent's):
+// she shows its sessions alone (main.rs pet_payload).
+const AGENT = new URLSearchParams(location.search).get('agent') || ''
 // Out on the desktop she only acts: her home does the talking. Her bubble
 // speaks only while there is no pet at all, to say how to get one.
 
@@ -315,6 +318,8 @@ const askSheet = sheetSwitcher(loadSheet, sheet => {
 })
 
 window.pet.onUpdate(data => {
+  // Another agent's (none should come here): not hers.
+  if (AGENT && data.agent && data.agent !== AGENT) return
   const wasMood = now.mood
   now = data
   lang = data.lang || lang
