@@ -185,7 +185,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // Crash reports sent by themselves, never, or asked about (crash.rs).
         "crashReports" => matches!(v.as_str(), Some("auto" | "off" | "ask")),
         // The taskbar home stands in for Windows' own: elsewhere, only the island.
-        "display" => v.as_str() == Some("island") || (cfg!(windows) && v.as_str() == Some("taskbar")),
+        "display" => v.as_str() == Some("island"),
         "islandWidth" => matches!(v.as_str(), Some("narrow" | "normal" | "wide")),
         "taskbarMaterial" => matches!(v.as_str(), Some("mica" | "black" | "clear")),
         "taskbarClearWhen" => matches!(v.as_str(), Some("mica" | "solid" | "always")),

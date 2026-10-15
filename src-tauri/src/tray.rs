@@ -87,12 +87,6 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
     for key in ["walk", "look"] {
         menu.append(&CheckMenuItem::with_id(app, key, t(&format!("menu.{key}")), true, flag(key), None::<&str>)?)?;
     }
-    // Her home: the island or the taskbar.
-    let homes = Submenu::new(app, t("menu.home"), true)?;
-    for id in ["island", "taskbar"] {
-        homes.append(&CheckMenuItem::with_id(app, format!("display:{id}"), t(&format!("menu.{id}")), true, home == id, None::<&str>)?)?;
-    }
-    menu.append(&homes)?;
     // Let her out onto the desktop, or call her back home.
     let label = if flag("out") { t("menu.callBack") } else { t("menu.letOut") };
     menu.append(&MenuItem::with_id(app, "out", label, true, None::<&str>)?)?;

@@ -67,10 +67,8 @@ fn defaults() -> Map<String, Value> {
         "lang": "auto",
         "pet": "claude-chan",
         "scale": 0.55,
-        // Her home: island or taskbar (the taskbar from the first start, on
-        // Windows; elsewhere there is no taskbar of hers, only the island);
-        // out, she is on the desktop.
-        "display": if cfg!(windows) { "taskbar" } else { "island" },
+        // Her home: the island; out, she is on the desktop.
+        "display": "island",
         "out": false,
         // The compact island's width: narrow, normal or wide (island.js WIDTHS).
         "islandWidth": "normal",
@@ -139,17 +137,14 @@ pub fn load(dir: &Path) -> Map<String, Value> {
         settings.extend(saved);
     }
     // The homes of earlier versions are the island now: the capsule, the
-    // corner and the top bar; the pet on her own too, with her out of it.
+    // corner, the top bar and the taskbar; the pet on her own too, with her
+    // out of it.
     match settings.get("display").and_then(Value::as_str) {
         Some("pet") => {
             settings.insert("display".into(), json!("island"));
             settings.insert("out".into(), json!(true));
         }
-        Some("capsule" | "corner" | "bar") => {
-            settings.insert("display".into(), json!("island"));
-        }
-        // A settings file brought from Windows: no taskbar of hers here.
-        Some("taskbar") if !cfg!(windows) => {
+        Some("capsule" | "corner" | "bar" | "taskbar") => {
             settings.insert("display".into(), json!("island"));
         }
         _ => {}
@@ -390,6 +385,16 @@ mod tests {
         assert!(!s.contains_key("taskbarMaterial"));
         // A new user: the new defaults.
         assert_eq!(defaults()["taskbarMaterial"], "clear");
+    }
+
+    #[test]
+    fn the_taskbar_home_is_the_island_now() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-home-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        fs::write(dir.join("config.json"), r#"{ "display": "taskbar", "out": false }"#).unwrap();
+        assert_eq!(load(&dir)["display"], "island");
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(defaults()["display"], "island");
     }
 
     #[test]

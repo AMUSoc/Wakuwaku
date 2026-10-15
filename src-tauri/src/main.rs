@@ -234,12 +234,9 @@ impl Shared {
         self.by_fullscreen.load(Ordering::SeqCst)
     }
 
-    // Her home: 'island' or 'taskbar' (island.rs).
+    // Her home: the island (island.rs).
     pub fn home(&self) -> &'static str {
-        match self.setting("display").as_str() {
-            Some("taskbar") => "taskbar",
-            _ => "island",
-        }
+        "island"
     }
 
     pub fn own_window(&self, _win: &WebviewWindow) {

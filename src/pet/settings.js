@@ -39,8 +39,6 @@
   const PART_OF = { pets: 'look', alerts: 'now', connect: 'now', update: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
-  const HOMES = ['island', 'taskbar']
-  const HOME_KEY = { island: 's.displayIsland', taskbar: 's.displayTaskbar' }
   const HOLDS = ['seen', 8, 30, 120]
   // Minutes a session at rest stays in sight; 0 always (state.rs is_shown).
   const IDLE_HIDES = [15, 30, 60, 120, 0]
@@ -222,12 +220,11 @@
           })
           .join('')
       : `<div class="note">${esc(T('home.noSessions', { list: toolNames(toolsHere()) }))}</div>`
-    // Her out on the desktop; and her home, the next one at a press.
+    // Her out on the desktop.
     const tiles = [
       ['show', 'eye', T('s.outTile'), !snap.hidden && s.out === true],
       ['dnd', 'moon', T('menu.dnd'), s.dnd],
       ['sound', 'sound', T('settings.sound'), s.sound],
-      ['home', 'pill', T(HOME_KEY[s.display] || 's.displayIsland'), true],
     ]
     return `${sec(T('home.sessions'))}<div class="grp">${list}</div>
       ${sec(T('s.quick'))}<div class="tiles">${tiles
@@ -498,10 +495,7 @@
 
   function pageLook() {
     const s = snap.settings
-    return `${sec(T('home.display'))}<div class="modes">
-        <div class="mode${s.display === 'taskbar' ? '' : ' on'}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span>${esc(T('s.displayIsland'))}</div></div>
-        <div class="mode${s.display === 'taskbar' ? ' on' : ''}" data-mode="taskbar"><div class="pv"><s></s></div><div class="l"><span class="rd"></span>${esc(T('s.displayTaskbar'))}</div></div>
-      </div>
+    return `${sec(T('home.display'))}
       ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div></div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
       <div class="grp">${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
       ${sec(T('s.her'))}<div class="grp">
@@ -1323,11 +1317,8 @@
         if (!snap.hidden) return patch({ out: s.out !== true })
         return window.pet.settings.showPet(true).then(got => ((snap = got), draw()))
       }
-      if (key === 'home') return patch({ display: HOMES[(HOMES.indexOf(s.display) + 1) % HOMES.length] })
       return patch({ [key]: !s[key] })
     }
-    const mode = at('[data-mode]')
-    if (mode) return mode.dataset.mode !== s.display && patch({ display: mode.dataset.mode })
     // The taskbar's layout dragged into shape on the strip: the settings make way.
     if (at('[data-tb-edit]')) {
       close('edit')
