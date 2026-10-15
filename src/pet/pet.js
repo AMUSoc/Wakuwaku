@@ -235,9 +235,10 @@ function scheduleIdle() {
   idleTimer = setTimeout(idleAct, 12000 + Math.random() * 18000)
 }
 
-// Free for a walk or a glance: at rest, someone about, and she out to be seen.
+// Free for a walk or a glance: at rest, someone about, and she out to be
+// seen; no prompt up above her (panel.js).
 function isFree() {
-  return now.mood === 'idle' && !quiet && !document.hidden && !reaction && !walking && !dragged && !(looking && performance.now() < looking.until)
+  return now.mood === 'idle' && !quiet && !document.body.classList.contains('asking') && !document.hidden && !reaction && !walking && !dragged && !(looking && performance.now() < looking.until)
 }
 
 async function idleAct() {

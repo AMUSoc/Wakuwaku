@@ -396,9 +396,24 @@ impl Shared {
     }
 
     // The prompts waiting changed.
+    // The prompts each page holds: an agent's pet out on the desktop, its
+    // own agent's (asks::agent_of); the island, the rest.
+    pub fn asks_for(&self, pet: Option<&str>) -> Value {
+        let out = self.out_agents();
+        let asks = self.asks.lock().unwrap();
+        match pet {
+            Some(agent) => asks.views_where(|a| a == agent && out.contains(&a)),
+            None => asks.views_where(|a| !out.contains(&a)),
+        }
+    }
+
     pub fn push_asks(&self) {
-        let views = self.asks.lock().unwrap().views();
-        self.to_pages("pet:asks", views);
+        let _ = self.app.emit_to("island", "pet:asks", self.asks_for(None));
+        for agent in data::AGENTS {
+            if pet::is_made(self, agent) {
+                let _ = self.app.emit_to(pet::label(agent), "pet:asks", self.asks_for(Some(agent)));
+            }
+        }
         self.push_settings();
     }
 
@@ -554,6 +569,7 @@ impl Shared {
         let touches_visibility = ["dnd", "display", "desktop", "hideInFullscreen"].iter().any(|k| patch.contains_key(*k));
         let touches_top = ["settingsPin", "settingsTop"].iter().any(|k| patch.contains_key(*k));
         let touches_monitor = ["monitor", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
+        let touches_desktop = patch.contains_key("desktop");
         {
             let mut settings = self.settings.lock().unwrap();
             settings.extend(patch);
@@ -566,6 +582,10 @@ impl Shared {
         tray::refresh_menu(self);
         if touches_visibility {
             self.apply_visibility();
+        }
+        // A pet out or home: its agent's prompts go to it, or back to the island.
+        if touches_desktop {
+            self.push_asks();
         }
         if touches_top {
             island::keep_on_top(self);
@@ -776,7 +796,7 @@ fn agent_of(window: &WebviewWindow) -> String {
 async fn pet_ready(app: AppHandle, window: WebviewWindow) {
     let sh = shared(&app);
     if is_island(&window) { island::ready(&sh) } else { pet::ready(&sh, &agent_of(&window)) }
-    let views = sh.asks.lock().unwrap().views();
+    let views = sh.asks_for(pet::agent_of(window.label()));
     let _ = app.emit_to(window.label(), "pet:asks", views);
 }
 

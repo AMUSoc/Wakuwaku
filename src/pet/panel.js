@@ -251,11 +251,11 @@
     })
   }
 
-  // Which page holds the panel: her home's (the island's window), which
-  // talks for her; the open settings have it as a banner.
-  const ROLE = new URLSearchParams(location.search).get('role') === 'island' ? 'island' : 'pet'
+  // Which page holds a prompt: main sends each its own (main.rs asks_for).
+  // An agent's pet out on the desktop holds its agent's, above its head; the
+  // island the rest (the open settings have it as a banner).
   let settingsOpen = false
-  const holdsPanel = () => ROLE === 'island'
+  const holdsPanel = () => true
 
   function render(armMs = ARM_MS) {
     const ask = holdsPanel() ? asks[0] : null
@@ -329,8 +329,15 @@
     }
   })
 
+  // The same prompts again (another page's answered: main sends every page
+  // its own again): not drawn anew, its buttons not put back to sleep.
+  let asksSeen = '[]'
   window.pet.onAsks(list => {
-    asks = Array.isArray(list) ? list : []
+    const next = Array.isArray(list) ? list : []
+    const seen = JSON.stringify(next)
+    if (seen === asksSeen) return
+    asksSeen = seen
+    asks = next
     render()
   })
 

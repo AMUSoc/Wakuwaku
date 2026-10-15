@@ -439,6 +439,9 @@ pub fn set_panel(sh: &Shared, agent: &str, measured: Option<(f64, f64)>) {
         let pet_bottom = old.1 + before.1;
         if w.panel.is_none() && measured.is_some() {
             w.parked = Some(old);
+            // Not walking off with it.
+            w.walk_gen += 1;
+            w.walking = false;
         }
         w.panel = measured;
         w.size = w.size_for(scale);
@@ -868,7 +871,7 @@ pub fn walk(sh: &Shared, agent: &str, dx: f64, ms: f64) -> bool {
     let screens = sh.screens();
     let (gen, x0, y0, target) = {
         let mut w = sh.pets.of(agent).lock().unwrap();
-        if !w.shown || w.drag.is_some() || w.flying {
+        if !w.shown || w.drag.is_some() || w.flying || w.panel.is_some() {
             return false;
         }
         w.walk_gen += 1;
