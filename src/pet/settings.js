@@ -232,6 +232,9 @@
         .join('')}</div>`
   }
 
+  // Dates and times as each language writes them.
+  const LOCALES = { zh: 'zh-CN', 'zh-TW': 'zh-TW', en: 'en-US' }
+
   // The agents a pet may be set for (data.rs AGENTS), by name.
   const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity', grok: 'Grok' }
 
@@ -745,7 +748,7 @@
       : `<button class="pbtn sm" data-update="check" ${busy ? 'disabled' : ''}>${esc(T('s.updateCheck'))}</button>`
     const title = newer ? `${version}${T('s.updateLatestIs', { version: latest.version })}` : version
     const when = u.checkedAt
-      ? T('s.updateCheckedAt', { time: new Date(u.checkedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) })
+      ? T('s.updateCheckedAt', { time: new Date(u.checkedAt).toLocaleString(LOCALES[lang] || 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) })
       : ''
     return `${sec(T('s.update'))}<div class="grp">
         ${row(esc(title), esc(state), buttons)}
@@ -761,7 +764,7 @@
   function pageCrash() {
     const c = snap.crash || {}
     if (!c.can) return ''
-    const when = ms => new Date(ms).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    const when = ms => new Date(ms).toLocaleString(LOCALES[lang] || 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     const ask =
       c.mode === 'ask' && c.newest
         ? `<div class="grp">
@@ -934,7 +937,7 @@
       ${part('alerts', pageAlerts())}
       ${sec(T('s.startLang'))}<div class="grp">
         ${row(esc(T('settings.startAtLogin')), esc(T('home.pluginStart')), sw('login', snap.loginAtStart))}
-        ${row(esc(T('home.language')), '', seg('lang', [['auto', T('settings.languageAuto')], ['zh', '中文'], ['en', 'EN']], snap.settings.lang))}
+        ${row(esc(T('home.language')), '', seg('lang', [['auto', T('settings.languageAuto')], ['zh-TW', '繁體中文'], ['zh', '简体中文'], ['en', 'EN']], snap.settings.lang))}
       </div>
       ${part('update', pageUpdate())}
       ${part('crash', pageCrash())}

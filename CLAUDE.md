@@ -25,7 +25,7 @@ cd .. && node --test "test/*.test.js"   # 頁面的單元測試（i18n、注視�
 
 ```
 src/pet/           頁面：她的視窗（?role=pet）和島（?role=island）共用 index.html
-src/shared/i18n.js 中英文字串（Rust 端少數字串在 src-tauri/src/i18n.rs）
+src/shared/i18n.js 簡中（zh）、繁中（zh-TW，預設語言）、英文字串（Rust 端少數字串在 src-tauri/src/i18n.rs）；新字串照 docs/zh-TW-glossary.md 翻
 src-tauri/src/     Rust 主程式（下表）
 src-tauri/capabilities/  頁面可用的 Tauri 權限：新視窗一定要列進去
 integrations/claude-code/  Claude Code 外掛 wakuwaku（只有 HTTP hooks）；.claude-plugin/ 是外掛市集入口

@@ -64,7 +64,9 @@ pub fn from_source() -> bool {
 
 fn defaults() -> Map<String, Value> {
     let Value::Object(map) = json!({
-        "lang": "auto",
+        // Traditional Chinese unless set otherwise (this fork's own; "auto"
+        // goes by the system's language, i18n.rs).
+        "lang": "zh-TW",
         "pet": "claude-chan",
         // A pet of its own for an agent's sessions ({ claude: id, ... });
         // one not set, or gone, is the pet above (pet_for).
@@ -363,6 +365,7 @@ mod tests {
         let s = settings(json!({ "pet": "gone" }));
         assert!(pet_for(&s, &json!({ "id": "c" }), &found).is_none());
         assert_eq!(defaults()["agentPets"], json!({}));
+        assert_eq!(defaults()["lang"], "zh-TW");
     }
 
     #[test]

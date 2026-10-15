@@ -242,19 +242,27 @@ pub fn gallery(page: u64, sort: &str, query: &str) -> Result<Value, PetError> {
 
 // An error in the person's language.
 pub fn describe(lang: &str, e: &PetError) -> String {
-    let zh = lang == "zh";
-    let text = match e.code {
-        "unreadable" => if zh { "看不懂这个地址或 id：{ref}" } else { "Can't read this URL or id: {ref}" },
-        "otherSite" => if zh { "只支持 codex-pets.net 上的宠物：{ref}" } else { "Only pets on codex-pets.net are supported: {ref}" },
-        "noId" => if zh { "地址里没找到宠物 id：{ref}（宠物页面的地址形如 https://codex-pets.net/#/pets/<id>）" } else { "No pet id in this URL: {ref} (a pet page looks like https://codex-pets.net/#/pets/<id>)" },
-        "notFound" => if zh { "codex-pets.net 上没有这只宠物：{id}" } else { "No such pet on codex-pets.net: {id}" },
-        "http" => "{status}: {url}",
-        "network" => if zh { "连不上：{message}" } else { "Could not connect: {message}" },
-        "write" => if zh { "存不下来：{message}" } else { "Could not save it: {message}" },
-        "sheetElsewhere" => if zh { "图集不在 codex-pets.net 上，不下载：{url}" } else { "The sprite sheet is not on codex-pets.net, not downloading: {url}" },
-        "atlas" => if zh { "注意：{id} 的图集是 {atlas}，不是常见的 {want}，动画可能对不上。" } else { "Note: {id} has a {atlas} sheet, not the usual {want}; the animation may be off." },
-        other => other,
+    let words = match e.code {
+        "unreadable" => ("看不懂这个地址或 id：{ref}", "看不懂這個網址或 id：{ref}", "Can't read this URL or id: {ref}"),
+        "otherSite" => ("只支持 codex-pets.net 上的宠物：{ref}", "只支援 codex-pets.net 上的寵物：{ref}", "Only pets on codex-pets.net are supported: {ref}"),
+        "noId" => (
+            "地址里没找到宠物 id：{ref}（宠物页面的地址形如 https://codex-pets.net/#/pets/<id>）",
+            "網址裡沒找到寵物 id：{ref}（寵物頁面的網址長得像 https://codex-pets.net/#/pets/<id>）",
+            "No pet id in this URL: {ref} (a pet page looks like https://codex-pets.net/#/pets/<id>)",
+        ),
+        "notFound" => ("codex-pets.net 上没有这只宠物：{id}", "codex-pets.net 上沒有這隻寵物：{id}", "No such pet on codex-pets.net: {id}"),
+        "http" => ("{status}: {url}", "{status}: {url}", "{status}: {url}"),
+        "network" => ("连不上：{message}", "連不上：{message}", "Could not connect: {message}"),
+        "write" => ("存不下来：{message}", "存不下來：{message}", "Could not save it: {message}"),
+        "sheetElsewhere" => ("图集不在 codex-pets.net 上，不下载：{url}", "圖集不在 codex-pets.net 上，不下載：{url}", "The sprite sheet is not on codex-pets.net, not downloading: {url}"),
+        "atlas" => (
+            "注意：{id} 的图集是 {atlas}，不是常见的 {want}，动画可能对不上。",
+            "注意：{id} 的圖集是 {atlas}，不是常見的 {want}，動畫可能對不上。",
+            "Note: {id} has a {atlas} sheet, not the usual {want}; the animation may be off.",
+        ),
+        other => (other, other, other),
     };
+    let text = crate::i18n::pick(lang, words);
     let mut out = text.to_string();
     if let Some(vars) = e.vars.as_object() {
         for (k, v) in vars {
@@ -344,6 +352,7 @@ mod tests {
     fn errors_in_words() {
         let e = err("notFound", json!({ "id": "x" }));
         assert_eq!(describe("zh", &e), "codex-pets.net 上没有这只宠物：x");
+        assert_eq!(describe("zh-TW", &e), "codex-pets.net 上沒有這隻寵物：x");
         assert_eq!(describe("en", &err("http", json!({ "status": 500, "url": "u" }))), "500: u");
     }
 }

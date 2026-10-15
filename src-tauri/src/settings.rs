@@ -116,7 +116,7 @@ fn is_island_look(v: &Value) -> bool {
 fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
     let is_bool = v.is_boolean();
     match key {
-        "lang" => matches!(v.as_str(), Some("auto" | "zh" | "en")),
+        "lang" => matches!(v.as_str(), Some("auto" | "zh" | "zh-TW" | "en")),
         "pet" => v.as_str().is_some_and(|id| data::pets(&sh.dir).iter().any(|p| p.id == id)),
         // An agent's own pet, by its id; one left out is the pet set.
         "agentPets" => v.as_object().is_some_and(|m| {
