@@ -140,6 +140,7 @@ Grok Build（xAI 的命令行 coding agent，2026-07 以 Apache 2.0 开源：[xa
 - **找窗口**：Grok 的 hook 是 HTTP 的，和 Claude Code 一样用连接对端的端口查进程链（`server.rs` 的 `chain_for`）。
 - **今天的统计**：Grok 的回合和 Antigravity 的一起算进 `agy_turns`（批准不经过她的回合），全是这种回合又没批准过时，批准显示「—」。今天的 token 不读 Grok 的记录。
 - **抓 payload**：`python tools/hook_dump.py`（127.0.0.1:47299），把 `tools/grok-hooks/hooks.json` 放进 `~/.grok/hooks/`（或用 `/hooks` 加它所在的文件夹），重开 Grok 会话。
+- **实测**（2026-10-16，Grok Build 1.0.52，Windows 11）：从「连接」页装好 `~/.grok/hooks/wakuwaku.json` 后，Grok 的会话正确显示在岛上，改了文件后这一轮结束显示「改好了」。
 
 ## 消息
 
