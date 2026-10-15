@@ -39,133 +39,6 @@
     0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 
-/* Light, on the taskbar in Windows' light mode (style.css tb-light), as
-   Windows' own Settings: a light grey panel, white cards. Its greys
-   swapped; the colours on them deeper, so they read on white. The
-   colours settings.js gives in place (the sessions' clocks, the widgets'
-   icons) darkened by a filter, their hues kept. The pictures of her homes
-   stay as they are: they show the dark island. */
-.tb-light #island[data-view='settings'] {
-  background: #f3f3f3;
-  box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.2),
-    0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
-.tb-light #island-settings {
-  --g1: #ffffff;
-  --g2: #f0f0f0;
-  --g3: #d9d9d9;
-  --g4: #8a8a8a;
-  --g5: #5d5d5d;
-  --fg: #1b1b1b;
-}
-
-.tb-light #island-settings [data-mood],
-.tb-light #island-settings .wi {
-  filter: brightness(0.62) saturate(1.3);
-}
-
-.tb-light #island-settings .r + .r,
-.tb-light #island-settings .m-text {
-  border-top-color: #ececec;
-}
-
-.tb-light #island-settings .r.jumps:hover,
-.tb-light #island-settings .letter:hover,
-.tb-light #island-settings .draft-row:hover {
-  background: rgba(0, 0, 0, 0.04);
-}
-
-.tb-light #island-settings .in {
-  background: #ffffff;
-}
-
-.tb-light #island-settings .inbox .letter.child {
-  background: rgba(0, 0, 0, 0.025);
-}
-
-.tb-light #island-settings .letter.open,
-.tb-light #island-settings .letter.open:hover,
-.tb-light #island-settings .inbox .letter.child.open {
-  background: rgba(0, 95, 184, 0.1);
-}
-
-.tb-light #island-settings .letter.unread .twisty {
-  color: #0067c0;
-}
-
-.tb-light #island-settings .md-pre {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.tb-light #island-settings .adv-b,
-.tb-light #island-settings .cmd {
-  background: #f0f0f0;
-  color: #1b1b1b;
-}
-
-.tb-light #island-settings .mmenu {
-  background: #ffffff;
-  box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.18),
-    0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
-.tb-light #island-settings .link,
-.tb-light #island-settings .adv-h,
-.tb-light #island-settings .chip.running {
-  color: #0067c0;
-}
-
-.tb-light #island-settings .in-use,
-.tb-light #island-settings .note.ok,
-.tb-light #island-settings .chip.done,
-.tb-light #island-settings .m-sum-h,
-.tb-light #island-settings .mi.on::after {
-  color: #0f7b3f;
-}
-
-/* The button that does the thing (Send, Done, Hand to…): Windows' own
-   accent fill on light, white words. */
-.tb-light #island-settings .pbtn.al {
-  border-color: #005fb8;
-  background: #005fb8;
-  color: #ffffff;
-}
-
-.tb-light #island-settings .note.err,
-.tb-light #island-settings .pbtn.no,
-.tb-light #island-settings .chip.failed {
-  color: #c42b3c;
-}
-
-.tb-light #island-settings .d.bad {
-  color: #b25e00;
-}
-
-.tb-light #island-settings .welcome,
-.tb-light #island-settings .m-sum.run {
-  color: #0b4a8f;
-}
-
-.tb-light #island-settings .m-sum {
-  color: #0b5e30;
-}
-
-.tb-light #island-settings .m-sum.bad,
-.tb-light #island-settings .talk.failed .talk-h {
-  color: #9f1d2c;
-}
-
-.tb-light #island-settings .talk-h {
-  color: #0b4a8f;
-}
-
-.tb-light #island-settings .star.on {
-  color: #c97a00;
-}
-
 #island[data-view='settings'] #island-her {
   cursor: default;
 }
@@ -255,10 +128,6 @@
 #island-settings .s-head .x.g.on {
   background: #0a84ff;
   color: #ffffff;
-}
-
-.tb-light #island-settings .s-head .x.g.on {
-  background: #005fb8;
 }
 
 .s-tabs {
@@ -407,24 +276,11 @@
   padding: 10px 14px;
 }
 
-/* A row whose control goes under its title: Windows' accent colours, the
-   one in use ringed in the text's colour (seen on dark and light alike). */
-#island-settings .r.col {
-  flex-direction: column;
-  align-items: stretch;
-}
-
 /* Buttons side by side at a row's end (the desktop's picture: picture, folder). */
 #island-settings .btns {
   display: flex;
   flex: none;
   gap: 6px;
-}
-
-#island-settings .accents {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 7px;
 }
 
 #island-settings .acc {
@@ -692,77 +548,8 @@
   color: #ffb340;
 }
 
-/* Setting a mail account up: label, box. */
-#island-settings .mail-form {
-  padding: 6px 14px 4px;
-}
-
-#island-settings .mail-form .r {
-  padding: 8px 0;
-  gap: 8px;
-}
-
-#island-settings .mail-form .note {
-  padding: 2px 0 6px 106px;
-}
-
-#island-settings .mail-form .fr .seg {
-  flex: none;
-}
-
 #island-settings .in:disabled {
   opacity: 0.6;
-}
-
-/* The fold, as Thunderbird's manual setup: a chevron and its name; open, the
-   incoming server's settings under a small heading, the outgoing one's after. */
-#island-settings .adv {
-  margin: 4px 0 2px;
-}
-
-#island-settings .adv-h {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 0;
-  border: 0;
-  background: none;
-  color: #5e9bff;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-#island-settings .adv-h .chev {
-  display: inline-block;
-  transition: transform 0.15s ease;
-}
-
-#island-settings .adv-h.on .chev {
-  transform: rotate(90deg);
-}
-
-#island-settings .adv-b {
-  margin: 2px 0 4px;
-  padding: 4px 12px 6px;
-  border-radius: 12px;
-  background: #151517;
-}
-
-#island-settings .adv-sec {
-  margin: 8px 0 2px;
-  color: var(--g4);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-#island-settings .adv-b .fr .fl {
-  width: 84px;
-}
-
-#island-settings .adv-b .note {
-  padding-left: 94px;
 }
 
 #island-settings .fr .pick:disabled {
@@ -774,12 +561,6 @@
   color: #34d27b;
 }
 
-/* The inbox: a line a letter, bold with a blue dot while unread. */
-#island-settings .inbox .r {
-  min-height: 0;
-  padding: 8px 14px;
-}
-
 #island-settings .letter {
   gap: 10px;
   cursor: pointer;
@@ -788,17 +569,6 @@
 
 #island-settings .letter:hover {
   background: rgba(255, 255, 255, 0.05);
-}
-
-#island-settings .udot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-#island-settings .letter.unread .udot {
-  background: #5e9bff;
 }
 
 #island-settings .letter .lt {
@@ -821,47 +591,6 @@
   color: var(--g4);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
-}
-
-/* A conversation, as Thunderbird's cards show one: › to fold it out (blue
-   while a letter of it is unread), how many letters; folded out, its letters
-   under it, each indented by how deep it answers, the start of its text. */
-#island-settings .twisty {
-  flex: none;
-  width: 7px;
-  color: var(--g4);
-  font-size: 15px;
-  line-height: 1;
-  text-align: center;
-  cursor: pointer;
-  transition: transform 0.15s ease;
-}
-
-#island-settings .twisty.out {
-  transform: rotate(90deg);
-}
-
-#island-settings .letter.unread .twisty {
-  color: #5e9bff;
-}
-
-#island-settings .letter .cnt {
-  flex: none;
-  padding: 0 6px;
-  border-radius: 8px;
-  background: var(--g2);
-  color: var(--g5);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-#island-settings .inbox .letter.child {
-  padding: 6px 14px 6px calc(30px + var(--depth, 0) * 14px);
-  background: rgba(255, 255, 255, 0.025);
-}
-
-#island-settings .inbox .letter.child.open {
-  background: rgba(94, 155, 255, 0.16);
 }
 
 #island-settings .letter.child .who {
@@ -895,56 +624,6 @@
   color: #ff6b7a;
 }
 
-#island-settings .agent-pick {
-  margin-top: 10px;
-}
-
-/* A letter open: back and the hand-off above it, then who, when, what an
-   agent said, and the text, which can be selected. */
-#island-settings .mail-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 2px 4px 8px;
-}
-
-#island-settings .mail-read {
-  padding: 12px 14px 14px;
-}
-
-#island-settings .m-subj {
-  margin-bottom: 4px;
-  font-size: 15px;
-  font-weight: 600;
-  user-select: text;
-}
-
-#island-settings .mail-read .d {
-  user-select: text;
-  overflow-wrap: anywhere;
-}
-
-#island-settings .m-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-#island-settings .m-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* Which inbox and which letters: the picker on the left, the filter on the right. */
-#island-settings .inbox .mail-tools {
-  padding: 8px 10px 8px 14px;
-}
-
-#island-settings .mail-tools .pick {
-  max-width: 260px;
-}
-
 /* A letter's star: hollow, filled amber when on. */
 #island-settings .star {
   flex: none;
@@ -965,353 +644,19 @@
   color: #ffb340;
 }
 
-#island-settings .mail-bar .star {
-  font-size: 18px;
-}
-
-/* Whose a letter is, in every account's inbox. */
-#island-settings .letter .acct {
-  flex: none;
-  max-width: 150px;
-  color: var(--g4);
-  font-size: 11px;
-}
-
-/* The talk under a letter: the state and start over; the letter handed
-   over and what the agent did in small; my words to the right; its words
-   as it writes them; a box to ask more. */
-#island-settings .talk {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(94, 155, 255, 0.08);
-  user-select: text;
-}
-
-#island-settings .talk.failed {
-  background: rgba(255, 92, 108, 0.1);
-}
-
-#island-settings .talk-h {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-  color: #8fb6ff;
-  font-size: 11.5px;
-  font-weight: 600;
-}
-
-#island-settings .talk.failed .talk-h {
-  color: #ff8a96;
-}
-
-#island-settings .t-start,
-#island-settings .t-tool,
-#island-settings .t-wait {
-  color: var(--g4);
-  font-size: 11.5px;
-}
-
-#island-settings .t-tool {
-  padding-left: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#island-settings .t-wait {
-  margin-top: 4px;
-  animation: t-blink 1.2s ease-in-out infinite;
-}
-
-@keyframes t-blink {
-  50% {
-    opacity: 0.4;
-  }
-}
-
-#island-settings .t-me {
-  align-self: flex-end;
-  width: fit-content;
-  max-width: 85%;
-  margin: 8px 0 6px auto;
-  padding: 6px 10px;
-  border-radius: 12px 12px 4px 12px;
-  background: #0a84ff;
-  color: #fff;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-#island-settings .t-agent {
-  margin: 6px 0;
-  overflow-wrap: anywhere;
-}
-
-#island-settings .t-agent code {
-  padding: 0 4px;
-  border-radius: 4px;
-  background: #000;
-  font-size: 12px;
-}
-
-#island-settings .md-h {
-  margin-top: 6px;
-  font-weight: 600;
-}
-
-#island-settings .md-li {
-  display: flex;
-  gap: 6px;
-  padding-left: 4px;
-}
-
-#island-settings .md-li > span:first-child {
-  flex: none;
-  color: var(--g4);
-}
-
-#island-settings .md-q {
-  padding-left: 8px;
-  border-left: 2px solid var(--g3);
-  color: var(--g5);
-}
-
-#island-settings .md-gap {
-  height: 6px;
-}
-
-#island-settings .t-ask {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-/* A block an agent wrote (a reply, often): apart, as written. */
-#island-settings .md-pre {
-  margin: 6px 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.35);
-  font: inherit;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 /* A letter replied to: a small arrow before its subject. */
 #island-settings .answered {
   color: var(--g4);
-}
-
-/* The account a letter goes from: as wide as its address. */
-#island-settings .mail-write .pick {
-  max-width: 100%;
-}
-
-/* Under each thing an agent said: reply with it. */
-#island-settings .t-use {
-  margin: -2px 0 6px;
-  font-size: 11.5px;
-}
-
-/* Writing a letter: from, to (cc and bcc on asking), the subject, a label
-   and a box each; the text in a box of its own; the files, a × each. */
-#island-settings .mail-write {
-  padding: 8px 14px 12px;
-}
-
-#island-settings .mail-write .fr .fl {
-  width: 56px;
-}
-
-#island-settings .mail-write .fr .link {
-  flex: none;
-  font-size: 12px;
-}
-
-#island-settings .mail-write .note {
-  padding: 2px 0 6px;
-}
-
-#island-settings .in.ta {
-  display: block;
-  width: 100%;
-  height: auto;
-  min-height: 170px;
-  margin-top: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  line-height: 1.5;
-  resize: vertical;
-}
-
-#island-settings .w-files {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-#island-settings .w-files .chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#island-settings .unfile {
-  flex: none;
-  padding: 0 0 0 4px;
-  border: 0;
-  background: none;
-  color: var(--g4);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-#island-settings .unfile:hover {
-  color: #ff6b7a;
-}
-
-/* The letter put aside, at the top of the inbox. */
-#island-settings .draft-row {
-  gap: 10px;
-  cursor: pointer;
-}
-
-#island-settings .draft-row:hover {
-  background: rgba(255, 255, 255, 0.05);
 }
 
 #island-settings .row-sec .link + .link {
   margin-left: 12px;
 }
 
-/* The Mail page in two panes, as Thunderbird (settings.js twoPanes; the
-   settings as wide as settings.js says then): the inbox on the left, its
-   letters scrolling under its tools; on the right the letter open, the one
-   being written, or the accounts, scrolling on their own. */
-#island-settings .panes {
-  display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
-  gap: 12px;
-  height: 100%;
-}
-
-#island-settings .pane-l {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-#island-settings .pane-l .row-sec {
-  flex: none;
-}
-
-#island-settings .pane-l .inbox {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-#island-settings .pane-l .mail-tools {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--g1);
-}
-
-#island-settings .pane-l .mail-tools .pick {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#island-settings .pane-l .letter .acct {
-  max-width: 110px;
-}
-
-#island-settings .pane-r {
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-#island-settings .pane-r > .mail-bar {
-  margin-top: 0;
-}
-
-#island-settings .pane-l .inbox::-webkit-scrollbar,
-#island-settings .pane-r::-webkit-scrollbar {
-  width: 6px;
-}
-
-#island-settings .pane-l .inbox::-webkit-scrollbar-thumb,
-#island-settings .pane-r::-webkit-scrollbar-thumb {
-  border-radius: 3px;
-  background: var(--g3);
-}
-
 /* The letter open beside the list, marked in it. */
 #island-settings .letter.open,
 #island-settings .letter.open:hover {
   background: rgba(94, 155, 255, 0.16);
-}
-
-#island-settings .m-text {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid #262628;
-  user-select: text;
-}
-
-/* The menu a right-click on a letter opens. */
-#island-settings .mmenu {
-  position: absolute;
-  z-index: 10;
-  min-width: 200px;
-  padding: 5px;
-  border-radius: 12px;
-  background: var(--g2);
-  box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.45),
-    0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-
-#island-settings .mmenu[hidden] {
-  display: none;
-}
-
-#island-settings .mi {
-  display: block;
-  width: 100%;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--fg);
-  text-align: left;
-  cursor: pointer;
-}
-
-#island-settings .mi:hover:not(:disabled) {
-  background: #0a84ff;
-}
-
-#island-settings .mi:disabled {
-  color: var(--g4);
-  cursor: default;
-}
-
-#island-settings .mi.on::after {
-  content: ' ✓';
-  color: #34d27b;
 }
 
 /* Wide enough for 「和邮件页一样（手动）」 and Claude Sonnet 4.6 (Thinking). */
@@ -1331,12 +676,6 @@
 }
 
 #island-settings .pick:hover {
-  background: var(--g3);
-}
-
-#island-settings .mi-sep {
-  height: 1px;
-  margin: 4px 6px;
   background: var(--g3);
 }
 
@@ -1479,19 +818,6 @@
   padding: 0 4px;
   font-size: 12.5px;
   font-weight: 600;
-}
-
-#island-settings .mode .rd {
-  width: 14px;
-  height: 14px;
-  box-sizing: border-box;
-  border: 1.5px solid var(--g3);
-  border-radius: 50%;
-  transition: border 0.25s var(--spring);
-}
-
-#island-settings .mode.on .rd {
-  border: 4px solid var(--fg);
 }
 
 /* A pet, playing her idle row. */
@@ -1786,11 +1112,6 @@
   box-shadow: 0 0 0 1px #0a84ff;
 }
 
-.tb-light #island-settings .ilook-card.on {
-  border-color: #005fb8;
-  box-shadow: 0 0 0 1px #005fb8;
-}
-
 #island-settings .ilook-card .ilook-pv {
   height: 30px;
   border-radius: 7px;
@@ -1883,10 +1204,6 @@
   accent-color: #0a84ff;
 }
 
-.tb-light #island-settings .rng {
-  accent-color: #005fb8;
-}
-
 #island-settings .rv {
   width: 42px;
   color: var(--g5);
@@ -1914,8 +1231,7 @@
   background: rgba(94, 155, 255, 0.13);
 }
 
-.isl-light #island-settings .wcard,
-.tb-light #island-settings .wcard {
+.isl-light #island-settings .wcard {
   --wc-ok: #107c10;
   --wc-warn: #9d5d00;
   background: rgba(0, 103, 192, 0.08);
@@ -2217,12 +1533,10 @@
   color: #ff6b7a;
 }
 
-.isl-light #island-settings .wc-err,
-.tb-light #island-settings .wc-err {
+.isl-light #island-settings .wc-err {
   background: rgba(196, 43, 28, 0.08);
 }
 
-.isl-light #island-settings .wc-err b,
-.tb-light #island-settings .wc-err b {
+.isl-light #island-settings .wc-err b {
   color: #c42b1c;
 }
