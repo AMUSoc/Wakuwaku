@@ -30,11 +30,8 @@
 //   tokens.rs      today's tokens, from Claude Code's, Codex's and Antigravity's own records
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod appbar;
 mod asks;
-mod audio;
 mod backplate;
-mod clock;
 mod connection;
 mod crash;
 mod data;
@@ -47,14 +44,11 @@ mod focus;
 mod fullscreen;
 mod gpu;
 mod i18n;
-mod icons;
-mod inputs;
 mod island;
 mod jump;
 mod notch;
 mod notify;
 mod pet;
-mod pins;
 mod pointer;
 mod power;
 mod proxy;
@@ -62,10 +56,7 @@ mod screen;
 mod scripts;
 mod server;
 mod settings;
-mod shell;
 mod state;
-mod systray;
-mod tasks;
 mod tokens;
 mod tray;
 mod updates;
@@ -1088,19 +1079,11 @@ fn agy_hook(port: u16, name: &str) {
 }
 
 fn main() {
-    // Her exe again, as her guard (crash.rs): it waits for her to end, gives
-    // Windows' taskbar back if she left it put away (shell.rs), and sees
-    // whether she crashed.
+    // Her exe again, as her guard (crash.rs): it waits for her to end, and
+    // sees whether she crashed.
     let args: Vec<String> = std::env::args().collect();
     if let Some((pid, data)) = crash::guard_args(&args) {
-        let after = data.clone();
-        let ended = || {
-            drop(icons::hold(&data));
-            shell::restore(&data.join("taskbar.json"));
-        };
-        crash::guard(pid, ended, move |code, started| crash::after_exit(&after, pid, code, started));
-        // Her desktop's icons as they were, should she have left them moved (icons.rs).
-        icons::given_back(&data);
+        crash::guard(pid, move |code, started| crash::after_exit(&data, pid, code, started));
         return;
     }
     let port: u16 = std::env::var("WAKUWAKU_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(47213);
@@ -1252,27 +1235,8 @@ fn main() {
             app.manage(sh.clone());
             sh.log(&format!("up on port {}, data in {}", sh.port, sh.dir.display()));
             sh.log(&format!("displays: {}", sh.screens().describe()));
-            // Windows' taskbar and the desktop's icons, should an older her
-            // have left them put away or moved (shell.rs, icons.rs).
-            if shell::recover(&sh.dir.join("taskbar.json")) {
-                sh.log("Windows' taskbar was left put away: given back");
-            }
-            if icons::file(&sh.dir).exists() {
-                let (dir, log) = (sh.dir.clone(), sh.clone());
-                std::thread::spawn(move || {
-                    for line in icons::given_back(&dir) {
-                        log.log(&line);
-                    }
-                });
-            }
 
             pet::create(&sh)?;
-            // Windows' own taskbar's pinned programs, once: hers seeded from
-            // them, those she kept before after them (pins.rs).
-            if !sh.flag("taskbarPinsImported") {
-                let first = sh.clone();
-                std::thread::spawn(move || pins::take_from_windows(&first));
-            }
             // An app full screen as she starts, known before her home first shows.
             if fullscreen::AVAILABLE && sh.flag("hideInFullscreen") {
                 sh.by_fullscreen.store(fullscreen::check(&[], &sh.displays()) == Some(true), Ordering::SeqCst);

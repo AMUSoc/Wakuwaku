@@ -3891,11 +3891,9 @@ dependencies = [
 name = "wakuwaku"
 version = "0.3.0"
 dependencies = [
- "base64 0.22.1",
  "libc",
  "objc2",
  "objc2-foundation",
- "png 0.17.16",
  "serde",
  "serde_json",
  "sha2",

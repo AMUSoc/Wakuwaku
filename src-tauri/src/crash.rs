@@ -757,9 +757,9 @@ mod guard_os {
         ok
     }
 
-    // The guard's whole life: wait for her to end, then `ended`, then
-    // `after` with her exit code and when she started (ms since 1970).
-    pub fn guard(pid: u32, ended: impl FnOnce(), after: impl FnOnce(Option<u32>, Option<u64>)) {
+    // The guard's whole life: wait for her to end, then `after` with her
+    // exit code and when she started (ms since 1970).
+    pub fn guard(pid: u32, after: impl FnOnce(Option<u32>, Option<u64>)) {
         // When she started, as ms since 1970.
         let started = started(pid).map(|t| (t / 10_000).saturating_sub(11_644_473_600_000));
         let mut code = None;
@@ -775,7 +775,6 @@ mod guard_os {
                 CloseHandle(process);
             }
         }
-        ended();
         after(code, started);
     }
 }
@@ -790,7 +789,7 @@ mod guard_os {
     pub fn spawn_guard(_data: &Path) -> bool {
         false
     }
-    pub fn guard(_pid: u32, _ended: impl FnOnce(), _after: impl FnOnce(Option<u32>, Option<u64>)) {}
+    pub fn guard(_pid: u32, _after: impl FnOnce(Option<u32>, Option<u64>)) {}
 }
 
 pub use guard_os::{guard, spawn_guard, started};

@@ -17,10 +17,6 @@ serde_json = "1"
 tiny_http = "0.12"
 sys-locale = "0.3"
 ureq = { version = "3.4.2", features = ["json"] }
-# The taskbar's tray icons, drawn into PNGs for its page (taskbar.rs); both
-# already in the tree, under Tauri.
-png = "0.17"
-base64 = "0.22"
 # The SHA-256 of an update downloaded (updates.rs); already in the tree, under Tauri.
 sha2 = "0.10"
 # Tauri's async runtime made with fewer threads (main.rs); already in the tree, under Tauri.
