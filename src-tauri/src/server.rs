@@ -186,7 +186,8 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
         ("GET", "/health") => {
             let mut body = json!({ "ok": true, "app": "wakuwaku", "runtime": "tauri", "state": sh.pet.lock().unwrap().get(now_ms()) });
             if is_debug {
-                body["window"] = pet::where_(sh);
+                body["window"] = pet::where_(sh, "claude");
+                body["pets"] = crate::data::AGENTS.iter().map(|agent| (agent.to_string(), pet::where_(sh, agent))).collect::<serde_json::Map<_, _>>().into();
                 body["island"] = island::where_(sh);
                 body["settings"] = Value::Object(sh.settings.lock().unwrap().clone());
             }
@@ -215,10 +216,11 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
         ("POST", "/debug/walk") if is_debug => {
             let Some(body) = read_json(&mut req) else { return reply(req, 400, json!({ "error": "bad json" })) };
             let (dx, ms) = (body["dx"].as_f64().unwrap_or(0.0), body["ms"].as_f64().unwrap_or(500.0));
+            let agent = body["agent"].as_str().filter(|a| crate::data::AGENTS.contains(a)).unwrap_or("claude").to_string();
             // Walks block; this one answers when it is over.
             let sh = sh.clone();
             std::thread::spawn(move || {
-                let arrived = pet::walk(&sh, dx, ms);
+                let arrived = pet::walk(&sh, &agent, dx, ms);
                 reply(req, 200, json!({ "ok": true, "arrived": arrived }));
             });
         }
@@ -226,9 +228,11 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
     }
 }
 
-// Run code in a page ("pet" or "island") and wait for what it gives back.
+// Run code in a page ("island", an agent's pet: "pet-codex"; "pet" is
+// Claude's) and wait for what it gives back.
 fn evaluate(sh: &Shared, page: &str, code: &str) -> Option<Value> {
-    let win = sh.app.get_webview_window(page)?;
+    let label = if page == "pet" { pet::label("claude") } else { page.to_string() };
+    let win = sh.app.get_webview_window(&label)?;
     let (tx, rx) = std::sync::mpsc::channel();
     let id = {
         let mut evals = sh.evals.lock().unwrap();

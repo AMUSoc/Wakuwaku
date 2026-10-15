@@ -1,5 +1,6 @@
-// Her window: transparent, frameless, always on top, her whole self on the
-// desktop. Where it sits and how big it is, the mouse (click-through, her
+// Her windows: transparent, frameless, always on top, her whole self on the
+// desktop, one for each agent's pet (pet-claude, pet-codex, ...: data.rs
+// AGENTS). Where each sits and how big it is, the mouse (click-through, her
 // eyes, dragging and being carried) and her walks. Up when she is out of
 // her home (out); at home, her home's window has her (island.rs).
 //
@@ -50,6 +51,8 @@ pub struct Win {
     pos: (i32, i32),
     size: (i32, i32),
     sf: f64,
+    // Its window made (an agent's pet not let out has none).
+    made: bool,
     ready: bool,
     shown: bool,
     ct: ClickThrough,
@@ -73,9 +76,35 @@ pub struct Win {
     parked: Option<(i32, i32)>,
 }
 
+// Each agent's pet window's state, one lock each: never two held at once.
+pub struct Pets([std::sync::Mutex<Win>; 4]);
+
+impl Default for Pets {
+    fn default() -> Self {
+        Pets(Default::default())
+    }
+}
+
+impl Pets {
+    // The window's state of an agent's pet (one not known: Claude's).
+    pub fn of(&self, agent: &str) -> &std::sync::Mutex<Win> {
+        &self.0[crate::data::AGENTS.iter().position(|a| *a == agent).unwrap_or(0)]
+    }
+}
+
+// An agent's pet window's label, as the capabilities know it (pet-*).
+pub fn label(agent: &str) -> String {
+    format!("pet-{agent}")
+}
+
+// The agent of a pet window, by its label.
+pub fn agent_of(label: &str) -> Option<&str> {
+    label.strip_prefix("pet-").filter(|a| crate::data::AGENTS.contains(a))
+}
+
 // Her window's display's scale.
-pub fn sf(sh: &Shared) -> f64 {
-    sh.win.lock().unwrap().sf()
+pub fn sf(sh: &Shared, agent: &str) -> f64 {
+    sh.pets.of(agent).lock().unwrap().sf()
 }
 
 impl Win {
@@ -103,8 +132,8 @@ impl Win {
     }
 }
 
-fn window(sh: &Shared) -> Option<WebviewWindow> {
-    sh.app.get_webview_window("pet")
+fn window(sh: &Shared, agent: &str) -> Option<WebviewWindow> {
+    sh.app.get_webview_window(&label(agent))
 }
 
 fn scale(sh: &Shared) -> f64 {
@@ -112,28 +141,28 @@ fn scale(sh: &Shared) -> f64 {
 }
 
 // Up: she is out of her home.
-pub fn is_shown(sh: &Shared) -> bool {
-    sh.is_visible() && sh.flag("out")
+pub fn is_shown(sh: &Shared, agent: &str) -> bool {
+    sh.is_visible() && agent == "claude" && sh.flag("out")
 }
 
 // The display her window is on (x, y, w, h).
-pub fn display(sh: &Shared) -> Option<(i32, i32, i32, i32)> {
+pub fn display(sh: &Shared, agent: &str) -> Option<(i32, i32, i32, i32)> {
     let (pos, size) = {
-        let win = sh.win.lock().unwrap();
+        let win = sh.pets.of(agent).lock().unwrap();
         (win.pos, win.size)
     };
     sh.screens().near(pos.0 + size.0 / 2, pos.1 + size.1 / 2).map(|a| a.mon)
 }
 
-fn set_ignore(sh: &Shared, ignore: Option<bool>) {
-    if let (Some(ignore), Some(win)) = (ignore, window(sh)) {
+fn set_ignore(sh: &Shared, agent: &str, ignore: Option<bool>) {
+    if let (Some(ignore), Some(win)) = (ignore, window(sh, agent)) {
         sh.log(&format!("pet: mouse {}", if ignore { "passes through" } else { "caught" }));
         let _ = win.set_ignore_cursor_events(ignore);
     }
 }
 
-fn place(sh: &Shared, (x, y): (i32, i32)) {
-    if let Some(win) = window(sh) {
+fn place(sh: &Shared, agent: &str, (x, y): (i32, i32)) {
+    if let Some(win) = window(sh, agent) {
         // On a Mac a window's physical place is in its own display's scale,
         // which changes as she crosses to a display of another: placed in
         // points, from the scale her place was reckoned in (Win::sf), she
@@ -141,7 +170,7 @@ fn place(sh: &Shared, (x, y): (i32, i32)) {
         // from it, 2026-10-14). Elsewhere the physical place is one space.
         #[cfg(target_os = "macos")]
         {
-            let sf = sh.win.lock().unwrap().sf();
+            let sf = sh.pets.of(agent).lock().unwrap().sf();
             let _ = win.set_position(tauri::LogicalPosition::new(x as f64 / sf, y as f64 / sf));
         }
         #[cfg(not(target_os = "macos"))]
@@ -150,23 +179,23 @@ fn place(sh: &Shared, (x, y): (i32, i32)) {
 }
 
 // Move the window, kept on screen unless `free`.
-fn move_to(sh: &Shared, x: i32, y: i32, free: bool) -> (i32, i32) {
+fn move_to(sh: &Shared, agent: &str, x: i32, y: i32, free: bool) -> (i32, i32) {
     let screens = sh.screens();
     let p = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         let p = if free { (x, y) } else { screens.clamp((x, y), w.size) };
         w.pos = p;
         p
     };
-    place(sh, p);
+    place(sh, agent, p);
     p
 }
 
 // Save where the window is, as where it would be without a prompt panel.
-fn remember(sh: &Shared) {
+fn remember(sh: &Shared, agent: &str) {
     let scale = scale(sh);
     let (x, y) = {
-        let w = sh.win.lock().unwrap();
+        let w = sh.pets.of(agent).lock().unwrap();
         let base = w.base_size(scale);
         (w.pos.0 + w.size.0 / 2 + w.shift - base.0 / 2, w.pos.1 + w.size.1 - base.1)
     };
@@ -177,9 +206,9 @@ fn remember(sh: &Shared) {
 }
 
 // Bottom right of the primary display.
-fn home_spot(sh: &Shared) -> (i32, i32) {
+fn home_spot(sh: &Shared, agent: &str) -> (i32, i32) {
     let primary = sh.screens().primary;
-    let w = sh.win.lock().unwrap();
+    let w = sh.pets.of(agent).lock().unwrap();
     let margin = (24.0 * w.sf()).round() as i32;
     match primary {
         Some(a) => (a.x + a.w - w.size.0 - margin, a.y + a.h - w.size.1 - margin),
@@ -188,33 +217,34 @@ fn home_spot(sh: &Shared) -> (i32, i32) {
 }
 
 // Where she was last left, or home.
-fn saved_spot(sh: &Shared) -> (i32, i32) {
+fn saved_spot(sh: &Shared, agent: &str) -> (i32, i32) {
     let spot = match (sh.setting("x").as_i64(), sh.setting("y").as_i64()) {
         (Some(x), Some(y)) => (x as i32, y as i32),
-        _ => home_spot(sh),
+        _ => home_spot(sh, agent),
     };
-    let size = sh.win.lock().unwrap().size;
+    let size = sh.pets.of(agent).lock().unwrap().size;
     sh.screens().clamp(spot, size)
 }
 
 // --- The window ---------------------------------------------------------------------
 
-pub fn create(sh: &Shared) -> tauri::Result<()> {
+pub fn create(sh: &Shared, agent: &str) -> tauri::Result<()> {
     let primary = sh.screens().primary;
     {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         w.sf = primary.map_or(1.0, |a| a.sf);
         w.size = w.base_size(scale(sh));
         w.ct.force(Mode::Pass);
+        w.made = true;
     }
-    let pos = saved_spot(sh);
+    let pos = saved_spot(sh, agent);
     let (size, sf) = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         w.pos = pos;
         (w.size, w.sf())
     };
 
-    let win = WebviewWindowBuilder::new(&sh.app, "pet", WebviewUrl::App("pet/index.html?role=pet".into()))
+    let win = WebviewWindowBuilder::new(&sh.app, label(agent), WebviewUrl::App(format!("pet/index.html?role=pet&agent={agent}").into()))
         .title("wakuwaku")
         .inner_size(size.0 as f64 / sf, size.1 as f64 / sf)
         .additional_browser_args(crate::browser_args(sh))
@@ -245,24 +275,24 @@ pub fn create(sh: &Shared) -> tauri::Result<()> {
 }
 
 // Her page has its listeners up: draw and show (her home says hello).
-pub fn ready(sh: &Shared) {
+pub fn ready(sh: &Shared, agent: &str) {
     sh.log("pet: page ready");
-    sh.win.lock().unwrap().ready = true;
+    sh.pets.of(agent).lock().unwrap().ready = true;
     sh.redraw();
     // Her window made hidden, its page was not: put away with it while she
     // is home (as she starts, mostly; apply_visibility has nothing to change).
-    if !is_shown(sh) {
-        if let Some(win) = window(sh) {
+    if !is_shown(sh, agent) {
+        if let Some(win) = window(sh, agent) {
             hide_window(&win);
         }
     }
-    apply_visibility(sh);
+    apply_visibility(sh, agent);
 }
 
-pub fn apply_visibility(sh: &Shared) {
-    let want = is_shown(sh);
+pub fn apply_visibility(sh: &Shared, agent: &str) {
+    let want = is_shown(sh, agent);
     {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         if !w.ready || w.shown == want {
             return;
         }
@@ -273,13 +303,13 @@ pub fn apply_visibility(sh: &Shared) {
             w.walking = false;
         }
     }
-    if let Some(win) = window(sh) {
+    if let Some(win) = window(sh, agent) {
         if want {
             let _ = win.as_ref().show();
             sh.show_window(&win);
             // Hidden, her page heard no updates (main.rs to_pages): the
             // whole state now, whether quiet with it.
-            sh.send_to_pet();
+            sh.send_to_pet(agent);
         } else {
             hide_window(&win);
         }
@@ -297,16 +327,24 @@ fn hide_window(win: &WebviewWindow) {
 
 // Her window on the screen now. Asked from anywhere (main.rs to_pages),
 // perhaps while the window's state is held: then taken as up.
-pub fn is_up(sh: &Shared) -> bool {
-    sh.win.try_lock().map(|w| w.shown).unwrap_or(true)
+pub fn is_up(sh: &Shared, agent: &str) -> bool {
+    sh.pets.of(agent).try_lock().map(|w| w.shown).unwrap_or(true)
 }
 
-// A new size keeps her spot: her bottom centre.
+// A new size, for every pet: each keeps its spot, its bottom centre.
 pub fn resize(sh: &Arc<Shared>, scale: f64) {
     sh.change(json!({ "scale": scale }));
+    for agent in crate::data::AGENTS {
+        if window(sh, agent).is_some() {
+            resize_one(sh, agent, scale);
+        }
+    }
+}
+
+fn resize_one(sh: &Shared, agent: &str, scale: f64) {
     let screens = sh.screens();
     let (p, size) = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         let old = w.size;
         w.size = w.size_for(scale);
         let (x, y) = w.pos;
@@ -314,46 +352,46 @@ pub fn resize(sh: &Arc<Shared>, scale: f64) {
         w.pos = p;
         (p, w.size)
     };
-    if let Some(win) = window(sh) {
+    if let Some(win) = window(sh, agent) {
         let _ = win.set_size(PhysicalSize::new(size.0 as u32, size.1 as u32));
     }
-    place(sh, p);
-    remember(sh);
+    place(sh, agent, p);
+    remember(sh, agent);
 }
 
-pub fn come_home(sh: &Shared) {
-    stop_walking(sh);
-    let home = home_spot(sh);
-    move_to(sh, home.0, home.1, false);
-    remember(sh);
+pub fn come_home(sh: &Shared, agent: &str) {
+    stop_walking(sh, agent);
+    let home = home_spot(sh, agent);
+    move_to(sh, agent, home.0, home.1, false);
+    remember(sh, agent);
 }
 
 // Back to where she was left (out of the island, or the pet again).
-pub fn return_to_spot(sh: &Shared) {
+pub fn return_to_spot(sh: &Shared, agent: &str) {
     let scale = scale(sh);
     let size = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         w.panel = None;
         w.parked = None;
         w.shift = 0;
         w.size = w.size_for(scale);
         w.size
     };
-    let _ = sh.app.emit_to("pet", "pet:shift", 0);
-    if let Some(win) = window(sh) {
+    let _ = sh.app.emit_to(label(&agent), "pet:shift", 0);
+    if let Some(win) = window(sh, agent) {
         let _ = win.set_size(PhysicalSize::new(size.0 as u32, size.1 as u32));
     }
-    let p = saved_spot(sh);
-    move_to(sh, p.0, p.1, false);
+    let p = saved_spot(sh, agent);
+    move_to(sh, agent, p.0, p.1, false);
 }
 
 // The prompt panel's size (logical) as the page measured it, or None once it
 // has gone. It grows the window upwards and both ways, her staying put.
-pub fn set_panel(sh: &Shared, measured: Option<(f64, f64)>) {
+pub fn set_panel(sh: &Shared, agent: &str, measured: Option<(f64, f64)>) {
     let scale = scale(sh);
     let screens = sh.screens();
     let (pos, size, shift, sf) = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         if w.panel == measured {
             return;
         }
@@ -380,19 +418,19 @@ pub fn set_panel(sh: &Shared, measured: Option<(f64, f64)>) {
         }
         (w.pos, w.size, w.shift, w.sf())
     };
-    if let Some(win) = window(sh) {
+    if let Some(win) = window(sh, agent) {
         let _ = win.set_size(PhysicalSize::new(size.0 as u32, size.1 as u32));
     }
-    place(sh, pos);
-    let _ = sh.app.emit_to("pet", "pet:shift", (shift as f64 / sf).round());
+    place(sh, agent, pos);
+    let _ = sh.app.emit_to(label(&agent), "pet:shift", (shift as f64 / sf).round());
 }
 
 // Put the window back on screen at its own size if anything moved it off or
 // stretched it (a display unplugged, the scale changed).
-pub fn keep_on_screen(sh: &Shared) {
-    let Some(win) = window(sh) else { return };
+pub fn keep_on_screen(sh: &Shared, agent: &str) {
+    let Some(win) = window(sh, agent) else { return };
     {
-        let w = sh.win.lock().unwrap();
+        let w = sh.pets.of(agent).lock().unwrap();
         if !w.ready || !w.shown || w.drag.is_some() || w.walking || w.flying {
             return;
         }
@@ -401,7 +439,7 @@ pub fn keep_on_screen(sh: &Shared) {
     let screens = sh.screens();
     let scale = scale(sh);
     let fix = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         if w.drag.is_some() || w.walking || w.flying {
             return;
         }
@@ -418,8 +456,8 @@ pub fn keep_on_screen(sh: &Shared) {
     if let Some((p, size, is_stretched)) = fix {
         sh.log(&format!("pet: back on screen at {p:?}{}", if is_stretched { ", resized" } else { "" }));
         let _ = win.set_size(PhysicalSize::new(size.0 as u32, size.1 as u32));
-        place(sh, p);
-        remember(sh);
+        place(sh, agent, p);
+        remember(sh, agent);
     }
 }
 
@@ -448,7 +486,11 @@ pub fn primary_down() -> Option<bool> {
 
 // One look at the mouse (cursor in physical px): the window's mode, the
 // page's pointer, her eyes, a drag. Returns ms until the next look.
-pub fn poll(sh: &Arc<Shared>, cursor: (i32, i32)) -> u64 {
+pub fn poll(sh: &Arc<Shared>, agent: &str, cursor: (i32, i32)) -> u64 {
+    // No window: nothing to look at, nor to wait for.
+    if !sh.pets.of(agent).lock().unwrap().made {
+        return u64::MAX;
+    }
     let is_idle = sh.pet.lock().unwrap().mood(now_ms()) == "idle";
     let look = sh.flag("look");
     let scale = scale(sh);
@@ -461,7 +503,7 @@ pub fn poll(sh: &Arc<Shared>, cursor: (i32, i32)) -> u64 {
     let mut let_go_now = false;
     let mut press_now = false;
     let wait = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         let sf = w.sf();
         if !w.ready {
             200
@@ -537,41 +579,42 @@ pub fn poll(sh: &Arc<Shared>, cursor: (i32, i32)) -> u64 {
         }
     };
 
-    set_ignore(sh, ignore);
+    set_ignore(sh, agent, ignore);
     if let Some(p) = moved_to {
-        place(sh, p);
+        place(sh, agent, p);
     }
     for (name, payload) in events {
-        let _ = sh.app.emit_to("pet", name, payload);
+        let _ = sh.app.emit_to(label(&agent), name, payload);
     }
     if let Some(p) = reach {
         island::reach(sh, Some(p), false);
     }
     if press_now {
         sh.log("pet: press seen from the button");
-        drag_start(sh);
+        drag_start(sh, agent);
     }
     if let_go_now {
-        let_go(sh);
+        let_go(sh, agent);
     }
     wait
 }
 
 // Being dragged from her own window (not carried out of the island).
+// Any of them.
 pub fn is_dragged(sh: &Shared) -> bool {
-    sh.win.lock().unwrap().drag.as_ref().is_some_and(|d| !d.carried)
+    crate::data::AGENTS.iter().any(|agent| sh.pets.of(agent).lock().unwrap().drag.as_ref().is_some_and(|d| !d.carried))
 }
 
-pub fn hover(sh: &Shared, is_over: bool) {
+pub fn hover(sh: &Shared, agent: &str, is_over: bool) {
     let ignore = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         let (held, passive) = match &w.drag {
             Some(d) => (!d.carried, d.carried),
             None => (false, false),
         };
         w.ct.set_over(is_over, held, passive)
     };
-    set_ignore(sh, ignore);
+    set_ignore(sh, agent, ignore);
     if is_over {
         let shown = {
             let now = sh.pet.lock().unwrap().get(now_ms());
@@ -579,7 +622,7 @@ pub fn hover(sh: &Shared, is_over: bool) {
             (now["mood"] != "idle" && now["jump"] == true && !id.is_empty()).then(|| id.to_string())
         };
         if let Some(id) = shown {
-            sh.win.lock().unwrap().click_goes = Some((id, Instant::now()));
+            sh.pets.of(agent).lock().unwrap().click_goes = Some((id, Instant::now()));
         }
     }
     // The pointer on her: you have seen what she had to say.
@@ -588,10 +631,10 @@ pub fn hover(sh: &Shared, is_over: bool) {
     }
 }
 
-pub fn drag_start(sh: &Shared) {
-    let Some((cx, cy)) = crate::screen::cursor(sh, sf(sh)) else { return };
+pub fn drag_start(sh: &Shared, agent: &str) {
+    let Some((cx, cy)) = crate::screen::cursor(sh, sf(sh, agent)) else { return };
     let ignore = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         // Already started from the button: the same press.
         if w.drag.is_some() || !w.shown || w.flying {
             return;
@@ -603,16 +646,16 @@ pub fn drag_start(sh: &Shared) {
         w.ct.force(Mode::Catch)
     };
     sh.log("pet: drag start");
-    set_ignore(sh, ignore);
+    set_ignore(sh, agent, ignore);
 }
 
 // Let go: back into the island if she is close enough to it, else she lands
 // where she is, kept on screen. A click makes her jump, and goes to the
 // window of the session she shows; two, see double_click.
-pub fn let_go(sh: &Arc<Shared>) {
+pub fn let_go(sh: &Arc<Shared>, agent: &str) {
     let scale = scale(sh);
     let (drag, is_double, her) = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         let Some(drag) = w.drag.take() else { return };
         let is_double = !drag.moved && !drag.carried && w.last_click.is_some_and(|t| t.elapsed() < Duration::from_millis(DOUBLE_MS));
         if !drag.moved && !drag.carried {
@@ -622,7 +665,7 @@ pub fn let_go(sh: &Arc<Shared>) {
         (drag, is_double, w.her_point(scale))
     };
     sh.log(&format!("pet: let go, {}{}", if drag.moved { "moved" } else { "a click" }, if drag.carried { " (carried)" } else { "" }));
-    let _ = sh.app.emit_to("pet", "pet:drag-end", ());
+    let _ = sh.app.emit_to(label(&agent), "pet:drag-end", ());
     if drag.carried {
         island::end_hold(sh);
     }
@@ -633,10 +676,10 @@ pub fn let_go(sh: &Arc<Shared>) {
         }
         island::reach(sh, None, false);
     }
-    move_to(sh, drag.x, drag.y, false);
-    remember(sh);
+    move_to(sh, agent, drag.x, drag.y, false);
+    remember(sh, agent);
     if is_double {
-        return double_click(sh);
+        return double_click(sh, agent);
     }
     // A click: a jump. Carried out of the island: she lands with one.
     if !drag.moved || drag.carried {
@@ -646,10 +689,11 @@ pub fn let_go(sh: &Arc<Shared>) {
     // was showing (jump.rs).
     if !drag.moved && !drag.carried {
         let sh = sh.clone();
+        let agent = agent.to_string();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(DOUBLE_MS + 20));
             let goes = {
-                let mut w = sh.win.lock().unwrap();
+                let mut w = sh.pets.of(&agent).lock().unwrap();
                 let is_single = w.last_click.is_some_and(|t| t.elapsed() >= Duration::from_millis(DOUBLE_MS));
                 match w.click_goes.take() {
                     Some((id, at)) if is_single && at.elapsed() < Duration::from_millis(CLICK_GOES_MS) => Some(id),
@@ -668,7 +712,7 @@ pub fn let_go(sh: &Arc<Shared>) {
 
 // A double-click: she flies back into her home (else the settings, grown
 // out of a home risen for them).
-pub fn double_click(sh: &Arc<Shared>) {
+pub fn double_click(sh: &Arc<Shared>, agent: &str) {
     if sh.flag("out") && crate::notch::in_notch() {
         // Her home in a Mac's notch is out of sight: she stays, and the
         // island drops open from it to show what is going on (island.js peek):
@@ -676,7 +720,7 @@ pub fn double_click(sh: &Arc<Shared>) {
         sh.log("pet: double-click; the island drops open from the notch");
         let _ = sh.app.emit_to("island", "island:peek", serde_json::json!({ "open": true }));
     } else if sh.flag("out") {
-        fly_home(sh);
+        fly_home(sh, agent);
     } else {
         island::open_settings(sh, None);
     }
@@ -685,11 +729,11 @@ pub fn double_click(sh: &Arc<Shared>) {
 // Back to her home from wherever she is: drawn in faster and faster,
 // running that way, her home reaching out for her; then it takes her in.
 // Her spot on the desktop stays where it was, for when she is let out again.
-fn fly_home(sh: &Arc<Shared>) {
+fn fly_home(sh: &Arc<Shared>, agent: &str) {
     let Some(end) = island::landing(sh) else { return };
     let scale = scale(sh);
     let (start, offset, end) = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         if w.flying || !w.shown {
             return;
         }
@@ -702,6 +746,7 @@ fn fly_home(sh: &Arc<Shared>) {
     };
     let dir = if end.0 == start.0 { 1 } else { end.0 - start.0 };
     let sh = sh.clone();
+    let agent = agent.to_string();
     std::thread::spawn(move || {
         let started = Instant::now();
         let mut p;
@@ -709,16 +754,16 @@ fn fly_home(sh: &Arc<Shared>) {
             let t = (started.elapsed().as_secs_f64() * 1000.0 / FLY_MS).min(1.0);
             let k = t * t;
             p = (start.0 + ((end.0 - start.0) as f64 * k) as i32, start.1 + ((end.1 - start.1) as f64 * k) as i32);
-            move_to(&sh, p.0 - offset.0, p.1 - offset.1, true);
-            let _ = sh.app.emit_to("pet", "pet:drag", dir);
+            move_to(&sh, &agent, p.0 - offset.0, p.1 - offset.1, true);
+            let _ = sh.app.emit_to(label(&agent), "pet:drag", dir);
             island::reach(&sh, Some(p), false);
             if t >= 1.0 {
                 break;
             }
             std::thread::sleep(Duration::from_millis(16));
         }
-        sh.win.lock().unwrap().flying = false;
-        let _ = sh.app.emit_to("pet", "pet:drag-end", ());
+        sh.pets.of(&agent).lock().unwrap().flying = false;
+        let _ = sh.app.emit_to(label(&agent), "pet:drag-end", ());
         crate::absorb(&sh, p);
     });
 }
@@ -726,11 +771,11 @@ fn fly_home(sh: &Arc<Shared>) {
 // Pulled out of the island, the button still held on the island: up she
 // comes under the cursor, her middle where the drop had it (offset, logical
 // px from the cursor), and follows it.
-pub fn carry(sh: &Arc<Shared>, offset: &Value) {
-    let Some(cursor) = crate::screen::cursor(sh, sf(sh)) else { return };
+pub fn carry(sh: &Arc<Shared>, agent: &str, offset: &Value) {
+    let Some(cursor) = crate::screen::cursor(sh, sf(sh, agent)) else { return };
     let scale = scale(sh);
     let p = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         let sf = w.sf();
         let dx = offset["dx"].as_f64().unwrap_or(0.0) * sf;
         let dy = offset["dy"].as_f64().unwrap_or(0.0) * sf;
@@ -744,23 +789,23 @@ pub fn carry(sh: &Arc<Shared>, offset: &Value) {
         (x, y)
     };
     sh.log(&format!("pet: carried out of the island at {p:?}"));
-    place(sh, p);
-    set_ignore(sh, Some(true));
+    place(sh, agent, p);
+    set_ignore(sh, agent, Some(true));
     sh.change(json!({ "out": true }));
 }
 
 // Gone into the island at once, before the island's animation starts.
-pub fn hide_now(sh: &Shared) {
+pub fn hide_now(sh: &Shared, agent: &str) {
     {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         w.drag = None;
         w.walk_gen += 1;
         w.walking = false;
         w.shown = false;
         w.ct.reset(true);
     }
-    set_ignore(sh, Some(true));
-    if let Some(win) = window(sh) {
+    set_ignore(sh, agent, Some(true));
+    if let Some(win) = window(sh, agent) {
         hide_window(&win);
     }
 }
@@ -769,13 +814,13 @@ pub fn hide_now(sh: &Shared) {
 
 // A short walk: move the window by dx (logical) over ms, stopping at the
 // screen edge. True when it got there, false when stopped on the way.
-pub fn walk(sh: &Shared, dx: f64, ms: f64) -> bool {
-    if !is_shown(sh) {
+pub fn walk(sh: &Shared, agent: &str, dx: f64, ms: f64) -> bool {
+    if !is_shown(sh, agent) {
         return false;
     }
     let screens = sh.screens();
     let (gen, x0, y0, target) = {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         if !w.shown || w.drag.is_some() || w.flying {
             return false;
         }
@@ -791,7 +836,7 @@ pub fn walk(sh: &Shared, dx: f64, ms: f64) -> bool {
         std::thread::sleep(Duration::from_millis(16));
         let t = (started.elapsed().as_secs_f64() * 1000.0 / ms).min(1.0);
         let p = {
-            let mut w = sh.win.lock().unwrap();
+            let mut w = sh.pets.of(agent).lock().unwrap();
             if w.walk_gen != gen || w.drag.is_some() || w.flying {
                 break false;
             }
@@ -799,36 +844,37 @@ pub fn walk(sh: &Shared, dx: f64, ms: f64) -> bool {
             w.pos = p;
             p
         };
-        place(sh, p);
+        place(sh, agent, p);
         if t >= 1.0 {
             break true;
         }
     };
     {
-        let mut w = sh.win.lock().unwrap();
+        let mut w = sh.pets.of(agent).lock().unwrap();
         if w.walk_gen == gen {
             w.walking = false;
         }
     }
-    remember(sh);
+    remember(sh, agent);
     arrived
 }
 
-pub fn stop_walking(sh: &Shared) {
-    let mut w = sh.win.lock().unwrap();
+pub fn stop_walking(sh: &Shared, agent: &str) {
+    let mut w = sh.pets.of(agent).lock().unwrap();
     w.walk_gen += 1;
     w.walking = false;
 }
 
 // Where the window is, for checks.
-pub fn where_(sh: &Shared) -> Value {
-    let actual = window(sh).and_then(|win| win.outer_position().ok()).map(|p| json!([p.x, p.y]));
-    let w = sh.win.lock().unwrap();
+pub fn where_(sh: &Shared, agent: &str) -> Value {
+    let actual = window(sh, agent).and_then(|win| win.outer_position().ok()).map(|p| json!([p.x, p.y]));
+    let w = sh.pets.of(agent).lock().unwrap();
     json!({
         "actual": actual,
         "pos": [w.pos.0, w.pos.1],
         "size": [w.size.0, w.size.1],
         "scaleFactor": w.sf(),
+        "made": w.made,
         "shown": w.shown,
         "over": w.ct.over,
         "walking": w.walking,

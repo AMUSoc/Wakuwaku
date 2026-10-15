@@ -90,7 +90,7 @@ pub struct Shared {
     pub port: u16,
     pub settings: Mutex<Map<String, Value>>,
     pub pet: Mutex<state::Pet>,
-    pub win: Mutex<pet::Win>,
+    pub pets: pet::Pets,
     pub island: Mutex<island::Island>,
     pub asks: Mutex<asks::Asks<Responder>>,
     // Plugins in the island (widgets.rs), and what today has seen.
@@ -204,9 +204,11 @@ impl Shared {
     // hers while she is out. An app full screen on another is none of hers.
     pub fn displays(&self) -> Vec<(i32, i32, i32, i32)> {
         let mut on: Vec<(i32, i32, i32, i32)> = island::display(self).into_iter().collect();
-        if let Some(mon) = pet::is_shown(self).then(|| pet::display(self)).flatten() {
-            if !on.contains(&mon) {
-                on.push(mon);
+        for agent in data::AGENTS {
+            if let Some(mon) = pet::is_shown(self, agent).then(|| pet::display(self, agent)).flatten() {
+                if !on.contains(&mon) {
+                    on.push(mon);
+                }
             }
         }
         on
@@ -298,20 +300,19 @@ impl Shared {
         now
     }
 
-    // Everything the pages draw from, for her window as it shows.
-    pub fn send_to_pet(&self) {
-        let _ = self.app.emit_to("pet", "pet:update", self.payload());
+    // Everything the pages draw from, for an agent's pet window as it shows.
+    pub fn send_to_pet(&self, agent: &str) {
+        let _ = self.app.emit_to(pet::label(agent), "pet:update", self.payload());
     }
 
     fn to_pages(&self, event: &str, payload: Value) {
-        // Her window hidden (she is home) hears no updates: it gets the
+        let _ = self.app.emit_to("island", event, payload.clone());
+        // A pet's window hidden (it is home) hears no updates: it gets the
         // whole state as it shows (pet.rs apply_visibility).
-        let pet_hears = event != "pet:update" || pet::is_up(self);
-        for label in ["pet", "island"] {
-            if label == "pet" && !pet_hears {
-                continue;
+        for agent in data::AGENTS {
+            if event != "pet:update" || pet::is_up(self, agent) {
+                let _ = self.app.emit_to(pet::label(agent), event, payload.clone());
             }
-            let _ = self.app.emit_to(label, event, payload.clone());
         }
     }
 
@@ -530,7 +531,9 @@ impl Shared {
     }
 
     pub fn apply_visibility(self: &Arc<Self>) {
-        pet::apply_visibility(self);
+        for agent in data::AGENTS {
+            pet::apply_visibility(self, agent);
+        }
         island::apply_visibility(self);
         // Out of sight, nobody can answer here: the terminal has them.
         if !self.asks_seen() {
@@ -628,7 +631,7 @@ pub fn set_display(sh: &Arc<Shared>, display: &str) {
         return;
     }
     if sh.flag("out") {
-        pet::hide_now(sh);
+        pet::hide_now(sh, "claude");
     }
     sh.change(json!({ "display": display, "out": false }));
 }
@@ -639,7 +642,7 @@ pub fn set_out(sh: &Arc<Shared>, out: bool) {
         return;
     }
     if out {
-        pet::return_to_spot(sh);
+        pet::return_to_spot(sh, "claude");
     }
     sh.change(json!({ "out": out }));
 }
@@ -647,7 +650,7 @@ pub fn set_out(sh: &Arc<Shared>, out: bool) {
 // Brought back close to the island: it takes her in from where she is.
 pub fn absorb(sh: &Arc<Shared>, point: (i32, i32)) {
     sh.log(&format!("absorbed from {point:?}"));
-    pet::hide_now(sh);
+    pet::hide_now(sh, "claude");
     island::absorb(sh, point);
     let sh = sh.clone();
     std::thread::spawn(move || {
@@ -662,7 +665,7 @@ pub fn absorb(sh: &Arc<Shared>, point: (i32, i32)) {
 pub fn come_home(sh: &Arc<Shared>) {
     sh.hidden.store(false, Ordering::SeqCst);
     if sh.flag("out") {
-        pet::come_home(sh);
+        pet::come_home(sh, "claude");
     }
     sh.apply_visibility();
     tray::refresh_menu(sh);
@@ -680,10 +683,15 @@ fn is_island(window: &WebviewWindow) -> bool {
     window.label() == "island"
 }
 
+// The agent of a pet's window (pet-codex: codex); the island's, Claude's.
+fn agent_of(window: &WebviewWindow) -> String {
+    pet::agent_of(window.label()).unwrap_or("claude").to_string()
+}
+
 #[tauri::command]
 async fn pet_ready(app: AppHandle, window: WebviewWindow) {
     let sh = shared(&app);
-    if is_island(&window) { island::ready(&sh) } else { pet::ready(&sh) }
+    if is_island(&window) { island::ready(&sh) } else { pet::ready(&sh, &agent_of(&window)) }
     let views = sh.asks.lock().unwrap().views();
     let _ = app.emit_to(window.label(), "pet:asks", views);
 }
@@ -691,13 +699,13 @@ async fn pet_ready(app: AppHandle, window: WebviewWindow) {
 #[tauri::command]
 async fn pet_hover(app: AppHandle, window: WebviewWindow, is_over: bool) {
     let sh = shared(&app);
-    if is_island(&window) { island::hover(&sh, is_over) } else { pet::hover(&sh, is_over) }
+    if is_island(&window) { island::hover(&sh, is_over) } else { pet::hover(&sh, &agent_of(&window), is_over) }
 }
 
 #[tauri::command]
 async fn pet_drag_start(app: AppHandle, window: WebviewWindow) {
     if !is_island(&window) {
-        pet::drag_start(&shared(&app));
+        pet::drag_start(&shared(&app), &agent_of(&window));
     }
 }
 
@@ -706,7 +714,7 @@ async fn pet_drag_start(app: AppHandle, window: WebviewWindow) {
 #[tauri::command]
 async fn pet_drag_end(app: AppHandle, window: WebviewWindow) {
     if !is_island(&window) {
-        pet::let_go(&shared(&app));
+        pet::let_go(&shared(&app), &agent_of(&window));
     }
 }
 
@@ -733,7 +741,7 @@ async fn pet_menu(app: AppHandle, window: WebviewWindow) {
 async fn pet_double_click(app: AppHandle, window: WebviewWindow) {
     let sh = shared(&app);
     if !is_island(&window) {
-        pet::double_click(&sh);
+        pet::double_click(&sh, &agent_of(&window));
     }
 }
 
@@ -748,7 +756,7 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
             (Some(w), Some(h)) if w > 0.0 && h > 0.0 => Some((w.ceil(), h.ceil())),
             _ => None,
         };
-        pet::set_panel(&sh, size);
+        pet::set_panel(&sh, &agent_of(&window), size);
     }
 }
 
@@ -794,12 +802,13 @@ async fn pet_walk(app: AppHandle, window: WebviewWindow, dx: f64, ms: f64) -> bo
         return false;
     }
     let sh = shared(&app);
-    tauri::async_runtime::spawn_blocking(move || pet::walk(&sh, dx, ms)).await.unwrap_or(false)
+    let agent = agent_of(&window);
+    tauri::async_runtime::spawn_blocking(move || pet::walk(&sh, &agent, dx, ms)).await.unwrap_or(false)
 }
 
 #[tauri::command]
-async fn pet_walk_stop(app: AppHandle) {
-    pet::stop_walking(&shared(&app));
+async fn pet_walk_stop(app: AppHandle, window: WebviewWindow) {
+    pet::stop_walking(&shared(&app), &agent_of(&window));
 }
 
 #[tauri::command]
@@ -835,7 +844,7 @@ async fn island_release(app: AppHandle, offset: Value) {
     let sh = shared(&app);
     sh.log(&format!("island: release {offset}"));
     if !sh.flag("out") {
-        pet::carry(&sh, &offset);
+        pet::carry(&sh, "claude", &offset);
     }
 }
 
@@ -843,7 +852,7 @@ async fn island_release(app: AppHandle, offset: Value) {
 async fn island_drop(app: AppHandle) {
     let sh = shared(&app);
     sh.log("island: drop");
-    pet::let_go(&sh);
+    pet::let_go(&sh, "claude");
 }
 
 // A page's answer to /debug/eval.
@@ -1206,7 +1215,7 @@ fn main() {
                 port,
                 settings: Mutex::new(settings),
                 pet: Mutex::new(state::Pet::default()),
-                win: Mutex::new(pet::Win::default()),
+                pets: pet::Pets::default(),
                 island: Mutex::new(island::Island::default()),
                 asks: Mutex::new(asks::Asks::default()),
                 widgets: Mutex::new(widgets::Widgets::default()),
@@ -1231,7 +1240,7 @@ fn main() {
             sh.log(&format!("up on port {}, data in {}", sh.port, sh.dir.display()));
             sh.log(&format!("displays: {}", sh.screens().describe()));
 
-            pet::create(&sh)?;
+            pet::create(&sh, "claude")?;
             // An app full screen as she starts, known before her home first shows.
             if fullscreen::AVAILABLE && sh.flag("hideInFullscreen") {
                 sh.by_fullscreen.store(fullscreen::check(&[], &sh.displays()) == Some(true), Ordering::SeqCst);
@@ -1251,14 +1260,14 @@ fn main() {
                 // Each window's pointer in its own display's scale on a Mac
                 // (screen::cursor); elsewhere the one pointer, read once.
                 #[cfg(target_os = "macos")]
-                let at = (screen::cursor(&pointer, pet::sf(&pointer)), screen::cursor(&pointer, island::origin(&pointer).1));
+                let at = (screen::cursor(&pointer, pet::sf(&pointer, "claude")), screen::cursor(&pointer, island::origin(&pointer).1));
                 #[cfg(not(target_os = "macos"))]
                 let at = {
                     let c = screen::cursor(&pointer, 1.0);
                     (c, c)
                 };
                 let wait = match at {
-                    (Some(her), Some(home)) => pet::poll(&pointer, her).min(island::poll(&pointer, home)),
+                    (Some(her), Some(home)) => data::AGENTS.iter().map(|agent| pet::poll(&pointer, agent, her)).fold(island::poll(&pointer, home), u64::min),
                     _ => 200,
                 };
                 let wait = if pointer.check_quiet() { wait.max(1000) } else { wait };
@@ -1391,7 +1400,9 @@ fn main() {
                     if n % 4 == 0 {
                         let screens = screen::read(&ticker.app);
                         *ticker.screens.lock().unwrap() = screens;
-                        pet::keep_on_screen(&ticker);
+                        for agent in data::AGENTS {
+                            pet::keep_on_screen(&ticker, agent);
+                        }
                         island::keep_on_screen(&ticker);
                     }
                 }
