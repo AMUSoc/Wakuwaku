@@ -549,7 +549,7 @@
         const { label, value } = Widgets.words(lang, w, s.details !== false)
         // A built-in one says what it shows; on, with nothing read, says so.
         const builtIn = w.builtIn && [T('w.builtIn'), T(`w.about.${w.id}`), w.on && w.value == null ? T('w.unread') : ''].filter(Boolean).join(' · ')
-        const from = builtIn || (w.from === 'mail' ? T('w.fromMail') : [T('w.script', { time: left(w.leftMs || 0) }), w.private ? T('w.private') : ''].filter(Boolean).join(' · '))
+        const from = builtIn || [T('w.script', { time: left(w.leftMs || 0) }), w.private ? T('w.private') : ''].filter(Boolean).join(' · ')
         // The monitor: its readings as icon and number, its settings folded under it.
         const says = Widgets.partsOf(w) ? ` ${Widgets.partsHTML(w)}` : `<span class="d"> ${esc(value)}</span>`
         const isMonitor = w.id === 'monitor'

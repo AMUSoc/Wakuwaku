@@ -22,9 +22,6 @@
 //   today    turns today, how long the agents worked, approvals given on her
 //            (Antigravity's never come to her)
 //   tokens   today's tokens, Claude Code's, Codex's and Antigravity's (tokens.rs)
-//
-// Hers too, never expiring and never a script's: each mail account's
-// (mail.rs, "inbox-<id>").
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -87,7 +84,7 @@ impl Widgets {
         if !is_id(id) {
             return Err("id: a-z 0-9 _ -, up to 40");
         }
-        if BUILT_IN.iter().any(|b| b.0 == id) || self.list.iter().any(|w| w.id == id && w.until.is_none()) {
+        if BUILT_IN.iter().any(|b| b.0 == id) {
             return Err("id: taken by a built-in widget");
         }
         if v.get("remove").and_then(Value::as_bool) == Some(true) {
@@ -143,30 +140,6 @@ impl Widgets {
         true
     }
 
-    // One of hers that is not built in (a mail account's): its words now,
-    // kept until she takes it away. True when they changed.
-    #[allow(clippy::too_many_arguments)]
-    pub fn put_owned(&mut self, id: &str, icon: &str, color: &str, label: Value, value: Value, private: bool, now: u64) -> bool {
-        let widget = Widget { id: id.into(), label, value, icon: icon.into(), color: color.into(), until: None, at: now, private };
-        match self.list.iter_mut().find(|w| w.id == id) {
-            Some(old) if old.label == widget.label && old.value == widget.value && old.color == widget.color => false,
-            Some(old) => {
-                *old = widget;
-                true
-            }
-            None => {
-                self.list.push(widget);
-                true
-            }
-        }
-    }
-
-    pub fn remove(&mut self, id: &str) -> bool {
-        let before = self.list.len();
-        self.list.retain(|w| w.id != id);
-        self.list.len() != before
-    }
-
     pub fn remove_built_in(&mut self, id: &str) -> bool {
         let before = self.list.len();
         self.list.retain(|w| w.id != id);
@@ -214,8 +187,8 @@ impl Widgets {
                         "icon": w.icon,
                         "color": w.color,
                         "builtIn": is_built_in(&w.id),
-                        // builtIn, mail (hers, a mail account's), or script.
-                        "from": if is_built_in(&w.id) { "builtIn" } else if w.until.is_none() { "mail" } else { "script" },
+                        // builtIn, or script.
+                        "from": if is_built_in(&w.id) { "builtIn" } else { "script" },
                         "plugin": owner(&w.id),
                         "on": !off.contains(&w.id),
                         "leftMs": w.until.map(|t| t.saturating_sub(now)),
@@ -667,12 +640,8 @@ mod tests {
         let view = w.view(0, &[], &["mine".into()], &mine);
         assert_eq!((view[0]["id"].clone(), view[0]["plugin"].clone()), (json!("a"), json!("mine")));
         assert!(w.remove_scripted(|id| id == "a") && !w.remove_scripted(|id| id == "sys"));
-        // A mail account's: hers, kept, not a script's to take over.
-        assert!(w.put_owned("inbox-1", "mail", "", json!("王总：周五的方案"), json!("3"), true, 0));
-        assert!(!w.put_owned("inbox-1", "mail", "", json!("王总：周五的方案"), json!("3"), true, 9));
-        assert!(w.put(&json!({ "id": "inbox-1", "label": "mine" }), 0).is_err());
-        assert_eq!(w.view(0, &[], &[], &none)[3]["from"], "mail");
-        assert!(!w.expire(u64::MAX) && w.remove("inbox-1"));
+        // A built-in one's id is not a script's to take.
+        assert!(w.put(&json!({ "id": "today", "label": "mine" }), 0).is_err());
         w.put(&json!({ "id": "a", "label": "A" }), 0).unwrap();
         // Built-in ones never go; a script's does.
         assert!(w.expire(u64::MAX));
