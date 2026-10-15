@@ -747,7 +747,7 @@ mod imp {
             again.map_or(String::new(), |a| format!(", again {a:?}")),
             laid()
         );
-        crate::taskbar::note(&note);
+        let _ = note;
         brought
     }
 

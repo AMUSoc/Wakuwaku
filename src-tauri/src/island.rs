@@ -1,9 +1,6 @@
-// Her home's window (the page draws it, src/pet/island.js), by display:
-//   island  a black pill at the top centre
-//   taskbar a strip along the bottom in place of Windows' own, which is put
-//           away while it is up, its tray taken over (taskbar.rs); what
-//           opens grows up from it, into room kept above it (appbar.rs)
-// Both stay up while she is out, and do the talking.
+// Her home's window (the page draws it, src/pet/island.js): the island, a
+// black pill at the top centre. It stays up while she is out, and does the
+// talking.
 //
 // Pulled out of her home, she becomes the pet window (carried under the
 // cursor while the button is still held on the home); brought close to it
@@ -11,7 +8,7 @@
 //
 // Sizes here are logical (the page's) unless they say physical.
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde_json::{json, Value};
 use tauri::utils::config::BackgroundThrottlingPolicy;
@@ -19,29 +16,14 @@ use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, Webvie
 
 use crate::pointer::{ClickThrough, Mode};
 use crate::screen::Area;
-use crate::appbar::Edge;
-use crate::{appbar, taskbar, Shared};
+use crate::Shared;
 
-// The window without extra room, by home (island.js BASE): the island as
+// The window without extra room (island.js BASE): the island as
 // wide as pulling her out needs, so it only ever grows down. A window whose
 // top-left corner moves shows its old picture from there for a frame or two,
 // so these never move it. The page asks for more (pet:panel) when a shape
 // needs it.
 const ISLAND: (f64, f64) = (760.0, 132.0);
-// The taskbar's strip (as high as Windows' own, so the Start menu and the
-// quick settings open just above it), and the room above it for what opens
-// (a window growing up moves its top-left corner). The window is the two.
-pub const TASKBAR_H: f64 = 48.0;
-// As high as the settings ever are (they stand above the strip, island.js
-// settingsMax): opening them never moves the window, which would flash.
-const TASKBAR_ROOM: f64 = 640.0;
-// Beside a side bar (taskbarEdge left or right): as wide as the settings
-// ever are (the Mail page in two panes, settings.js WIDE_W), their gap off
-// the strip and their shadow, for the same reason.
-const SIDE_ROOM: f64 = 960.0 + 8.0 + 12.0;
-// The middle of her portrait at the taskbar's start (its left end, or a
-// side bar's top), along the strip.
-const TASKBAR_SEAT: f64 = 24.0;
 // The island's top edge in the window, and its compact height.
 const TOP: f64 = 8.0;
 const COMPACT_H: f64 = 36.0;
@@ -69,16 +51,8 @@ pub struct Island {
     ready: bool,
     shown: bool,
     ct: ClickThrough,
-    // The window, once made (for the app bar).
+    // The window, once made.
     hwnd: isize,
-    // The bar's or the taskbar's strip, as Windows granted it (physical x,
-    // y, w, h), and what it was asked for (the display, the height, the
-    // home): asked again only on a change.
-    bar: Option<(i32, i32, i32, i32)>,
-    bar_for: Option<((i32, i32, i32, i32), i32, &'static str, Edge)>,
-    // The strip is a bar of ours Windows knows (appbar.rs), not one laid over
-    // the room Windows' own taskbar keeps (taskbar.rs explorer_room).
-    bar_own: bool,
     // The button held on her (a pull, or carrying her out): the window keeps the pointer.
     holding: bool,
     reaching: bool,
@@ -88,21 +62,8 @@ pub struct Island {
     // they close.
     pub temp: bool,
     pub settings_open: bool,
-    // Risen for the prompts waiting (asked from her taskbar on another
-    // display while an app full screen hid it): it goes once they are answered.
-    pub for_asks: bool,
-    // The page told it is up over an app full screen for them alone (over_full).
-    over_full: bool,
     // Settings asked for before its page was up: the page they open on.
     pending: Option<String>,
-    // On the taskbar, her seat along the strip from its start (logical: from
-    // its left, or a side bar's top), where the page has laid her island out
-    // (taskbarLayout: it may be anywhere along the strip); none told yet: at
-    // its start.
-    seat_at: Option<f64>,
-    // The strip, its edge and the window as the page was last told of them
-    // (tell_strip).
-    strip_told: Option<((i32, i32, i32, i32), Edge, (i32, i32), (i32, i32))>,
 }
 
 impl Island {
@@ -110,29 +71,16 @@ impl Island {
         if self.sf > 0.0 { self.sf } else { 1.0 }
     }
 
-    // Physical. The taskbar is as long as its strip (its display, or what
-    // Windows granted of it), with its room beside it: above a bottom bar,
-    // below a top one, inside a side one's.
-    fn size_for(&self, home: &str, area: &Area, edge: Edge) -> (i32, i32) {
+    // Physical: the island's, grown by the room the page asked for.
+    fn size(&self) -> (i32, i32) {
         let sf = self.sf();
-        let side = home == "taskbar" && edge.is_side();
-        let base = match home {
-            "taskbar" if side => (TASKBAR_H + SIDE_ROOM, self.bar.map_or(area.mon.3, |b| b.3) as f64 / sf),
-            "taskbar" => (area.mon.2 as f64 / sf, TASKBAR_H + TASKBAR_ROOM),
-            _ => ISLAND,
-        };
         let (w, h) = match self.room {
-            Some((w, h)) => (w.max(base.0), h.max(base.1)),
-            None => base,
-        };
-        // The strip's length is the window's; only its room grows.
-        let (w, h) = match home {
-            "taskbar" if side => (w, base.1),
-            "taskbar" => (base.0, h),
-            _ => (w, h),
+            Some((w, h)) => (w.max(ISLAND.0), h.max(ISLAND.1)),
+            None => ISLAND,
         };
         ((w * sf).round() as i32, (h * sf).round() as i32)
     }
+
 }
 
 fn window(sh: &Shared) -> Option<WebviewWindow> {
@@ -142,13 +90,10 @@ fn window(sh: &Shared) -> Option<WebviewWindow> {
 // Up whenever she is in sight, home or out; or risen for the settings; or
 // the settings open in it, whatever they just hid (she, do not disturb):
 // they never go from under the person, only once closed.
-// The taskbar is up whatever hides her (out of sight, do not disturb): it is
-// the person's taskbar; only an app full screen hides it, as Windows' own.
 pub fn is_shown(sh: &Shared) -> bool {
-    // Nor while another copy of her holds the taskbar (taskbar.rs waiting).
-    let up = if sh.home() == "taskbar" { !sh.is_fullscreen() && !taskbar::waiting() } else { sh.is_visible() };
+    let up = sh.is_visible();
     let isl = sh.island.lock().unwrap();
-    up || isl.temp || isl.settings_open || isl.for_asks
+    up || isl.temp || isl.settings_open
 }
 
 // Its window's handle, once made (0 before).
@@ -175,11 +120,6 @@ fn set_ignore(sh: &Shared, ignore: Option<bool>) {
     }
 }
 
-// The screen's edge her taskbar is along (taskbarEdge).
-pub fn edge(sh: &Shared) -> Edge {
-    Edge::of(sh.setting("taskbarEdge").as_str().unwrap_or("bottom"))
-}
-
 // The display it is on: where it is, else the primary one.
 fn area(sh: &Shared) -> Option<Area> {
     let screens = sh.screens();
@@ -198,21 +138,15 @@ pub fn display(sh: &Shared) -> Option<(i32, i32, i32, i32)> {
     area(sh).map(|a| a.mon)
 }
 
-// Where the window goes, by home. Returns the physical rect if it moved.
+// Where the window goes. Returns the physical rect if it moved.
 fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
-    let home = sh.home();
-    let edge = edge(sh);
     let area = area(sh)?;
     let mut isl = sh.island.lock().unwrap();
     isl.sf = area.sf;
-    let size = isl.size_for(home, &area, edge);
-    let pos = match home {
-        // The window's edge on the strip's outer one, the room inside it.
-        "taskbar" => window_at(edge, isl.bar.unwrap_or_else(|| edge.strip(area.mon, (TASKBAR_H * area.sf).round() as i32)), size),
-        // On a Mac the notch's place, over the menu bar (notch.rs); elsewhere
-        // the top centre, below a taskbar that sits at the top.
-        _ => crate::notch::at_top(area.mon, size.0).unwrap_or((area.x + (area.w - size.0) / 2, area.y)),
-    };
+    let size = isl.size();
+    // On a Mac the notch's place, over the menu bar (notch.rs); elsewhere
+    // the top centre, below a taskbar that sits at the top.
+    let pos = crate::notch::at_top(area.mon, size.0).unwrap_or((area.x + (area.w - size.0) / 2, area.y));
     if (pos, size) == (isl.pos, isl.size) {
         return None;
     }
@@ -221,217 +155,8 @@ fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
     Some((pos, size))
 }
 
-// The taskbar's window (physical) for its strip along an edge: its outer
-// edge on the strip's, the room inside it.
-fn window_at(edge: Edge, b: (i32, i32, i32, i32), size: (i32, i32)) -> (i32, i32) {
-    match edge {
-        Edge::Bottom => (b.0, b.1 + b.3 - size.1),
-        Edge::Top | Edge::Left => (b.0, b.1),
-        Edge::Right => (b.0 + b.2 - size.0, b.1),
-    }
-}
-
-// The strip's thickness across it (physical), as it lies: what the page
-// draws it as (its CSS px times the scale), so that its inner edge is the
-// work area's, at any scale (175% left a hairline gap: zhoupengjie/Wakuwaku#2).
-fn thickness(edge: Edge, b: (i32, i32, i32, i32)) -> i32 {
-    if edge.is_side() { b.2 } else { b.3 }
-}
-
-// The page told the strip's thickness when the strip, its edge or the window
-// change (or anew once it is ready), and a line for the log with all that
-// sets where its inner edge lies: Windows' room, the strip, the work area,
-// the window (on a change of edge too, the thickness the same: 2026-10-12).
-pub fn tell_strip(sh: &Shared, again: bool) {
-    if sh.home() != "taskbar" {
-        return;
-    }
-    let edge = edge(sh);
-    let (bar, pos, size, sf, told) = {
-        let isl = sh.island.lock().unwrap();
-        (isl.bar, isl.pos, isl.size, isl.sf(), isl.strip_told)
-    };
-    let Some(b) = bar else { return };
-    let thick = thickness(edge, b);
-    let now = Some((b, edge, pos, size));
-    if now == told && !again {
-        return;
-    }
-    sh.island.lock().unwrap().strip_told = now;
-    let room = (edge == Edge::Bottom).then(|| area(sh).and_then(|a| crate::shell::room(a.mon))).flatten();
-    sh.log(&format!(
-        "taskbar: strip {b:?} along the {edge:?}, {thick} px ({} at {sf}); Windows' room {room:?}; work area {:?}; window at {pos:?} {size:?}",
-        thick as f64 / sf,
-        taskbar::work_area_rect()
-    ));
-    // With the window's size: the page may be a little bigger (island.js
-    // fitPage, zhoupengjie/Wakuwaku#19).
-    let _ = sh.app.emit_to("island", "taskbar:strip", json!({ "thick": thick, "win": [size.0, size.1] }));
-}
-
-// One at a time: two at once took the taskbar twice (two tray threads, one
-// never stopped). Asked while one runs, it runs again after, with the last
-// ask: 1 give back, 2 keep.
-static SYNCING: AtomicBool = AtomicBool::new(false);
-static SYNC_ASK: AtomicU8 = AtomicU8::new(0);
-
-fn sync_bar(sh: &Shared, keep: bool) {
-    SYNC_ASK.store(1 + keep as u8, Ordering::SeqCst);
-    loop {
-        if SYNCING.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        while let ask @ 1..=2 = SYNC_ASK.swap(0, Ordering::SeqCst) {
-            sync_bar_now(sh, ask == 2);
-        }
-        SYNCING.store(false, Ordering::SeqCst);
-        // An ask that came between the last look and letting go.
-        if SYNC_ASK.load(Ordering::SeqCst) == 0 {
-            return;
-        }
-    }
-}
-
-// The taskbar's strip along its edge (taskbarEdge): asked of Windows while
-// the home is the taskbar and keep (up; also while an app full screen hides
-// its window: giving the strip back would move every window), given back
-// otherwise. Asked again only when the display, the height, the home or the
-// edge change. It comes with Windows' own put away first and goes with it
-// given back (taskbar.rs).
-fn sync_bar_now(sh: &Shared, keep: bool) {
-    let home = sh.home();
-    let edge = match home {
-        "taskbar" => Some((edge(sh), TASKBAR_H)),
-        _ => None,
-    };
-    let want = match (keep, edge) {
-        (true, Some((edge, h))) => area(sh).map(|a| (a, edge, (h * a.sf).round() as i32)),
-        _ => None,
-    };
-    let (hwnd, held, registered) = {
-        let isl = sh.island.lock().unwrap();
-        (isl.hwnd, isl.bar_for, isl.bar_own)
-    };
-    if hwnd == 0 {
-        return;
-    }
-    let ask = want.map(|(a, edge, h)| (a.mon, h, home, edge));
-    if held == ask {
-        return;
-    }
-    // Another home's strip (or none wanted): given back first. A bar of ours
-    // taken away only if there is one: over Windows' room there is none, and
-    // asking goes to the taskbar's window of the tray, on the taskbar's
-    // thread, waited for (quitting, the main thread).
-    if let Some((_, _, was, _)) = held.filter(|h| Some(h.2) != ask.map(|a| a.2)) {
-        // The desktop's icons where they are, before the work area goes
-        // back under them (icons.rs hold).
-        if was == "taskbar" {
-            for line in crate::icons::hold_within(&sh.dir, std::time::Duration::from_secs(2)) {
-                sh.log(&line);
-            }
-        }
-        if registered {
-            appbar::remove(hwnd);
-        }
-        {
-            let mut isl = sh.island.lock().unwrap();
-            isl.bar = None;
-            isl.bar_for = None;
-            isl.bar_own = false;
-        }
-        if was == "taskbar" {
-            taskbar::give_back(sh);
-        }
-        sh.log(&format!("island: {was} strip given back"));
-    }
-    let Some((area, edge, height)) = want else { return };
-    if home == "taskbar" {
-        let strip = edge.strip(area.mon, height);
-        // The desktop's icons where they are, before anything of a strip along
-        // another edge than the bottom moves them (icons.rs keep_before).
-        if edge != Edge::Bottom {
-            for line in crate::icons::keep_before_within(&sh.dir, std::time::Duration::from_millis(1500)) {
-                sh.log(&line);
-            }
-        }
-        // Windows' own keeps its room along the bottom for a bottom strip,
-        // and none for another edge (taskbar.rs set_edge).
-        taskbar::set_edge(edge);
-        // Another copy of her holds it: nothing taken (it waits).
-        if !taskbar::take(sh, strip) {
-            return;
-        }
-        // Along the bottom, laid over the room Windows' own keeps, put away:
-        // what it opens (the Start menu, the notifications) opens above it.
-        // Its top and height are that room's (the work area stops there),
-        // not ours worked out at this scale, when they differ by its
-        // rounding (a pixel or two: one a pixel taller left a hairline gap
-        // above the strip, zhoupengjie/Wakuwaku#2); a room of another size
-        // (Windows 10's, 40 px) leaves ours as it is. Along another edge, a
-        // bar of ours (Windows' opens at the bottom).
-        if let Some(room) = (edge == Edge::Bottom).then(|| taskbar::explorer_room(area.mon)).flatten() {
-            let strip = if (room.3 - height).abs() <= 2 { (area.mon.0, room.1, area.mon.2, room.3) } else { strip };
-            let own = {
-                let mut isl = sh.island.lock().unwrap();
-                isl.bar = Some(strip);
-                isl.bar_for = ask;
-                std::mem::replace(&mut isl.bar_own, false)
-            };
-            if own {
-                appbar::remove(hwnd);
-            }
-            taskbar::strip_moved(strip);
-            sh.log(&format!("island: taskbar strip {strip:?} over Windows' room {room:?}; work area's bottom {}", taskbar::work_area_bottom()));
-            return;
-        }
-    }
-    let registered = sh.island.lock().unwrap().bar_own;
-    if !registered && !appbar::register(hwnd) {
-        sh.log("island: Windows would not take the bar");
-        return;
-    }
-    let granted = appbar::place(hwnd, area.mon, edge, height);
-    {
-        let mut isl = sh.island.lock().unwrap();
-        isl.bar = Some(granted);
-        isl.bar_for = ask;
-        isl.bar_own = true;
-    }
-    if home == "taskbar" {
-        taskbar::strip_moved(granted);
-    }
-    sh.log(&format!("island: {home} strip {granted:?}; work area's bottom {}", taskbar::work_area_bottom()));
-}
-
-// Quitting, or the window going: the strip back to the other windows (and
-// Windows' own taskbar back, for the taskbar's). Waited for, so it is back
-// before she goes (should it take too long, the guard gives it back).
-pub fn release_bar(sh: &Shared) {
-    let t = std::time::Instant::now();
-    while SYNCING.load(Ordering::SeqCst) && t.elapsed() < std::time::Duration::from_secs(5) {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    sync_bar(sh, false);
-}
-
-// Explorer started again: it forgot the strip, which is asked for anew.
-pub fn take_strip_again(sh: &Shared) {
-    let hwnd = {
-        let mut isl = sh.island.lock().unwrap();
-        if isl.bar_for.take().is_none() {
-            return;
-        }
-        isl.bar_own = false;
-        isl.hwnd
-    };
-    // Should it remember after all, a second registration would be refused.
-    appbar::remove(hwnd);
-    place(sh);
-}
-
 // The window laid on its rect (physical): its place first, then its size,
-// then its place again, as bars.rs lay does. Sized first and then moved to
+// then its place again. Sized first and then moved to
 // a display of another scale, Windows gave it the size for that one (the
 // scales' ratio over it): an external display at 125% plugged back in and
 // made the main one while it sat on the laptop's at 175%, her taskbar came
@@ -445,21 +170,14 @@ fn lay(win: &WebviewWindow, (x, y): (i32, i32), (w, h): (i32, i32)) {
 
 // Laid again where it is meant to be (a change of scale under it).
 fn lay_again(sh: &Shared, why: &str) {
-    let (pos, size, bar) = {
+    let (pos, size) = {
         let isl = sh.island.lock().unwrap();
-        (isl.pos, isl.size, isl.bar)
+        (isl.pos, isl.size)
     };
-    // The display it is meant for: the one her strip lies on, or the
-    // island's middle; none between strips (a display gone, the new one not
-    // yet taken by the taskbar's thread).
+    // The display it is meant for: the one under the island's middle.
     let areas = sh.screens().areas;
-    let on = |r: (i32, i32, i32, i32)| areas.iter().find(|a| r.0 >= a.mon.0 && r.1 >= a.mon.1 && r.0 + r.2 <= a.mon.0 + a.mon.2 && r.1 + r.3 <= a.mon.1 + a.mon.3);
-    let meant = match bar {
-        _ if sh.home() != "taskbar" => on((pos.0 + size.0 / 2, pos.1 + size.1 / 2, 1, 1)),
-        Some(b) => on(b),
-        None => None,
-    };
-    let Some(meant) = meant else { return };
+    let (x, y) = (pos.0 + size.0 / 2, pos.1 + size.1 / 2);
+    let Some(meant) = areas.iter().find(|a| x >= a.mon.0 && y >= a.mon.1 && x < a.mon.0 + a.mon.2 && y < a.mon.1 + a.mon.3) else { return };
     let Some(win) = window(sh) else { return };
     // Laid again only once it has that display's scale: of another (Windows
     // moving it off a display unplugged, the list of displays not yet
@@ -476,10 +194,7 @@ fn lay_again(sh: &Shared, why: &str) {
 }
 
 fn place(sh: &Shared) {
-    sync_bar(sh, true);
-    let fitted = fit(sh);
-    tell_strip(sh, false);
-    let Some((pos, size)) = fitted else { return };
+    let Some((pos, size)) = fit(sh) else { return };
     if let Some(win) = window(sh) {
         lay(&win, pos, size);
     }
@@ -570,14 +285,14 @@ fn create(sh: &Arc<Shared>) {
 // setDeep, zhoupengjie/Wakuwaku#27): looked at with the full screen's look
 // (every 1.5 s, or a window to the front), told the page as it changes
 // (island:over-max). Windows' mode with it: the page has it in pet:update
-// alone there (no taskbar to hear it from), so a change of it draws anew.
+// alone, so a change of it draws anew.
 // Nothing for the default black look, nor while she is quiet.
 static OVER_MAX: AtomicBool = AtomicBool::new(false);
 static TOP_LIGHT: AtomicU8 = AtomicU8::new(2);
 
 pub fn look_over_max(sh: &Arc<Shared>) {
     let looks = sh.setting("islandTopLook");
-    if sh.home() == "taskbar" || sh.is_quiet() || !looks.as_object().is_some_and(|m| m.values().any(Value::is_object)) {
+    if sh.is_quiet() || !looks.as_object().is_some_and(|m| m.values().any(Value::is_object)) {
         return;
     }
     let light = crate::wallpaper::look().0;
@@ -603,63 +318,16 @@ pub fn ready(sh: &Arc<Shared>) {
         isl.pending.take()
     };
     sh.redraw();
-    taskbar::resend(sh);
-    tell_strip(sh, true);
     // The band at a Mac's screen top, now that the page hears it.
     crate::notch::settle(sh);
     sh.greet();
-    // Taking the taskbar over: Windows' own laid over ours first, put away
-    // under it, then turned to dust that settles into ours.
-    let covered = handoff_cover(sh);
     apply_visibility(sh);
-    if covered {
-        handoff_ask(sh, json!({ "step": "go" }));
-        sh.log("handoff: go");
-    }
     if let Some(tab) = pending {
         let _ = sh.app.emit_to("island", "island:settings", json!({ "tab": tab }));
     }
 }
 
 pub fn apply_visibility(sh: &Arc<Shared>) {
-    // Told before it shows, so the strip never shows over the full screen;
-    // told it is over once it has gone (or, the full screen gone, stays up).
-    let over = over_full(sh);
-    let told = sh.island.lock().unwrap().over_full;
-    if over && !told {
-        tell_over_full(sh, true);
-    }
-    show_or_hide(sh);
-    if !over && told {
-        tell_over_full(sh, false);
-    }
-}
-
-// Up over an app full screen for the prompts alone (show_asks), her taskbar
-// the home: the page shows her island and what opens from it, not the strip
-// under them (style.css over-full), and the pointer goes through there to
-// what is full screen. The whole taskbar, the tray and the clock, came up
-// over the video with them (the test session, 2026-10-13). Not with the
-// settings open: they stand on the strip.
-fn over_full(sh: &Shared) -> bool {
-    sh.home() == "taskbar" && sh.is_fullscreen() && {
-        let isl = sh.island.lock().unwrap();
-        isl.for_asks && !isl.temp && !isl.settings_open
-    }
-}
-
-fn tell_over_full(sh: &Shared, on: bool) {
-    sh.island.lock().unwrap().over_full = on;
-    let _ = sh.app.emit_to("island", "island:over-full", json!({ "on": on }));
-    sh.log(&format!("island: {}", if on { "over the full screen for the prompts alone, the strip unseen" } else { "the strip seen again" }));
-}
-
-fn show_or_hide(sh: &Arc<Shared>) {
-    // Another copy of her holding the taskbar: this one waits, its window
-    // not shown over the other's.
-    if sh.home() == "taskbar" {
-        taskbar::look_for_other(sh);
-    }
     let want = is_shown(sh);
     let (created, ready, shown) = {
         let isl = sh.island.lock().unwrap();
@@ -676,13 +344,6 @@ fn show_or_hide(sh: &Arc<Shared>) {
     }
     if want {
         place(sh);
-    } else {
-        // The taskbar keeps the strip it holds while an app full screen
-        // hides it; it takes none then: one taken with its window hidden
-        // keeps no room (2026-10-10), so it waits for the window to show.
-        // Given back, though, to another copy of her holding it too.
-        let held = sh.island.lock().unwrap().bar_for.is_some();
-        sync_bar(sh, sh.home() == "taskbar" && held && !taskbar::waiting());
     }
     if want == shown {
         return;
@@ -706,119 +367,11 @@ fn show_or_hide(sh: &Arc<Shared>) {
     }
 }
 
-// --- The handover with Windows' taskbar (handoff.js) ----------------------------------
-// Windows' taskbar never gone for a moment. Taking over: a picture of it
-// laid over ours, shown exactly over it, before it is put away; then its
-// picture turns to dust that settles into ours. Quitting: ours turns to
-// dust, Windows' shown again under it, ours fading over it before she
-// goes. Each answer of the page's (covered, bare, done) waited for so long
-// at most: neither side can hold the other. Not on the main thread: its
-// events reach the page through the main thread.
-static HANDOFF: Mutex<Vec<String>> = Mutex::new(Vec::new());
-static HANDOFF_SAID: std::sync::Condvar = std::sync::Condvar::new();
-
-// What the page answers (taskbar_handoff).
-pub fn handoff_answer(what: &str) {
-    HANDOFF.lock().unwrap().push(what.to_string());
-    HANDOFF_SAID.notify_all();
-}
-
-// A step told the page; its answers from before forgotten.
-fn handoff_ask(sh: &Shared, step: Value) {
-    HANDOFF.lock().unwrap().clear();
-    let _ = sh.app.emit_to("island", "taskbar:handoff", step);
-}
-
-// An answer, within ms at most: true once it came.
-fn handoff_wait(what: &str, ms: u64) -> bool {
-    let said = HANDOFF.lock().unwrap();
-    let (said, _) = HANDOFF_SAID.wait_timeout_while(said, std::time::Duration::from_millis(ms), |s| !s.iter().any(|x| x == what)).unwrap();
-    said.iter().any(|x| x == what)
-}
-
-// Her page ready, the taskbar to be taken (not yet up, nothing full screen,
-// no other copy of hers holding it): Windows' taskbar pictured, her window
-// shown exactly over it with the picture laid on, before it is put away.
-// True once covered: then `go` follows the taking. A picture that cannot
-// be had (auto-hidden, already put away) is none: the dust comes from above.
-fn handoff_cover(sh: &Arc<Shared>) -> bool {
-    if sh.home() != "taskbar" || taskbar::is_up() {
-        return false;
-    }
-    taskbar::look_for_other(sh);
-    if !is_shown(sh) {
-        return false;
-    }
-    let Some(area) = area(sh) else { return false };
-    // Windows' strip pictured only where hers takes its place: along the
-    // bottom. Along another edge none (the dust gathers from above).
-    let picture = (edge(sh) == Edge::Bottom).then(|| taskbar::strip_picture(area.mon)).flatten();
-    let _ = fit(sh);
-    let (pos, size, hwnd) = {
-        let mut isl = sh.island.lock().unwrap();
-        isl.shown = true;
-        (isl.pos, isl.size, isl.hwnd)
-    };
-    let Some(win) = window(sh) else { return false };
-    lay(&win, pos, size);
-    let _ = win.show();
-    let shown = std::time::Instant::now();
-    // Over Windows' own, which is kept on top too.
-    os::raise_top(hwnd);
-    let pictured = picture.is_some();
-    // Its window's size (physical) too: the page lays the picture only once
-    // its own size has come to that (a window made bigger reaches the page
-    // some frames later; laid before, it sat too small, up and to the left).
-    handoff_ask(sh, json!({ "step": "in", "picture": picture, "size": [size.0, size.1] }));
-    let covered = handoff_wait("covered", 800);
-    // Drawn by the page is not yet on the screen: a window just shown hands
-    // WebView2's frames to DWM some 40 ms later, and Windows' strip put away
-    // at once left the bare desktop under the strip that long (whatever the
-    // material: the test session's films, 2026-10-13). So two of DWM's passes
-    // waited for, and 150 ms since the window showed at least; the picture is
-    // Windows' strip itself, so the wait cannot be seen.
-    if pictured {
-        crate::tasks::dwm_flush();
-        crate::tasks::dwm_flush();
-        let least = std::time::Duration::from_millis(150);
-        if let Some(rest) = least.checked_sub(shown.elapsed()) {
-            std::thread::sleep(rest);
-        }
-    }
-    sh.log(&format!(
-        "handoff: in ({}), {} ({} ms after the window showed)",
-        if pictured { "pictured" } else { "no picture" },
-        if covered { "covered" } else { "no answer in 800 ms" },
-        shown.elapsed().as_millis()
-    ));
-    true
-}
-
-// Quitting with the taskbar up (and nothing full screen): hers turns to
-// dust, Windows' shown under it once the page says so (bare), hers kept
-// over it while it fades (done). Then she goes, and gives it back as ever.
-pub fn handoff_out(sh: &Shared) {
-    let shown = sh.island.lock().unwrap().shown;
-    if sh.home() != "taskbar" || !taskbar::is_up() || !shown || sh.is_fullscreen() {
-        return;
-    }
-    handoff_ask(sh, json!({ "step": "out" }));
-    let bare = handoff_wait("bare", 500);
-    taskbar::handing_back();
-    crate::shell::show_bars();
-    os::raise_top(hwnd(sh));
-    let done = bare && handoff_wait("done", 1500);
-    sh.log(&format!("handoff: out, {}, {}", if bare { "bare" } else { "no answer in 500 ms" }, if done { "done" } else { "not waited for" }));
-}
-
-// Kept in its place (a display gone, the scale changed, another bar). And
-// put back where it was put if Windows moved it: the taskbar's window, which
-// reaches over its own strip, was pushed up into the work area by the strip's
-// height (2026-10-10, as a game went full screen and back).
+// Kept in its place (a display gone, the scale changed).
 pub fn keep_on_screen(sh: &Shared) {
-    let (is_up, pos, size) = {
+    let is_up = {
         let isl = sh.island.lock().unwrap();
-        (isl.shown && !isl.holding && !isl.reaching, isl.pos, isl.size)
+        isl.shown && !isl.holding && !isl.reaching
     };
     if !is_up {
         return;
@@ -828,16 +381,6 @@ pub fn keep_on_screen(sh: &Shared) {
     // the same, and would never set it again (#37).
     place(sh);
     lay_again(sh, "seen by the look");
-    if sh.home() != "taskbar" {
-        return;
-    }
-    let Some(win) = window(sh) else { return };
-    if let Ok(at) = win.outer_position() {
-        if (at.x, at.y) != pos && sh.island.lock().unwrap().pos == pos {
-            sh.log(&format!("island: moved by Windows to ({}, {}); put back at {pos:?}", at.x, at.y));
-            lay(&win, pos, size);
-        }
-    }
 }
 
 // One look at the mouse. Returns ms until the next look.
@@ -882,14 +425,6 @@ pub fn hover(sh: &Shared, is_over: bool) {
     }
 }
 
-// Her seat on the taskbar as the page has laid her island out (logical px
-// from the strip's left): what she is reached for from, and flies back to.
-pub fn set_seat(sh: &Shared, at: f64) {
-    if at.is_finite() && at >= 0.0 {
-        sh.island.lock().unwrap().seat_at = Some(at);
-    }
-}
-
 // The room a shape needs, as the page measured it.
 pub fn set_room(sh: &Shared, measured: &Value) {
     let room = match (measured["width"].as_f64(), measured["height"].as_f64()) {
@@ -912,46 +447,20 @@ pub fn set_holding(sh: &Shared, is_holding: bool) {
 }
 
 // Where her home is on the screen, physical, whether it is up or not: what
-// she is reached for from and taken back into. The island: the middle of
-// its lower edge (compact); the taskbar: her portrait, on the strip's inner
-// edge (above a bottom bar, below a top one, beside a side one).
+// she is reached for from and taken back into: the middle of the island's
+// lower edge (compact).
 pub fn seat(sh: &Shared) -> Option<(i32, i32)> {
-    let home = sh.home();
-    let edge = edge(sh);
     let area = area(sh)?;
-    let (bar, seat_at) = {
-        let isl = sh.island.lock().unwrap();
-        (isl.bar, isl.seat_at)
-    };
     let px = |v: f64| (v * area.sf).round() as i32;
-    Some(match home {
-        "taskbar" => {
-            let (x, y, w, h) = bar.unwrap_or_else(|| edge.strip(area.mon, px(TASKBAR_H)));
-            let at = px(seat_at.unwrap_or(TASKBAR_SEAT));
-            match edge {
-                Edge::Bottom => (x + at, y),
-                Edge::Top => (x + at, y + h),
-                Edge::Left => (x + w, y + at),
-                Edge::Right => (x, y + at),
-            }
-        }
-        _ => (area.x + area.w / 2, area.y + px(TOP + COMPACT_H)),
-    })
+    Some((area.x + area.w / 2, area.y + px(TOP + COMPACT_H)))
 }
 
 // Where she flies to before her home takes her in: just under the island,
-// just off the taskbar (inside it), where the drop can take her.
+// where the drop can take her.
 pub fn landing(sh: &Shared) -> Option<(i32, i32)> {
     let seat = seat(sh)?;
     let sf = area(sh).map_or(1.0, |a| a.sf);
-    let off = (70.0 * sf) as i32;
-    Some(match (sh.home(), edge(sh)) {
-        ("taskbar", Edge::Bottom) => (seat.0, seat.1 - off),
-        ("taskbar", Edge::Top) => (seat.0, seat.1 + off),
-        ("taskbar", Edge::Left) => (seat.0 + off, seat.1),
-        ("taskbar", Edge::Right) => (seat.0 - off, seat.1),
-        _ => (seat.0, seat.1 + off),
-    })
+    Some((seat.0, seat.1 + (70.0 * sf) as i32))
 }
 
 // She is being moved near her home (point: her middle on the screen,
@@ -1070,14 +579,6 @@ pub fn settings_closed(sh: &Arc<Shared>) {
     });
 }
 
-// The prompts answered: an island risen for them goes.
-pub fn asks_answered(sh: &Arc<Shared>) {
-    let was = std::mem::take(&mut sh.island.lock().unwrap().for_asks);
-    if was {
-        apply_visibility(sh);
-    }
-}
-
 // The settings' two buttons by ✕ (settings.js): locked ("settingsPin"), a
 // click outside does not close them, and other windows come over them as
 // over any window (hers kept on top only while they are not open); on top
@@ -1137,7 +638,6 @@ pub fn where_(sh: &Shared) -> Value {
         "reaching": isl.reaching,
         "temp": isl.temp,
         "settingsOpen": isl.settings_open,
-        "bar": isl.bar.map(|b| json!([b.0, b.1, b.2, b.3])),
     })
 }
 
@@ -1328,40 +828,4 @@ mod os {
     }
     pub fn raise_top(_hwnd: isize) {}
     pub fn no_transitions(_hwnd: isize) {}
-}
-
-#[cfg(test)]
-mod strip_tests {
-    use super::{thickness, window_at, Edge, SIDE_ROOM, TASKBAR_H, TASKBAR_ROOM};
-
-    // At every scale, a strip as Windows grants it (its room, a pixel more
-    // or less than ours as it rounds, or our own bar's): the window's outer
-    // edge on the strip's, and the page's strip (its CSS px times the scale)
-    // exactly as thick, so its inner edge is the work area's.
-    #[test]
-    fn the_strip_and_the_window_meet_at_any_scale() {
-        let mon = (0, 0, 3840, 2160);
-        for sf in [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 1.37] {
-            let ours = (TASKBAR_H * sf).round() as i32;
-            for edge in [Edge::Bottom, Edge::Top, Edge::Left, Edge::Right] {
-                for t in [ours - 1, ours, ours + 1] {
-                    let b = edge.strip(mon, t);
-                    let size = if edge.is_side() { (((TASKBAR_H + SIDE_ROOM) * sf).round() as i32, mon.3) } else { (mon.2, ((TASKBAR_H + TASKBAR_ROOM) * sf).round() as i32) };
-                    let (x, y) = window_at(edge, b, size);
-                    // The window's outer edge on the strip's, the strip inside it.
-                    match edge {
-                        Edge::Bottom => assert_eq!(y + size.1, b.1 + b.3, "{sf} {edge:?} {t}"),
-                        Edge::Top => assert_eq!(y, b.1, "{sf} {edge:?} {t}"),
-                        Edge::Left => assert_eq!(x, b.0, "{sf} {edge:?} {t}"),
-                        Edge::Right => assert_eq!(x + size.0, b.0 + b.2, "{sf} {edge:?} {t}"),
-                    }
-                    assert!(x <= b.0 && y <= b.1 && x + size.0 >= b.0 + b.2 && y + size.1 >= b.1 + b.3, "{sf} {edge:?} {t}");
-                    // The page's strip: thick / scale CSS px, back to exactly thick.
-                    let thick = thickness(edge, b);
-                    assert_eq!(thick, t);
-                    assert_eq!(((thick as f64 / sf) * sf).round() as i32, t, "{sf} {edge:?} {t}");
-                }
-            }
-        }
-    }
 }

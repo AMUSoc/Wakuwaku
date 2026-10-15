@@ -3,7 +3,7 @@
 // close them. Five pages:
 //   now       the sessions (a click on one goes to its window), and four quick switches
 //   pets      the pets downloaded, a download by link or id, the gallery
-//   look      her home (island, taskbar), size, strolls, eyes, language
+//   look      her island, size, strolls, eyes, language
 //   alerts    how long endings stay, and idle sessions in sight; notifications,
 //             sound, prompts, quiet
 //   widgets   plugins: the built-in ones, those she runs for you (a switch, their settings folded under), their order, turns, nudges, waku, and how to write one
@@ -267,42 +267,11 @@
   }
 
   // --- Her island's look (island.js drawIslandLook) ---------------------------------
-  // By Windows' mode: a preset, or its parts one by one, over Windows' own
-  // flyout grey (none set: that grey). On the taskbar only where her end is
-  // a capsule (the Mica, clear or light strip); on the black one she is part
-  // of it. Folded out under the taskbar's options, or the island's at the
-  // top of the screen (its own look, ITOP_*). Open, the settings are the
+  // By Windows' mode: a preset, or its parts one by one (none set: black).
+  // Folded out under the island's options. Open, the settings are the
   // island itself, so a small one here shows the look (hovered, it opens).
-  const ILOOK_DEFAULT = {
-    // Bare in the dark mode, a new user's since 2026-10-13 (the person's own
-    // look; island.js drawIslandLook takes it as the default too).
-    dark: { bg: '#2c2c2c', op: 100, blur: 0, edge: 'line', bare: true },
-    light: { bg: '#f3f3f3', op: 100, blur: 0, edge: 'line', bare: false },
-  }
-  // Each preset its own look: the dark grey was the default's, the bare look
-  // once that became the default, and a press on the bare one lit the grey
-  // (zhoupengjie/Wakuwaku#17).
-  const ILOOK_PRESETS = {
-    dark: [
-      ['black', { bg: '#000000', op: 100, blur: 0, edge: 'line', bare: false }],
-      ['gray', { bg: '#2c2c2c', op: 100, blur: 0, edge: 'line', bare: false }],
-      ['mica', { bg: '#242424', op: 62, blur: 40, edge: 'line', bare: false }],
-      ['ring', { bg: '#2c2c2c', op: 100, blur: 0, edge: 'ring', bare: false }],
-      ['bare', { bg: '#2c2c2c', op: 100, blur: 0, edge: 'line', bare: true }],
-    ],
-    light: [
-      ['white', { bg: '#fbfbfb', op: 100, blur: 0, edge: 'line', bare: false }],
-      ['gray', { bg: '#f3f3f3', op: 100, blur: 0, edge: 'line', bare: false }],
-      ['mica', { bg: '#f6f6f6', op: 62, blur: 40, edge: 'line', bare: false }],
-      ['ring', { bg: '#fbfbfb', op: 100, blur: 0, edge: 'ring', bare: false }],
-      ['bare', { bg: '#f3f3f3', op: 100, blur: 0, edge: 'line', bare: true }],
-      ['black', { bg: '#000000', op: 100, blur: 0, edge: 'none', bare: false }],
-    ],
-  }
-  // At the top of the screen its own look, kept apart (islandTopLook,
-  // zhoupengjie/Wakuwaku#27): black by default in either mode, as it always
-  // was (the iPhone's, its faint line, white words), so nobody's changes;
-  // no bare capsule (no strip to be part of up there), and no 「云母毛玻璃」
+  // Its look (islandTopLook, zhoupengjie/Wakuwaku#27): black by default in
+  // either mode (the iPhone's, its faint line, white words); no 「云母毛玻璃」
   // where Windows' acrylic cannot go under it (nothing else would blur).
   const ITOP_DEFAULT = {
     dark: { bg: '#000000', op: 100, blur: 0, edge: 'line', bare: false },
@@ -335,15 +304,13 @@
   let ilookMode = ''
   const winMode = () => (snap.winLook?.light ? 'light' : 'dark')
   const ilookFor = () => ilookMode || winMode()
-  // Her home's: the taskbar's, or the top of the screen's.
-  const isTop = () => snap.settings.display !== 'taskbar'
-  const ilookKey = () => (isTop() ? 'islandTopLook' : 'islandLook')
-  const ilookDefault = mode => (isTop() ? ITOP_DEFAULT : ILOOK_DEFAULT)[mode]
-  const ilookPresets = mode => (isTop() ? ITOP_PRESETS[mode].filter(([id]) => id !== 'mica' || snap.plate === true) : ILOOK_PRESETS[mode])
+  const ilookKey = () => 'islandTopLook'
+  const ilookDefault = mode => ITOP_DEFAULT[mode]
+  const ilookPresets = mode => ITOP_PRESETS[mode].filter(([id]) => id !== 'mica' || snap.plate === true)
   const ilookOf = mode => ({ ...ilookDefault(mode), ...(snap.settings[ilookKey()]?.[mode] || {}) })
   const sameLook = (a, b) => a.bg.toLowerCase() === b.bg.toLowerCase() && a.op === b.op && a.blur === b.blur && a.edge === b.edge && !!a.bare === !!b.bare
   const ilookPreset = mode => (ilookPresets(mode).find(([, p]) => sameLook(p, ilookOf(mode))) || ['custom'])[0]
-  const ilookName = (mode, id) => T(id === 'custom' ? 's.ilookCustom' : isTop() && id === 'black' ? 's.ilookP.top.black' : `s.ilookP.${mode}.${id}`)
+  const ilookName = (mode, id) => T(id === 'custom' ? 's.ilookCustom' : id === 'black' ? 's.ilookP.top.black' : `s.ilookP.${mode}.${id}`)
 
   // A mode's look kept (its default kept as none); while a slider moves,
   // only shown here, kept once it is let go.
@@ -410,38 +377,29 @@
     return fromHsl(h, s, darker ? lo : hi)
   }
 
-  // The island as the look makes it, on a strip over a desktop; big, it
-  // opens under the pointer (open, above the strip, the page has nothing
-  // behind it to blur: its ground alone, as on the taskbar; blurred where
-  // Windows' acrylic goes under it, island.js placePlate). At the top of
-  // the screen, a pill at the top of a desktop, opening down; blurred only
-  // by that acrylic, open or not.
+  // The island as the look makes it: a pill at the top of a desktop; big,
+  // it opens down under the pointer. Blurred only where Windows' acrylic
+  // goes under it (island.js placePlate), open or not.
   function ilookPreview(mode, look, big = false) {
     const [r, g, b] = [1, 3, 5].map(i => parseInt(look.bg.slice(i, i + 2), 16))
     // Its words, and the moods' colours, as light or dark as its ground is.
     const inkDark = inkDarkOn(look.bg)
     const moods = inkDark ? COLOR_DEEP : COLOR
     const ring = moods[snap.now?.mood] || moods.working
-    const top = isTop()
-    const line = top ? (inkDark ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.07)') : mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'
+    const line = inkDark ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.07)'
     const edge = look.edge === 'ring' ? `0 0 0 1.5px ${ring}, 0 0 12px ${ring}59` : look.edge === 'none' ? '0 0 0 0 transparent' : `0 0 0 1px ${line}`
     const plate = snap.plate === true && look.op < 100 && look.blur > 0
-    const blur = look.blur && (plate || !top) ? `blur(${look.blur}px) saturate(1.25)` : 'none'
+    const blur = look.blur && plate ? `blur(${look.blur}px) saturate(1.25)` : 'none'
     const style = `--pv-bg:rgba(${r},${g},${b},${look.op / 100});--pv-blur:${blur};--pv-edge:${edge};--pv-ring:${ring}`
     const more = big ? `<span class="more"><span>${esc(T('s.ilookSample2'))}</span><span>${esc(T('s.ilookSample3'))}</span></span>` : ''
-    return `<div class="ilook-pv ${mode}${inkDark ? ' ink-dark' : ''}${look.bare ? ' bare' : ''}${big ? ' big' : ''}${plate ? ' plate' : ''}${top ? ' top' : ''}" style="${style}"><span class="cap"><span class="top"><i class="face"></i><span class="w">${esc(T('s.ilookSample'))}</span><span class="t">1:42</span></span>${more}</span></div>`
+    return `<div class="ilook-pv ${mode}${inkDark ? ' ink-dark' : ''}${look.bare ? ' bare' : ''}${big ? ' big' : ''}${plate ? ' plate' : ''} top" style="${style}"><span class="cap"><span class="top"><i class="face"></i><span class="w">${esc(T('s.ilookSample'))}</span><span class="t">1:42</span></span>${more}</span></div>`
   }
 
   function ilookPanel() {
-    const s = snap.settings
     const mode = ilookFor()
     const look = ilookOf(mode)
     const active = ilookPreset(mode)
-    const top = isTop()
-    // On the black strip in the dark, she is part of it: none of this
-    // shows. At the top of the screen, its own look.
-    const isCapsule = (s.taskbarMaterial || 'clear') !== 'black' || winMode() === 'light'
-    const note = top ? T('s.ilookTop') : isCapsule ? '' : T('s.ilookBlack')
+    const note = T('s.ilookTop')
     const cards = ilookPresets(mode)
       .map(([id, p]) => `<button class="ilook-card${id === active ? ' on' : ''}" data-ilook-preset="${id}">${ilookPreview(mode, p)}<span>${esc(ilookName(mode, id))}</span></button>`)
       .join('')
@@ -450,9 +408,8 @@
       .join('')
     const picker = `<span class="ilook-sw">${swatches}<input type="color" class="swc-in" data-ilook="bg" value="${esc(look.bg)}" title="${esc(T('s.ilookPick'))}"></span>`
     const range = (key, min, max, unit) => `<span class="ilook-rng"><input type="range" class="rng" data-ilook="${key}" min="${min}" max="${max}" step="1" value="${look[key]}"><span class="rv">${look[key]}${unit}</span></span>`
-    // At the top no bare capsule, and a blur only where Windows' acrylic
-    // can go under the island.
-    const blurRow = top && snap.plate !== true ? '' : row(esc(T('s.ilookBlur')), esc(T(top ? 's.ilookBlurTopNote' : 's.ilookBlurNote')), range('blur', 0, 60, 'px'))
+    // A blur only where Windows' acrylic can go under the island.
+    const blurRow = snap.plate !== true ? '' : row(esc(T('s.ilookBlur')), esc(T('s.ilookBlurTopNote')), range('blur', 0, 60, 'px'))
     return `<div class="ilook">
         ${note ? `<div class="note">${esc(note)}</div>` : ''}
         <div class="ilook-top">${seg('ilookMode', [['dark', T('s.ilookDark')], ['light', T('s.ilookLight')]], mode)}<span class="grow"></span><button class="pbtn sm" data-ilook-reset ${sameLook(look, ilookDefault(mode)) ? 'disabled' : ''}>${esc(T('s.ilookReset'))}</button></div>
@@ -463,7 +420,6 @@
         ${row(esc(T('s.ilookOp')), '', range('op', 20, 100, '%'))}
         ${blurRow}
         ${row(esc(T('s.ilookEdge')), '', seg('ilookEdge', ['none', 'line', 'ring'].map(e => [e, T(`s.ilookEdge.${e}`)]), look.edge))}
-        ${top ? '' : row(esc(T('s.ilookBare')), esc(T('s.ilookBareNote')), sw('ilookBare', look.bare))}
       </div>`
   }
 
@@ -477,15 +433,6 @@
     ilookSave(mode, { ...ilookOf(mode), [key]: value }, keep)
   }
 
-  // The taskbar's layout (island.js tbLayout): a preset, or one dragged
-  // into shape on the strip itself (the button: the settings close for it).
-  function layoutRow() {
-    const preset = window.Island?.tbPreset?.() || 'win11'
-    const presets = ['win11', 'left', 'herRight'].map(p => [p, T(`s.layout.${p}`)])
-    const note = T(preset === 'custom' ? 's.layoutCustom' : 's.layoutNote')
-    return row(esc(T('s.taskbarLayout')), esc(note), `<span class="btns">${seg('taskbarLayout', presets, preset)}<button class="pbtn sm" data-tb-edit>${esc(T('s.layoutEdit'))}</button></span>`)
-  }
-
   // The fold's own row: how the island looks in Windows' mode now.
   function ilookRow() {
     const mode = winMode()
@@ -496,8 +443,7 @@
   function pageLook() {
     const s = snap.settings
     return `${sec(T('home.display'))}
-      ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div></div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
-      <div class="grp">${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
+      <div class="grp">${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${ilookRow()}</div>
       ${sec(T('s.her'))}<div class="grp">
         ${row(esc(T('menu.size')), '', seg('scale', SIZES.map(([name, scale]) => [scale, T(`menu.${name}`)]), s.scale))}
         ${row(esc(T('s.details')), esc(T('s.detailsNote')), sw('details', s.details !== false))}
@@ -833,12 +779,10 @@
     return failed[tool] ? 'failed' : 'none'
   }
 
-  // Windows' accent for the accent-filled buttons: its light shade on the
-  // dark settings, its dark one on the light (the taskbar's look, else
-  // Windows' defaults).
+  // Windows' default accent for the accent-filled buttons: its light shade
+  // on the dark settings, its dark one on the light.
   function accentButton() {
-    const pair = window.Island?.accent?.() || {}
-    return winMode() === 'light' ? `--acc:${pair.dark || '#0067c0'};--acc-ink:#fff` : `--acc:${pair.light || '#4cc2ff'};--acc-ink:#000`
+    return winMode() === 'light' ? '--acc:#0067c0;--acc-ink:#fff' : '--acc:#4cc2ff;--acc-ink:#000'
   }
 
   // One's button: its name, and under it how it stands; set up and
@@ -926,19 +870,6 @@
       </div>`
   }
 
-  // Her taskbar on the main display alone (no taskbar on the others), or
-  // on all of them (bars.rs); with one display, shown greyed (the appearance
-  // session's spec, as Windows' own "show my taskbar on all displays").
-  function displaysRow() {
-    const value = snap.settings.taskbarDisplays === 'all' ? 'all' : 'main'
-    const one = (snap.displayCount || 1) < 2
-    const note = one ? T('s.displaysOne') : T(value === 'all' ? 's.displaysAllNote' : 's.displaysMainNote')
-    const control = one
-      ? `<span class="seg off">${['main', 'all'].map(v => `<span class="${v === value ? 'on' : ''}">${esc(T(`s.displays.${v}`))}</span>`).join('')}</span>`
-      : seg('taskbarDisplays', ['main', 'all'].map(v => [v, T(`s.displays.${v}`)]), value)
-    return row(esc(T('s.taskbarDisplays')), esc(note), control)
-  }
-
   // General: the welcome (nothing connected yet), the sessions and the
   // quick switches, the alerts, startup and the language, her updates, her
   // crash reports, connecting (the plugin, the hooks) and what this is.
@@ -1023,12 +954,10 @@
     foot.querySelector('.ver').textContent = `v${snap.version}`
     tick()
     // The same height on every page, however much it holds: the head and
-    // the tabs stay where they are from one page to the next (on the
-    // taskbar it grows up from the strip, and a shorter page would take
-    // them down from under the pointer). Never taller than the screen, nor
-    // than the home keeps room for (the taskbar's): a page scrolls inside.
+    // the tabs stay where they are from one page to the next. Never taller
+    // than the screen: a page scrolls inside.
     const rest = layer.offsetHeight - body.offsetHeight
-    const most = window.Island?.settingsMax?.() ?? screen.availHeight - 56
+    const most = screen.availHeight - 56
     body.style.height = `${Math.max(160, Math.min(460, most - rest))}px`
     window.Island?.changed()
   }
@@ -1239,7 +1168,6 @@
       if (key === 'login') return window.pet.settings.login(!snap.loginAtStart).then(got => ((snap = got), draw()))
       // Crash reports: sent by themselves, or never (not asked again).
       if (key === 'crashReports') return patch({ crashReports: snap.crash?.mode === 'auto' ? 'off' : 'auto' })
-      if (key === 'ilookBare') return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), bare: !ilookOf(ilookFor()).bare })
       if (key.startsWith('notify.')) return patch({ notify: { ...s.notify, [key.slice(7)]: !s.notify?.[key.slice(7)] } })
       // A widget on or off.
       if (key.startsWith('w:')) {
@@ -1290,11 +1218,6 @@
     if (option) {
       const key = option.parentElement.dataset.seg
       const raw = option.dataset.value
-      if (key === 'taskbarLayout') {
-        // Its parts as the preset has them; the widgets put there kept.
-        const layout = window.Island?.tbWithPreset?.(raw)
-        return layout && patch({ taskbarLayout: layout })
-      }
       if (key === 'ilookMode') {
         ilookMode = raw === winMode() ? '' : raw
         return draw()
@@ -1307,7 +1230,7 @@
         gallery.items = []
         return loadGallery(false)
       }
-      const value = ['lang', 'islandWidth', 'taskbarMaterial', 'taskbarClearWhen', 'taskbarButtons', 'taskbarAlign', 'taskbarEdge', 'taskbarDisplays', 'updateFrom'].includes(key) ? raw : raw === 'seen' ? 'seen' : Number(raw)
+      const value = ['lang', 'islandWidth', 'updateFrom'].includes(key) ? raw : raw === 'seen' ? 'seen' : Number(raw)
       return patch({ [key]: value })
     }
     const tile = at('[data-tile]')
@@ -1318,11 +1241,6 @@
         return window.pet.settings.showPet(true).then(got => ((snap = got), draw()))
       }
       return patch({ [key]: !s[key] })
-    }
-    // The taskbar's layout dragged into shape on the strip: the settings make way.
-    if (at('[data-tb-edit]')) {
-      close('edit')
-      return window.Island?.editTaskbar?.()
     }
     // Her island's look: folded out or in, a preset, a ground, back to Windows' grey.
     if (at('[data-ilook-fold]')) {

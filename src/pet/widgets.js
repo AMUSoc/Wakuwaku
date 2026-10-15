@@ -149,84 +149,6 @@
       .map(row => `<span class="wrow">${row.map(cellHTML).join('')}</span>`)
       .join('')
 
-  // --- On the taskbar (island.js) -----------------------------------------------------
-  // The taskbar's layout (taskbarLayout) is three runs, { left, center,
-  // right }, of its parts by name ('start', 'clock', …) and of the widgets
-  // put there, each { id, type, of, size, name, icon }: type 'widget' (of: a
-  // widget's id), 'plugin' (of: a plugin's: its widgets, in turn), or a
-  // spacer: 'flex' (takes the room there is), 'gap', 'sep' (a line); size
-  // 'S' (its icon and value) or 'M' (its name over its value, as the clock
-  // has the date under the time). name and icon: as it was put there, for
-  // while it has nothing to say. settings.rs checks the same.
-  const ENTRY_TYPES = ['widget', 'plugin', 'flex', 'gap', 'sep']
-  const MAX_ENTRIES = 32
-  const isEntry = e =>
-    !!e &&
-    typeof e === 'object' &&
-    typeof e.id === 'string' &&
-    /^w[a-z0-9]{1,15}$/.test(e.id) &&
-    ENTRY_TYPES.includes(e.type) &&
-    (e.type === 'widget' || e.type === 'plugin' ? typeof e.of === 'string' && /^[a-z0-9_-]{1,40}$/.test(e.of) : e.of === undefined) &&
-    (e.size === undefined || e.size === 'S' || e.size === 'M') &&
-    (e.name === undefined || (typeof e.name === 'string' && [...e.name].length <= 40)) &&
-    (e.icon === undefined || (typeof e.icon === 'string' && e.icon in ICONS))
-  const isSource = e => e.type === 'widget' || e.type === 'plugin'
-  // A part by its name, a widget by its id.
-  const keyOf = item => (typeof item === 'string' ? item : item.id)
-
-  // A layout as kept, made whole: each of the parts once, and one missing
-  // (new since) where the default has it; each widget once, 32 at most.
-  function layoutOf(saved, parts, base) {
-    const seen = new Set()
-    let entries = 0
-    const keep = p => {
-      if (typeof p === 'string') return parts.includes(p) && !seen.has(p) && !!seen.add(p)
-      if (!isEntry(p) || seen.has(p.id) || entries >= MAX_ENTRIES) return false
-      entries++
-      return !!seen.add(p.id)
-    }
-    const run = k => (Array.isArray(saved?.[k]) ? saved[k] : []).filter(keep).map(p => (typeof p === 'string' ? p : { ...p }))
-    const out = { left: run('left'), center: run('center'), right: run('right') }
-    for (const [k, list] of Object.entries(base)) for (const p of list) if (!seen.has(p)) out[k].push(p)
-    return out
-  }
-
-  // Its parts alone: what a preset says.
-  const partsAlone = layout => Object.fromEntries(Object.entries(layout).map(([k, run]) => [k, run.filter(p => typeof p === 'string')]))
-
-  // A preset's parts, and the widgets where they were: in their run, after
-  // its parts (before them in the right run, not past the clock).
-  function withParts(preset, old) {
-    const out = {}
-    for (const k of ['left', 'center', 'right']) {
-      const mine = (Array.isArray(old?.[k]) ? old[k] : []).filter(p => typeof p !== 'string')
-      const parts = [...(preset[k] || [])]
-      out[k] = k === 'right' ? [...mine, ...parts] : [...parts, ...mine]
-    }
-    return out
-  }
-
-  // What a widget put there shows, of the widgets there are now: the one,
-  // or a plugin's.
-  const sourcesOf = (entry, all) => (entry.type === 'widget' ? all.filter(w => w.id === entry.of) : entry.type === 'plugin' ? all.filter(w => w.plugin === entry.of) : [])
-
-  // The widgets the layout shows (not to take their turns in the island too).
-  function shownOn(layout, all) {
-    const ids = new Set()
-    for (const run of Object.values(layout)) for (const e of run) if (typeof e !== 'string') for (const w of sourcesOf(e, all)) ids.add(w.id)
-    return ids
-  }
-
-  // Its name: a plugin's, a built-in widget's, a spacer's; another widget's
-  // label (as it was put there, when gone).
-  function nameOf(lang, entry, all = [], detailed = true) {
-    if (entry.type === 'plugin') return render(lang, { key: `w.ex.${entry.of}` })
-    if (entry.type !== 'widget') return render(lang, { key: `taskbar.w.${entry.type}` })
-    const w = all.find(x => x.id === entry.of)
-    if (w) return words(lang, w, detailed).label || render(lang, { key: 'taskbar.w.widget' })
-    return entry.name || render(lang, { key: 'taskbar.w.widget' })
-  }
-
   const api = {
     ICONS,
     icon,
@@ -239,16 +161,6 @@
     shareOf,
     glyphOf,
     deepen,
-    ENTRY_TYPES,
-    isEntry,
-    isSource,
-    keyOf,
-    layoutOf,
-    partsAlone,
-    withParts,
-    sourcesOf,
-    shownOn,
-    nameOf,
   }
 
   if (typeof module !== 'undefined' && module.exports) {

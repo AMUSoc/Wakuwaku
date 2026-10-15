@@ -32,33 +32,15 @@ pub enum Over {
     Home,
 }
 
-// The menu, over the tray, her or her home. Over the taskbar (her home as
-// the taskbar): what a taskbar's right press is for (do not disturb, the
-// settings, Windows' own, quit); hers (pets, size, her home…) are in the
-// settings, and on her.
+// The menu, over the tray, her or her home.
 pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
     let app = &sh.app;
     let lang = sh.lang();
     let t = |key: &str| i18n::t(lang, key);
     let settings = sh.settings.lock().unwrap().clone();
     let flag = |key: &str| settings.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
-    let home = sh.home();
     let is_tray = over == Over::Tray;
     let menu = Menu::new(app)?;
-
-    if over == Over::Home && home == "taskbar" {
-        menu.append(&CheckMenuItem::with_id(app, "dnd", t("menu.dnd"), true, flag("dnd"), None::<&str>)?)?;
-        menu.append(&MenuItem::with_id(app, "settings", t("menu.settings"), true, None::<&str>)?)?;
-        menu.append(&MenuItem::with_id(app, "editTaskbar", t("menu.editTaskbar"), true, None::<&str>)?)?;
-        menu.append(&PredefinedMenuItem::separator(app)?)?;
-        menu.append(&MenuItem::with_id(app, "taskManager", t("menu.taskManager"), true, None::<&str>)?)?;
-        menu.append(&MenuItem::with_id(app, "winSettings", t("menu.winSettings"), true, None::<&str>)?)?;
-        menu.append(&MenuItem::with_id(app, "controlPanel", t("menu.controlPanel"), true, None::<&str>)?)?;
-        menu.append(&MenuItem::with_id(app, "deviceManager", t("menu.deviceManager"), true, None::<&str>)?)?;
-        menu.append(&PredefinedMenuItem::separator(app)?)?;
-        menu.append(&MenuItem::with_id(app, "quit", t("menu.quit"), true, None::<&str>)?)?;
-        return Ok(menu);
-    }
 
     if is_tray {
         let label = if sh.is_visible() { t("menu.hide") } else { t("menu.show") };
@@ -94,45 +76,9 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&CheckMenuItem::with_id(app, "dnd", t("menu.dnd"), true, flag("dnd"), None::<&str>)?)?;
     menu.append(&MenuItem::with_id(app, "settings", t("menu.settings"), true, None::<&str>)?)?;
-    // In place of Windows' taskbar, the way to Windows' own settings too.
-    if home == "taskbar" {
-        menu.append(&MenuItem::with_id(app, "editTaskbar", t("menu.editTaskbar"), true, None::<&str>)?)?;
-        menu.append(&MenuItem::with_id(app, "taskManager", t("menu.taskManager"), true, None::<&str>)?)?;
-        menu.append(&MenuItem::with_id(app, "winSettings", t("menu.winSettings"), true, None::<&str>)?)?;
-        menu.append(&MenuItem::with_id(app, "controlPanel", t("menu.controlPanel"), true, None::<&str>)?)?;
-        menu.append(&MenuItem::with_id(app, "deviceManager", t("menu.deviceManager"), true, None::<&str>)?)?;
-    }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(app, "quit", t("menu.quit"), true, None::<&str>)?)?;
     Ok(menu)
-}
-
-// A right press on the volume, the network or the clock of her taskbar:
-// the menu Windows' own taskbar has there (SystemTray.dll, read
-// 2026-10-14), its items in its order and words, a native menu as hers on
-// the strip is; each opens what Windows' opens (taskbar.rs open). None for
-// another part: hers.
-pub fn part_menu(sh: &Shared, part: &str) -> Option<tauri::Result<Menu<Wry>>> {
-    let items: &[&str] = match part {
-        "volume" => &["soundFix", "-", "mixer", "sound"],
-        "network" => &["netFix", "-", "network"],
-        "clock" => &["dateTime", "notifySettings"],
-        _ => return None,
-    };
-    let app = &sh.app;
-    let lang = sh.lang();
-    let build = || -> tauri::Result<Menu<Wry>> {
-        let menu = Menu::new(app)?;
-        for item in items {
-            if *item == "-" {
-                menu.append(&PredefinedMenuItem::separator(app)?)?;
-            } else {
-                menu.append(&MenuItem::with_id(app, format!("win:{item}"), i18n::t(lang, &format!("menu.{item}")), true, None::<&str>)?)?;
-            }
-        }
-        Ok(menu)
-    };
-    Some(build())
 }
 
 pub fn on_menu(sh: &Arc<Shared>, id: &str) {
@@ -142,23 +88,6 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
         "out" => crate::set_out(sh, !sh.flag("out")),
         "corner" => crate::come_home(sh),
         "settings" => crate::island::open_settings(sh, None),
-        // The taskbar's parts dragged about, on the strip itself (island.js).
-        "editTaskbar" => {
-            let _ = sh.app.emit_to("island", "taskbar:edit", ());
-        }
-        "winSettings" => {
-            crate::tasks::launch("ms-settings:");
-        }
-        // Windows' Task Manager, as its own taskbar's menu has it first.
-        "taskManager" => {
-            crate::tasks::launch("taskmgr.exe");
-        }
-        "controlPanel" => {
-            crate::tasks::launch("control.exe");
-        }
-        "deviceManager" => {
-            crate::tasks::launch("devmgmt.msc");
-        }
         // Quit by the person: no session's hook starts her again until she
         // is opened (data.rs mark_quit).
         "quit" => {
@@ -166,11 +95,7 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
             sh.quit();
         }
         _ => {
-            if let Some(what) = id.strip_prefix("win:") {
-                crate::taskbar::taskbar_open(what.to_string());
-            } else if let Some(home) = id.strip_prefix("display:") {
-                crate::set_display(sh, home);
-            } else if let Some(pet_id) = id.strip_prefix("pet:") {
+            if let Some(pet_id) = id.strip_prefix("pet:") {
                 sh.change(json!({ "pet": pet_id }));
             } else if let Some(name) = id.strip_prefix("size:") {
                 if let Some((_, scale)) = data::SCALES.iter().find(|(n, _)| *n == name) {

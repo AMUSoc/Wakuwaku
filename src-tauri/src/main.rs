@@ -65,7 +65,6 @@ mod settings;
 mod shell;
 mod state;
 mod systray;
-mod taskbar;
 mod tasks;
 mod tokens;
 mod tray;
@@ -204,9 +203,6 @@ impl Shared {
             self.log(&format!("quiet: {quiet} (efficiency mode set: {eco}; for {webview_eco} of WebView2's processes; memory {} for {} pages)", if quiet { "low" } else { "normal" }, windows.len()));
             self.to_pages("pet:quiet", json!({ "on": quiet }));
             wake_monitor();
-            if !quiet {
-                taskbar::wake();
-            }
         }
         quiet
     }
@@ -294,11 +290,8 @@ impl Shared {
         // Whether a blur of what is behind the island can be put under it
         // (backplate.rs): Windows 11, transparency effects on.
         now["plate"] = json!(backplate::available());
-        // Windows' mode, for her island's look at the top of the screen (the
-        // taskbar hears it from taskbar.rs, taskbar:look).
-        if self.home() != "taskbar" {
-            now["winLight"] = json!(wallpaper::look().0);
-        }
+        // Windows' mode, for her island's look at the top of the screen.
+        now["winLight"] = json!(wallpaper::look().0);
         // The widgets that have something to say: those on take their turns
         // in the island while nothing needs you; any may be on the taskbar.
         now["widgets"] = self.widgets_said();
@@ -347,16 +340,9 @@ impl Shared {
 
     // The prompts waiting changed.
     pub fn push_asks(&self) {
-        let (views, none) = {
-            let asks = self.asks.lock().unwrap();
-            (asks.views(), asks.is_empty())
-        };
+        let views = self.asks.lock().unwrap().views();
         self.to_pages("pet:asks", views);
         self.push_settings();
-        // Her island risen for them goes once they are answered.
-        if none {
-            island::asks_answered(&shared(&self.app));
-        }
     }
 
     // The open settings follow what happens, a few times a second at most.
@@ -410,10 +396,9 @@ impl Shared {
         !self.list_setting("widgetsOff").iter().any(|o| o == id)
     }
 
-    // On in the island, or put on the taskbar (taskbarLayout) while she is
-    // the taskbar: a built-in one is worked out then.
+    // On in the island: a built-in one is worked out then.
     pub fn is_widget_wanted(&self, id: &str) -> bool {
-        self.is_widget_on(id) || (self.setting("display") == "taskbar" && settings::is_on_taskbar(&self.setting("taskbarLayout"), id))
+        self.is_widget_on(id)
     }
 
     // The widgets with something to say, each saying whether it is on.
@@ -502,7 +487,7 @@ impl Shared {
 
     pub fn change(self: &Arc<Self>, patch: Value) {
         let Value::Object(patch) = patch else { return };
-        let touches_visibility = ["dnd", "display", "out", "hideInFullscreen", "taskbarEdge", "taskbarDisplays"].iter().any(|k| patch.contains_key(*k));
+        let touches_visibility = ["dnd", "display", "out", "hideInFullscreen"].iter().any(|k| patch.contains_key(*k));
         let touches_top = ["settingsPin", "settingsTop"].iter().any(|k| patch.contains_key(*k));
         let touches_monitor = ["monitor", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
         {
@@ -533,7 +518,7 @@ impl Shared {
     // logged for 10 s after a change: asked how, and what it saw.
     pub fn look_fullscreen(self: &Arc<Self>, asked: Option<Instant>) {
         static CHANGED: Mutex<Option<Instant>> = Mutex::new(None);
-        let watching = fullscreen::AVAILABLE && (self.flag("hideInFullscreen") || self.home() == "taskbar");
+        let watching = fullscreen::AVAILABLE && self.flag("hideInFullscreen");
         let own = self.own.lock().unwrap().clone();
         let cover = if watching { fullscreen::covering(&own) } else { Some(None) };
         let on = self.displays();
@@ -597,9 +582,7 @@ impl Shared {
     }
 
     // Quit (the menu's Quit, POST /quit), never taking longer than 8 s: a
-    // quit once hung (80 s, Windows' taskbar with it, 2026-10-11). Ended
-    // then, whatever is stuck; the guard gives Windows' taskbar back once
-    // she is gone.
+    // quit once hung (80 s, 2026-10-11). Ended then, whatever is stuck.
     pub fn quit(self: &Arc<Self>) {
         if QUITTING.swap(true, Ordering::SeqCst) {
             return;
@@ -611,14 +594,9 @@ impl Shared {
             watched.log("quitting: not done in 8 s: ended");
             end_now();
         });
-        // The handover first (the taskbar's dust over Windows' shown again,
-        // two seconds at most), off the main thread: its events reach the
-        // page through it.
+        // Off the main thread: what the exit waits on reaches the page through it.
         let going = self.clone();
-        std::thread::spawn(move || {
-            island::handoff_out(&going);
-            going.app.exit(0);
-        });
+        std::thread::spawn(move || going.app.exit(0));
     }
 
     pub fn is_shuffling(&self) -> bool {
@@ -748,12 +726,11 @@ async fn pet_drag_end(app: AppHandle, window: WebviewWindow) {
     }
 }
 
-// Her menu; on the volume, the network or the clock of her taskbar (part),
-// the one Windows' own taskbar has there (tray.rs part_menu).
+// Her menu.
 #[tauri::command]
-async fn pet_menu(app: AppHandle, window: WebviewWindow, part: Option<String>) {
+async fn pet_menu(app: AppHandle, window: WebviewWindow) {
     let sh = shared(&app);
-    let menu = part.as_deref().and_then(|p| tray::part_menu(&sh, p)).unwrap_or_else(|| tray::menu(&sh, if is_island(&window) { tray::Over::Home } else { tray::Over::Her }));
+    let menu = tray::menu(&sh, if is_island(&window) { tray::Over::Home } else { tray::Over::Her });
     if let Ok(menu) = menu {
         // A Windows menu closes at once unless its window can come to the
         // front, which these cannot (they never take focus): for the menu, it may.
@@ -844,19 +821,6 @@ async fn pet_walk_stop(app: AppHandle) {
 #[tauri::command]
 async fn island_holding(app: AppHandle, is_holding: bool) {
     island::set_holding(&shared(&app), is_holding);
-}
-
-// The handover with Windows' taskbar: the page's answers (covered, bare, done).
-#[tauri::command]
-fn taskbar_handoff(what: String) {
-    island::handoff_answer(&what);
-}
-
-// Where the page laid her island out on the taskbar: her seat, along the
-// strip from its start (x on a bottom or top bar, y on a side bar).
-#[tauri::command]
-async fn island_seat(app: AppHandle, x: f64) {
-    island::set_seat(&shared(&app), x);
 }
 
 // Under her island, a blur of what is behind it (backplate.rs): where the
@@ -1214,7 +1178,6 @@ fn main() {
             pet_walk,
             pet_walk_stop,
             island_holding,
-            island_seat,
             island_plate,
             island_release,
             island_drop,
@@ -1235,24 +1198,6 @@ fn main() {
             settings::settings_open_site,
             settings::settings_update,
             settings::settings_crash,
-            taskbar::taskbar_tray,
-            taskbar::taskbar_open,
-            taskbar::taskbar_volume,
-            taskbar::taskbar_clock_tip,
-            taskbar::taskbar_end_task,
-            taskbar::taskbar_inputs,
-            taskbar::taskbar_input,
-            taskbar::taskbar_battery_font,
-            taskbar_handoff,
-            taskbar::taskbar_tray_rects,
-            taskbar::taskbar_window,
-            taskbar::taskbar_windows,
-            taskbar::taskbar_held,
-            taskbar::taskbar_window_menu,
-            taskbar::taskbar_watch_presses,
-            taskbar::taskbar_tray_pin,
-            taskbar::taskbar_app,
-            taskbar::taskbar_thumbs,
         ])
         .on_menu_event(|app, event| tray::on_menu(&shared(app), event.id().as_ref()))
         .setup(move |app| {
@@ -1307,7 +1252,19 @@ fn main() {
             app.manage(sh.clone());
             sh.log(&format!("up on port {}, data in {}", sh.port, sh.dir.display()));
             sh.log(&format!("displays: {}", sh.screens().describe()));
-            taskbar::recover(&sh);
+            // Windows' taskbar and the desktop's icons, should an older her
+            // have left them put away or moved (shell.rs, icons.rs).
+            if shell::recover(&sh.dir.join("taskbar.json")) {
+                sh.log("Windows' taskbar was left put away: given back");
+            }
+            if icons::file(&sh.dir).exists() {
+                let (dir, log) = (sh.dir.clone(), sh.clone());
+                std::thread::spawn(move || {
+                    for line in icons::given_back(&dir) {
+                        log.log(&line);
+                    }
+                });
+            }
 
             pet::create(&sh)?;
             // Windows' own taskbar's pinned programs, once: hers seeded from
@@ -1316,10 +1273,8 @@ fn main() {
                 let first = sh.clone();
                 std::thread::spawn(move || pins::take_from_windows(&first));
             }
-            // An app full screen as she starts, known before her home first
-            // shows: the taskbar takes its strip only once it can show (one
-            // taken with its window hidden keeps no room).
-            if fullscreen::AVAILABLE && (sh.flag("hideInFullscreen") || sh.home() == "taskbar") {
+            // An app full screen as she starts, known before her home first shows.
+            if fullscreen::AVAILABLE && sh.flag("hideInFullscreen") {
                 sh.by_fullscreen.store(fullscreen::check(&[], &sh.displays()) == Some(true), Ordering::SeqCst);
             }
             island::apply_visibility(&sh);
@@ -1523,13 +1478,11 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while running wakuwaku")
-        // Quitting: the bar's strip back to the other windows, and the
-        // plugins she ran stopped.
+        // Quitting: the plugins she ran stopped.
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 let sh = shared(app);
-                sh.log("quitting: the bar given back, and the plugins stopped");
-                island::release_bar(&sh);
+                sh.log("quitting: the plugins stopped");
                 scripts::stop_all(&sh);
                 sh.log("quitting: done");
             }

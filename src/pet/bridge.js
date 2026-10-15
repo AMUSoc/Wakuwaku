@@ -63,9 +63,8 @@
     },
     dragStart: () => send('pet_drag_start'),
     dragEnd: () => send('pet_drag_end'),
-    // Her menu; on the volume, the network or the clock of her taskbar
-    // (part), the one Windows' own taskbar has there.
-    menu: part => send('pet_menu', { part: part || null }),
+    // Her menu.
+    menu: () => send('pet_menu'),
     doubleClick: () => send('pet_double_click'),
     // Out of the queue: it answers when the walk is over.
     walk: (dx, ms) => invoke('pet_walk', { dx, ms }).catch(() => false),
@@ -75,8 +74,6 @@
     releaseHer: offset => send('island_release', { offset: offset || {} }),
     dropHer: () => send('island_drop'),
     holding: isHolding => send('island_holding', { isHolding: isHolding === true }),
-    // Her seat on the taskbar, where the page has laid her island out (logical px from its left).
-    seat: x => send('island_seat', { x: Number(x) || 0 }),
     // A blur of what is behind her island, under it (backplate.rs): where
     // the island is ({ x, y, width, height, radius, vw, vh, dark }), faded
     // in over fade ms; none, faded out.
@@ -84,8 +81,6 @@
     onReach: on('island:reach'),
     onAbsorb: on('island:absorb'),
     onLanded: on('island:landed'),
-    // Up over an app full screen for the prompts alone ({ on }, island.rs over_full): her island only.
-    onOverFull: on('island:over-full'),
     // A maximized window on her display, at the top of the screen ({ on }, island.rs look_over_max).
     onOverMax: on('island:over-max'),
     // The settings in the island (settings.js): open them here or from
@@ -98,92 +93,17 @@
     settingsClosed: () => send('settings_closed'),
     // To a session's window; true when there was one to go to.
     jump: id => invoke('session_jump', { id: String(id || '') }).catch(() => false),
-    // The taskbar (taskbar.rs): what its own buttons open (start, search,
-    // tasks, widgets, desktop, quick, notifications), a press on a tray icon
-    // (leftDown, leftUp, rightDown, rightUp, double, move, in, out; in order,
-    // so a press never overtakes the one before), where the page drew the
-    // tray's icons; the icons as they change.
-    taskbar: {
-      open: what => invoke('taskbar_open', { what: String(what) }).catch(() => false),
-      // The volume that many steps up (down below 0), by Windows' volume keys.
-      volume: steps => invoke('taskbar_volume', { steps: Math.round(Number(steps) || 0) }).catch(() => false),
-      // The clock's tip as Windows' own has it: the date in full, and
-      // Windows' additional clocks (clock.rs).
-      clockTip: () => invoke('taskbar_clock_tip').catch(() => ''),
-      // Whether Windows' End task is on now (Settings → For developers).
-      endTask: () => invoke('taskbar_end_task').catch(() => false),
-      // The input methods to pick from ([{ id, lang, langName, name, icon, own,
-      // current }], inputs.rs), and one of them switched to for the window in front.
-      inputs: () => invoke('taskbar_inputs').catch(() => []),
-      input: id => invoke('taskbar_input', { id: String(id) }).catch(() => false),
-      // Windows' own battery font (an ArrayBuffer; empty where Windows has none).
-      batteryFont: () => invoke('taskbar_battery_font').catch(() => null),
-      tray: (key, press) => send('taskbar_tray', { key: Number(key), press: String(press) }),
-      trayRects: rects => send('taskbar_tray_rects', { rects }),
-      // A press on a window's button: press (to the front, or minimized),
-      // front (to the front alone: the next of a program's windows), drag (to
-      // the front, a file held over its button),
-      // close, end (its process ended, as Windows' End task does).
-      window: (id, what) => invoke('taskbar_window', { id: Number(id), what: String(what) }).catch(() => false),
-      // A program's windows all to the front, or all minimized when one is in front.
-      windows: ids => invoke('taskbar_windows', { ids: (ids || []).map(Number) }).catch(() => false),
-      // Shift and Ctrl held now, as Windows has them ({ shift, ctrl }; null
-      // if it could not say): read at a press on a program's button.
-      held: () => invoke('taskbar_held').catch(() => null),
-      // A window's own menu, or one for all of a program's windows, at the pointer.
-      windowMenu: ids => invoke('taskbar_window_menu', { ids: (ids || []).map(Number) }).catch(() => false),
-      // Presses anywhere told back (onPress) while something is open that closes on one.
-      watch: on => send('taskbar_watch_presses', { on: on === true }),
-      // A tray icon kept out on the taskbar, or folded away (its name,
-      // systray.rs; null: where it was), and the tray's order (names) after it.
-      trayPin: (name, pinned, order) =>
-        send('taskbar_tray_pin', { name: String(name), pinned: typeof pinned === 'boolean' ? pinned : null, order: Array.isArray(order) ? order.map(String) : null }),
-      // A program's button: launch (it, or another window of it), admin (run
-      // as administrator), pin, unpin.
-      app: (path, what, id) => invoke('taskbar_app', { path: String(path), what: String(what), id: id ? String(id) : null }).catch(() => false),
-      // Room for windows' live pictures in the page: [[window, x, y, w, h]], or none.
-      thumbs: items => send('taskbar_thumbs', { items }),
-      // The handover with Windows' own taskbar (handoff.js): its picture is
-      // over it (covered), hers is bare for Windows' to show under it (bare),
-      // the dust has settled (done). Out of the queue: the program may be
-      // waiting on it inside an earlier call (pet_ready waits for covered).
-      handoff: what => invoke('taskbar_handoff', { what: String(what) }).catch(() => {}),
-    },
-    // The handover's steps ({ step: in, picture } with Windows' strip as a
-    // picture, { step: go } once Windows' is hidden under it, { step: out }).
-    onHandoff: on('taskbar:handoff'),
-    onTray: on('taskbar:tray'),
-    // The strip's thickness as it lies on the screen (physical px): { thick }.
-    onStrip: on('taskbar:strip'),
     // A Mac's screen top, the island over its menu bar (notch.rs):
     // { height, notch } in px, the notch's width 0 without one.
     onTop: on('island:top'),
     // Her tray icon clicked on a Mac: the island in the notch drops open, or
     // goes back (island.js peek).
     onPeek: on('island:peek'),
-    // The windows' buttons as they change ({ id, title, exe, png, front, min, flash, sessions }).
-    onWindows: on('taskbar:windows'),
-    // The keyboard as it changes ({ lang, native, caps, ime: { id, name, lang,
-    // icon, own, mode: { tip, glyph, icon, off } } }), and the input methods'
-    // icons the keys name ({ key: png }), each sent once.
-    onKeys: on('taskbar:keys'),
-    onImeIcons: on('taskbar:imeIcons'),
-    onPress: on('taskbar:press'),
     // A file dragged from another program over the window: (type, at) with
     // type enter, over, leave or drop, at where it is in the page's px (none
     // once it has left). Tauri's drop handler has the window's drags, so the
     // page hears no dragenter of its own.
     onFileDrag: fn => fileDrags.push(fn),
-    // The desktop's picture under the strip, for its Mica ({ url, position,
-    // color, mon, screen, sf }; mica.js).
-    onWallpaper: on('taskbar:wallpaper'),
-    // Windows' look ({ mode: dark | light, accent: { base, light, dark } }),
-    // for the taskbar to be as Windows' own is.
-    onLook: on('taskbar:look'),
-    // The taskbar's layout to be edited by dragging (its menu).
-    onTaskbarEdit: on('taskbar:edit'),
-    // Windows' Start menu opened or closed ({ open }), for the Start button.
-    onStart: on('taskbar:start'),
     settings: {
       get: () => invoke('settings_get'),
       set: patch => invoke('settings_set', { patch }),
