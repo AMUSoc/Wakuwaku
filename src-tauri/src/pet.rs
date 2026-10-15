@@ -280,6 +280,39 @@ pub fn create(sh: &Shared, agent: &str) -> tauri::Result<()> {
     Ok(())
 }
 
+// Whether an agent's pet has its window.
+pub fn is_made(sh: &Shared, agent: &str) -> bool {
+    sh.pets.of(agent).lock().unwrap().made
+}
+
+// Carried out of the island right now.
+pub fn is_carried(sh: &Shared, agent: &str) -> bool {
+    sh.pets.of(agent).lock().unwrap().drag.as_ref().is_some_and(|d| d.carried)
+}
+
+// Out on the desktop: its window made; home: closed, its state let go (its
+// spot is kept in the settings). Not while it is carried or flying home.
+pub fn open_or_close(sh: &Arc<Shared>, agent: &str) {
+    let out = sh.is_out(agent);
+    let (made, busy) = {
+        let w = sh.pets.of(agent).lock().unwrap();
+        (w.made, w.drag.is_some() || w.flying)
+    };
+    if out && !made {
+        sh.log(&format!("pet: {agent}'s window made"));
+        if let Err(e) = create(sh, agent) {
+            sh.log(&format!("pet: {agent}'s window not made: {e}"));
+        }
+    } else if !out && made && !busy {
+        sh.log(&format!("pet: {agent}'s window closed"));
+        if let Some(win) = window(sh, agent) {
+            sh.disown_window(&win);
+            let _ = win.destroy();
+        }
+        *sh.pets.of(agent).lock().unwrap() = Win::default();
+    }
+}
+
 // Her page has its listeners up: draw and show (her home says hello).
 pub fn ready(sh: &Shared, agent: &str) {
     sh.log("pet: page ready");
@@ -497,7 +530,7 @@ pub fn poll(sh: &Arc<Shared>, agent: &str, cursor: (i32, i32)) -> u64 {
     if !sh.pets.of(agent).lock().unwrap().made {
         return u64::MAX;
     }
-    let is_idle = sh.pet.lock().unwrap().mood(now_ms()) == "idle";
+    let is_idle = sh.pet.lock().unwrap().mood_for(agent, now_ms()) == "idle";
     let look = sh.flag("look");
     let scale = scale(sh);
     let down = primary_down();
@@ -623,7 +656,7 @@ pub fn hover(sh: &Shared, agent: &str, is_over: bool) {
     set_ignore(sh, agent, ignore);
     if is_over {
         let shown = {
-            let now = sh.pet.lock().unwrap().get(now_ms());
+            let now = sh.pet.lock().unwrap().get_for(agent, now_ms());
             let id = now["id"].as_str().unwrap_or("");
             (now["mood"] != "idle" && now["jump"] == true && !id.is_empty()).then(|| id.to_string())
         };
@@ -632,7 +665,7 @@ pub fn hover(sh: &Shared, agent: &str, is_over: bool) {
         }
     }
     // The pointer on her: you have seen what she had to say.
-    if is_over && sh.pet.lock().unwrap().seen(now_ms(), sh.hold()) {
+    if is_over && sh.pet.lock().unwrap().seen_for(agent, now_ms(), sh.hold()) {
         sh.redraw();
     }
 }
@@ -689,7 +722,7 @@ pub fn let_go(sh: &Arc<Shared>, agent: &str) {
     }
     // A click: a jump. Carried out of the island: she lands with one.
     if !drag.moved || drag.carried {
-        sh.apply(&json!({ "react": "jump" }));
+        let _ = sh.app.emit_to(label(agent), "pet:react", json!({ "react": "jump" }));
     }
     // A click, and no second one after it: to the window of the session she
     // was showing (jump.rs).
@@ -778,6 +811,14 @@ fn fly_home(sh: &Arc<Shared>, agent: &str) {
 // comes under the cursor, her middle where the drop had it (offset, logical
 // px from the cursor), and follows it.
 pub fn carry(sh: &Arc<Shared>, agent: &str, offset: &Value) {
+    // Its window made now if it has none: shown under the cursor once its
+    // page is up (ready), carried meanwhile.
+    if !is_made(sh, agent) {
+        if let Err(e) = create(sh, agent) {
+            sh.log(&format!("pet: {agent}'s window not made: {e}"));
+            return;
+        }
+    }
     let Some(cursor) = crate::screen::cursor(sh, sf(sh, agent)) else { return };
     let scale = scale(sh);
     let p = {

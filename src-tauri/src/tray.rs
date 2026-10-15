@@ -28,7 +28,8 @@ fn face(mood: &str) -> &'static [u8] {
 #[derive(Clone, Copy, PartialEq)]
 pub enum Over {
     Tray,
-    Her,
+    // An agent's pet on the desktop.
+    Her(&'static str),
     Home,
 }
 
@@ -69,10 +70,19 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
     for key in ["walk", "look"] {
         menu.append(&CheckMenuItem::with_id(app, key, t(&format!("menu.{key}")), true, flag(key), None::<&str>)?)?;
     }
-    // Let her out onto the desktop, or call her back home.
-    let label = if sh.is_out(sh.island_agent()) { t("menu.callBack") } else { t("menu.letOut") };
-    menu.append(&MenuItem::with_id(app, "out", label, true, None::<&str>)?)?;
-    menu.append(&MenuItem::with_id(app, "corner", t("menu.backToCorner"), true, None::<&str>)?)?;
+    // Let a pet out onto the desktop, or call it back home: on a pet, that
+    // one; elsewhere the island's agent's.
+    let agent = match over {
+        Over::Her(agent) => agent,
+        _ => sh.island_agent(),
+    };
+    let label = if sh.is_out(agent) { t("menu.callBack") } else { t("menu.letOut") };
+    menu.append(&MenuItem::with_id(app, format!("out:{agent}"), label, true, None::<&str>)?)?;
+    let corner = match over {
+        Over::Her(agent) => format!("corner:{agent}"),
+        _ => "corner".into(),
+    };
+    menu.append(&MenuItem::with_id(app, corner, t("menu.backToCorner"), true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&CheckMenuItem::with_id(app, "dnd", t("menu.dnd"), true, flag("dnd"), None::<&str>)?)?;
     menu.append(&MenuItem::with_id(app, "settings", t("menu.settings"), true, None::<&str>)?)?;
@@ -85,10 +95,7 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
     match id {
         "toggle" => sh.set_hidden(sh.is_visible()),
         "walk" | "look" | "dnd" => sh.change(json!({ id: !sh.flag(id) })),
-        "out" => {
-            let agent = sh.island_agent();
-            crate::set_out(sh, agent, !sh.is_out(agent));
-        }
+        // The menu's own items (out:<agent>, corner:<agent>) below.
         "corner" => crate::come_home(sh),
         "settings" => crate::island::open_settings(sh, None),
         // Quit by the person: no session's hook starts her again until she
@@ -98,7 +105,11 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
             sh.quit();
         }
         _ => {
-            if let Some(pet_id) = id.strip_prefix("pet:") {
+            if let Some(agent) = id.strip_prefix("out:") {
+                crate::set_out(sh, agent, !sh.is_out(agent));
+            } else if let Some(agent) = id.strip_prefix("corner:") {
+                crate::pet::come_home(sh, agent);
+            } else if let Some(pet_id) = id.strip_prefix("pet:") {
                 sh.change(json!({ "pet": pet_id }));
             } else if let Some(name) = id.strip_prefix("size:") {
                 if let Some((_, scale)) = data::SCALES.iter().find(|(n, _)| *n == name) {

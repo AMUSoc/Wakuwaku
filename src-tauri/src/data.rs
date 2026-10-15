@@ -360,8 +360,13 @@ pub fn agent_key(session: &Value) -> Option<&str> {
 // The pet a session is drawn as: its agent's own (agentPets), else the
 // pet set; one not among those found, the next.
 pub fn pet_for<'a>(settings: &Map<String, Value>, session: &Value, found: &'a [PetInfo]) -> Option<&'a PetInfo> {
+    pet_of(settings, agent_key(session), found)
+}
+
+// An agent's pet (none: the pet set), as its window on the desktop draws it.
+pub fn pet_of<'a>(settings: &Map<String, Value>, agent: Option<&str>, found: &'a [PetInfo]) -> Option<&'a PetInfo> {
     let find = |id: Option<&str>| id.and_then(|id| found.iter().find(|p| p.id == id));
-    let own = agent_key(session).and_then(|agent| settings.get("agentPets")?.get(agent)?.as_str());
+    let own = agent.and_then(|agent| settings.get("agentPets")?.get(agent)?.as_str());
     find(own).or_else(|| find(settings.get("pet").and_then(Value::as_str)))
 }
 

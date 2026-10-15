@@ -157,9 +157,10 @@ impl Shared {
 
     // The agent whose pet the island stands for: the session it shows (none:
     // Claude's). Its pet is let out and called back from the island, the
-    // tray and the settings. Claude's alone so far (multi: step 4).
+    // tray and the settings.
     pub fn island_agent(&self) -> &'static str {
-        "claude"
+        let now = self.pet.lock().unwrap().get(now_ms());
+        data::agent_key(&now).and_then(|agent| data::AGENTS.into_iter().find(|a| *a == agent)).unwrap_or("claude")
     }
 
     pub fn lang(&self) -> &'static str {
@@ -256,6 +257,14 @@ impl Shared {
         }
     }
 
+    // A window of hers closed (a pet called home): no longer hers.
+    pub fn disown_window(&self, _win: &WebviewWindow) {
+        #[cfg(windows)]
+        if let Ok(hwnd) = _win.hwnd() {
+            self.own.lock().unwrap().retain(|h| *h != hwnd.0 as isize);
+        }
+    }
+
     // A line in recent.log always (what a crash report tells of what came
     // before, crash.rs), and in debug.log while debugging.
     pub fn log(&self, line: &str) {
@@ -329,25 +338,51 @@ impl Shared {
         now
     }
 
-    // Everything the pages draw from, for an agent's pet window as it shows.
-    pub fn send_to_pet(&self, agent: &str) {
-        let _ = self.app.emit_to(pet::label(agent), "pet:update", self.payload());
+    // Everything an agent's pet on the desktop draws from: the island's, but
+    // of its agent's sessions alone (state.rs get_for), as its agent's pet.
+    pub fn pet_payload(&self, agent: &str, island: &Value) -> Value {
+        let (mut now, list) = {
+            let pet = self.pet.lock().unwrap();
+            (pet.get_for(agent, now_ms()), pet.list_for(agent))
+        };
+        for key in ["config", "lang", "quiet", "plate", "winLight", "widgets", "unconnected", "tools", "islandTemp", "settingsOpen"] {
+            if let Some(v) = island.get(key) {
+                now[key] = v.clone();
+            }
+        }
+        let found = data::pets(&self.dir);
+        let sprite = island["config"].as_object().and_then(|settings| data::pet_of(settings, Some(agent), &found));
+        now["sprite"] = sprite.map_or(Value::Null, |p| json!(data::asset_url(&p.sheet)));
+        now["spriteVersion"] = json!(sprite.map_or(2, |p| p.version));
+        now["list"] = list;
+        now["agent"] = json!(agent);
+        now
     }
 
+    // Everything the pages draw from, for an agent's pet window as it shows.
+    pub fn send_to_pet(&self, agent: &str) {
+        let _ = self.app.emit_to(pet::label(agent), "pet:update", self.pet_payload(agent, &self.payload()));
+    }
+
+    // To the island and every pet's window there is.
     fn to_pages(&self, event: &str, payload: Value) {
         let _ = self.app.emit_to("island", event, payload.clone());
-        // A pet's window hidden (it is home) hears no updates: it gets the
-        // whole state as it shows (pet.rs apply_visibility).
         for agent in data::AGENTS {
-            if event != "pet:update" || pet::is_up(self, agent) {
-                let _ = self.app.emit_to(pet::label(agent), event, payload.clone());
-            }
+            let _ = self.app.emit_to(pet::label(agent), event, payload.clone());
         }
     }
 
     // The mood or the settings changed: the pages, the tray, the settings.
     pub fn redraw(&self) {
-        self.to_pages("pet:update", self.payload());
+        let island = self.payload();
+        // A pet's window hidden (it is home) hears no updates: it gets the
+        // whole state as it shows (pet.rs apply_visibility).
+        for agent in data::AGENTS {
+            if pet::is_up(self, agent) {
+                let _ = self.app.emit_to(pet::label(agent), "pet:update", self.pet_payload(agent, &island));
+            }
+        }
+        let _ = self.app.emit_to("island", "pet:update", island);
         tray::refresh(self);
         self.push_settings();
     }
@@ -399,7 +434,13 @@ impl Shared {
             self.redraw();
         }
         if let Some(react) = out.react {
-            self.to_pages("pet:react", react);
+            match react["agent"].as_str() {
+                Some(agent) => {
+                    let _ = self.app.emit_to("island", "pet:react", react.clone());
+                    let _ = self.app.emit_to(pet::label(agent), "pet:react", react);
+                }
+                None => self.to_pages("pet:react", react),
+            }
         }
         if !self.flag("dnd") {
             for (mood, project) in out.alerts {
@@ -561,6 +602,9 @@ impl Shared {
 
     pub fn apply_visibility(self: &Arc<Self>) {
         for agent in data::AGENTS {
+            // Out: its window made; home: closed (not kept hidden: a WebView
+            // keeps its memory).
+            pet::open_or_close(self, agent);
             pet::apply_visibility(self, agent);
         }
         island::apply_visibility(self);
@@ -673,7 +717,9 @@ pub fn set_out(sh: &Arc<Shared>, agent: &str, out: bool) {
     if sh.is_out(agent) == out {
         return;
     }
-    if out {
+    // A window kept (being carried home): to where it was left; none, it is
+    // made there (apply_visibility).
+    if out && pet::is_made(sh, agent) {
         pet::return_to_spot(sh, agent);
     }
     sh.change(json!({ "desktop": sh.desktop_with(agent, out) }));
@@ -760,7 +806,11 @@ async fn pet_drag_end(app: AppHandle, window: WebviewWindow) {
 #[tauri::command]
 async fn pet_menu(app: AppHandle, window: WebviewWindow) {
     let sh = shared(&app);
-    let menu = tray::menu(&sh, if is_island(&window) { tray::Over::Home } else { tray::Over::Her });
+    let over = match pet::agent_of(window.label()).and_then(|a| data::AGENTS.into_iter().find(|x| *x == a)) {
+        Some(agent) => tray::Over::Her(agent),
+        None => tray::Over::Home,
+    };
+    let menu = tray::menu(&sh, over);
     if let Ok(menu) = menu {
         // A Windows menu closes at once unless its window can come to the
         // front, which these cannot (they never take focus): for the menu, it may.
@@ -891,7 +941,12 @@ async fn island_release(app: AppHandle, offset: Value) {
 async fn island_drop(app: AppHandle) {
     let sh = shared(&app);
     sh.log("island: drop");
-    pet::let_go(&sh, sh.island_agent());
+    // The pet carried out (the island may show another's by now).
+    for agent in data::AGENTS {
+        if pet::is_carried(&sh, agent) {
+            pet::let_go(&sh, agent);
+        }
+    }
 }
 
 // A page's answer to /debug/eval.
@@ -1279,7 +1334,11 @@ fn main() {
             sh.log(&format!("up on port {}, data in {}", sh.port, sh.dir.display()));
             sh.log(&format!("displays: {}", sh.screens().describe()));
 
-            pet::create(&sh, "claude")?;
+            // The pets out on the desktop: their windows (the others' are
+            // made as they are let out).
+            for agent in sh.out_agents() {
+                pet::create(&sh, agent)?;
+            }
             // An app full screen as she starts, known before her home first shows.
             if fullscreen::AVAILABLE && sh.flag("hideInFullscreen") {
                 sh.by_fullscreen.store(fullscreen::check(&[], &sh.displays()) == Some(true), Ordering::SeqCst);
