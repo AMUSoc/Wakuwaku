@@ -3,7 +3,8 @@
 用法：
   python tools/slice_sheet.py <姿勢表.png> <輸出資料夾> [--run-b 檔案] [--id 寵物id] [--name 顯示名]
                               [--fit same|each | --height N] [--preview 預覽.png]
-                              [--crop-preview 裁切預覽.png]
+                              [--crop-preview 裁切預覽.png] [--look 視線表.png] [--breathe]
+                              [--look-preview 視線預覽.png]
 
 姿勢表：3×3，透明背景，格子之間是透明區域，由左到右、由上到下是
   idle-a、idle-b、wave、jump、failed、waiting、working、review、run-a
@@ -21,6 +22,11 @@
      180×200；以人物中心（不透明部分的重心，飄開的頭髮拉不走它）左右置中，超出 192 寬的部分
      直接裁掉，超出上緣的也裁掉。每一格裁掉幾個像素都會印出來，超過 40 px 的標上「!」。
      --crop-preview 另存 jump 和 run-a 裁切後的樣子（上：圖集裡的格子；下：整張，紅色是裁掉的）。
+  --look：4×4 的視線方向表，由左到右、由上到下是 look 的 index 0–15（0 看正上，順時針每
+     22.5°），切法同上，依序放進 look/ 的 16 張（沒有就 16 張都是 idle-a）。視線表的人和姿勢表的
+     畫得不一樣大，所以它用自己的比例：16 格高度的中位數縮成和 idle-a 一樣高；腳底、置中同上。
+  --breathe：idle 列改成 idle-a 的呼吸：6 幀垂直縮放 1.000、1.008、1.015、1.008、1.000、0.995，
+     以腳底為基準（腳底固定在 y=204），index 3 換成 idle-b 眨眼（沒有就是 A A A B A A）。
   3. 排成各列資料夾（<輸出資料夾>/idle/00.png …），running-left 是 running-right 的水平鏡像。
   4. 呼叫 make_sheet.py 產出 data/pets/<id>/spritesheet.webp，並寫 pet.json。
 需要 Pillow 和 NumPy：pip install pillow numpy
@@ -70,10 +76,10 @@ def runs(filled):
     return out
 
 
-def three(filled, what):
-    """切成三段：有東西的區段多於三段時（小碎點），併到最近的大段。"""
+def split(filled, n, what):
+    """切成 n 段：有東西的區段多於 n 段時（小碎點），併到最近的大段。"""
     parts = runs(filled)
-    while len(parts) > 3:
+    while len(parts) > n:
         # 最小的一段併進相鄰、間隔較近的那段。
         i = min(range(len(parts)), key=lambda k: parts[k][1] - parts[k][0])
         left = parts[i][0] - parts[i - 1][1] if i > 0 else None
@@ -81,18 +87,18 @@ def three(filled, what):
         j = i - 1 if right is None or (left is not None and left <= right) else i + 1
         a, b = sorted((i, j))
         parts[a:b + 1] = [(parts[a][0], parts[b][1])]
-    if len(parts) != 3:
-        sys.exit(f'{what}：透明區域只分出 {len(parts)} 段，要 3 段；格子之間要留透明的間隔')
+    if len(parts) != n:
+        sys.exit(f'{what}：透明區域只分出 {len(parts)} 段，要 {n} 段；格子之間要留透明的間隔')
     return parts
 
 
-def cut(sheet):
-    """姿勢表切成 9 格，各自裁到不透明部分的邊。"""
+def cut(sheet, n=3):
+    """n×n 的表切成 n² 格（由左到右、由上到下），各自裁到不透明部分的邊。"""
     a = np.array(sheet.getchannel('A')) > 0
     cells = []
-    for y0, y1 in three(a.any(axis=1), '列'):
+    for y0, y1 in split(a.any(axis=1), n, '列'):
         band = a[y0:y1]
-        for x0, x1 in three(band.any(axis=0), f'第 {len(cells) // 3 + 1} 列的欄'):
+        for x0, x1 in split(band.any(axis=0), n, f'第 {len(cells) // n + 1} 列的欄'):
             cell = sheet.crop((x0, y0, x1, y1))
             cells.append(cell.crop(cell.getbbox()))
     return cells
@@ -129,12 +135,30 @@ def place(im, scale, feet_y, by_mass=False):
     return canvas, cut
 
 
-def rows_of(f):
+# 呼吸：idle 列 6 幀各自的垂直縮放；index 3 是眨眼。
+BREATH = [1.000, 1.008, 1.015, 1.008, 1.000, 0.995]
+BLINK_AT = 3
+
+
+def stretch(cell, f, feet_y=FEET_Y_DEFAULT):
+    """格子垂直縮放 f 倍，y=feet_y 那一行不動（腳底固定）。"""
+    if f == 1:
+        return cell
+    # 輸出的 y 取自來源的 feet_y + (y − feet_y) / f；預乘 alpha 再取樣。
+    out = cell.convert('RGBa').transform(cell.size, Image.AFFINE, (1, 0, 0, 0, 1 / f, feet_y - feet_y / f), resample=Image.BICUBIC)
+    return out.convert('RGBA')
+
+
+def rows_of(f, look=None, breathe=False):
     """各列的幀，照 docs/MAKING_A_PET.md 的列與幀數。"""
     a, b = f['run-a'], f['run-b']
     right = [a, a, b, b, a, a, b, b]
+    if breathe:
+        idle = [stretch(f['idle-b'] if i == BLINK_AT else f['idle-a'], k) for i, k in enumerate(BREATH)]
+    else:
+        idle = [f['idle-a']] * 3 + [f['idle-b']] + [f['idle-a']] * 2
     return {
-        'idle': [f['idle-a']] * 3 + [f['idle-b']] + [f['idle-a']] * 2,
+        'idle': idle,
         'running-right': right,
         'running-left': [ImageOps.mirror(x) for x in right],
         'waving': [f['wave'], f['idle-a'], f['wave'], f['idle-a']],
@@ -143,7 +167,7 @@ def rows_of(f):
         'waiting': [f['waiting']] * 6,
         'running': [f['working']] * 6,
         'review': [f['review']] * 6,
-        'look': [f['idle-a']] * 16,
+        'look': look or [f['idle-a']] * 16,
     }
 
 
@@ -193,10 +217,10 @@ def crop_preview(poses, scale, out, names=('jump', 'run-a'), zoom=2):
     sheet.convert('RGB').resize((w * zoom, h * zoom), Image.NEAREST).save(out)
 
 
-def preview(sheet_path, out, rows=3):
-    """圖集的前幾列，鋪在淺色棋盤格上，畫出格線。"""
+def preview(sheet_path, out, rows=3, first=0):
+    """圖集的幾列（從第 first 列起 rows 列），鋪在淺色棋盤格上，畫出格線。"""
     sheet = Image.open(sheet_path).convert('RGBA')
-    top = sheet.crop((0, 0, sheet.width, CELL_H * rows))
+    top = sheet.crop((0, CELL_H * first, sheet.width, CELL_H * (first + rows)))
     board = board_of(top.size)
     board.alpha_composite(top)
     px = board.load()
@@ -221,6 +245,9 @@ def main():
     p.add_argument('--alpha', type=int, default=8, help='alpha 小於這個值的點當成透明（預設 8）')
     p.add_argument('--preview', help='另存圖集前三列的預覽 PNG')
     p.add_argument('--crop-preview', help='另存 jump 和 run-a 裁切後的樣子')
+    p.add_argument('--look', help='4×4 的視線方向表（look 的 index 0–15）')
+    p.add_argument('--breathe', action='store_true', help='idle 列用 idle-a 產生呼吸，index 3 眨眼')
+    p.add_argument('--look-preview', help='另存圖集 look 兩列（第 9、10 列）的預覽 PNG')
     args = p.parse_args()
 
     pet_id = args.id or Path(args.sheet).stem
@@ -245,8 +272,23 @@ def main():
         said = f'裁掉 左 {trimmed["left"]}、右 {trimmed["right"]}、上 {trimmed["top"]} px' + ('  ! 超過 40 px' if lost > 40 else '')
         print(f'{k:8} {im.width}×{im.height} → {round(im.width * s)}×{round(im.height * s)}（×{s:.3f}）  {said}')
 
+    look = None
+    if args.look:
+        cells = cut(clean(Image.open(args.look).convert('RGBA'), args.alpha), 4)
+        middle = float(np.median([im.height for im in cells]))
+        tall = poses['idle-a'].height * same
+        s = tall / middle
+        print(f'look：16 格高 {min(im.height for im in cells)}–{max(im.height for im in cells)}，中位數 {middle:g} → {tall:.0f}（×{s:.3f}）')
+        look = []
+        for i, im in enumerate(cells):
+            cell, trimmed = place(im, s, FEET_Y_DEFAULT, by_mass=bool(args.height))
+            look.append(cell)
+            lost = trimmed['left'] + trimmed['right'] + trimmed['top']
+            if lost:
+                print(f'look {i:2}  裁掉 左 {trimmed["left"]}、右 {trimmed["right"]}、上 {trimmed["top"]} px' + ('  ! 超過 40 px' if lost > 40 else ''))
+
     out = Path(args.out)
-    for row, images in rows_of(frames).items():
+    for row, images in rows_of(frames, look, args.breathe).items():
         folder = out / row
         if folder.exists():
             shutil.rmtree(folder)
@@ -270,6 +312,9 @@ def main():
     if args.preview:
         preview(pet / 'spritesheet.webp', args.preview)
         print(f'預覽：{args.preview}')
+    if args.look_preview:
+        preview(pet / 'spritesheet.webp', args.look_preview, rows=2, first=make_sheet.LOOK_ROW)
+        print(f'視線預覽：{args.look_preview}')
     if args.crop_preview:
         crop_preview(poses, same, args.crop_preview)
         print(f'裁切預覽：{args.crop_preview}')
