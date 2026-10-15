@@ -8,6 +8,8 @@ data/*
 !data/pets/
 data/pets/*
 !data/pets/grok-chan/
+# A test copy's data folder (WAKUWAKU_USER_DATA=data2)
+data2/
 
 # Downloaded pets are their authors' work
 pets/*

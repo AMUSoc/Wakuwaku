@@ -231,7 +231,8 @@ pub fn pet_dirs(dir: &Path) -> Vec<PathBuf> {
 // or taken away changes its folder's time), or she puts one in herself
 // (forget_pets). Asked for on every redraw: the folders were read through
 // each time.
-static PETS: std::sync::Mutex<Option<(u64, Vec<Option<std::time::SystemTime>>, Vec<PetInfo>)>> = std::sync::Mutex::new(None);
+type Stamps = Vec<(PathBuf, Option<std::time::SystemTime>)>;
+static PETS: std::sync::Mutex<Option<(u64, Stamps, Vec<PetInfo>)>> = std::sync::Mutex::new(None);
 static PETS_PUT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 // A pet put in by her (fetch.rs put_pet): what was found is looked for anew.
@@ -242,9 +243,33 @@ pub fn forget_pets() {
     PETS_PUT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
+// What the pets found are kept by: each folder the pets are in, each pet's
+// folder in them and its two files, by path and time. A pet's folder made
+// and its sheet written a moment after (tools/slice_sheet.py, a copy by
+// hand) changes only the pet's own folder, not the one it is in: by the
+// folders alone, a look between the two kept it out until she restarted.
+// By path too: two data folders (tests) of the same times are not one.
+fn stamps_of(dir: &Path) -> Stamps {
+    let time = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    let mut stamps = Vec::new();
+    for root in pet_dirs(dir) {
+        stamps.push((root.clone(), time(&root)));
+        let Ok(entries) = fs::read_dir(&root) else { continue };
+        let mut pets: Vec<PathBuf> = entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()).collect();
+        pets.sort();
+        for pet in pets {
+            for p in [pet.join("spritesheet.webp"), pet.join("pet.json"), pet] {
+                let t = time(&p);
+                stamps.push((p, t));
+            }
+        }
+    }
+    stamps
+}
+
 pub fn pets(dir: &Path) -> Vec<PetInfo> {
     let put = PETS_PUT.load(std::sync::atomic::Ordering::SeqCst);
-    let stamps: Vec<Option<std::time::SystemTime>> = pet_dirs(dir).iter().map(|root| fs::metadata(root).and_then(|m| m.modified()).ok()).collect();
+    let stamps = stamps_of(dir);
     let mut kept = PETS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((was, at, found)) = kept.as_ref() {
         if *was == put && *at == stamps {
@@ -369,6 +394,24 @@ mod tests {
     }
 
     #[test]
+    fn a_pet_whose_sheet_comes_after_its_folder_is_found_once_it_does() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-late-sheet-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let pet = dir.join("pets").join("late");
+        fs::create_dir_all(&pet).unwrap();
+        let has = |name: &str| pets(&dir).iter().any(|p| p.id == "late" && p.name == name && p.sheet.starts_with(&dir));
+        // Looked at between the folder and its sheet: not a pet yet.
+        assert!(!has("late"));
+        // Its sheet in (the folder it is in unchanged): found.
+        fs::write(pet.join("spritesheet.webp"), b"RIFF0000WEBP").unwrap();
+        assert!(has("late"));
+        // Its pet.json written after: its name taken up.
+        fs::write(pet.join("pet.json"), r#"{ "displayName": "Late", "spriteVersionNumber": 2 }"#).unwrap();
+        assert!(has("Late"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_three_old_widgets_become_the_monitor() {
         // CPU on, the network and the battery off: the monitor on with CPU and memory.
         let mut s = settings(json!({ "widgetsOff": ["net", "battery", "x"], "widgetOrder": ["today", "sys", "net"] }));
@@ -416,3 +459,4 @@ mod tests {
     }
 
 }
+
