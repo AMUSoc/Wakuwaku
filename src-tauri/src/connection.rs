@@ -721,6 +721,46 @@ pub fn write_agy_hooks(action: &str) -> Result<(), String> {
     write_json(&file, &after)
 }
 
+// --- Grok Build: hooks in ~/.grok/hooks/wakuwaku.json -----------------------------------
+//
+// Grok Build loads every *.json in $GROK_HOME/hooks (~/.grok/hooks) as hooks
+// of its own, always trusted, with no /hooks add (xai-org/grok-build,
+// global_hook_sources.rs): the file is all ours. Its hooks are HTTP ones, as
+// Claude Code's, to /hook?…&agent=grok (events_grok.rs). It loads Claude
+// Code's too (the plugin, ~/.claude/settings.json), which bring the same
+// events without an agent: server.rs drops those while ours are in.
+
+pub fn grok_home() -> PathBuf {
+    match std::env::var_os("GROK_HOME") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => PathBuf::from(std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default()).join(".grok"),
+    }
+}
+
+pub fn grok_hooks_file() -> PathBuf {
+    grok_home().join("hooks").join("wakuwaku.json")
+}
+
+pub fn grok_hook_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/hook?{URL_MARK}&agent=grok")
+}
+
+// Whether Grok's own hooks bring its events to this port: our file there,
+// naming our URL. Asked for each Grok event the Claude Code hooks bring
+// (server.rs), so looked at once in a few seconds at most.
+pub fn grok_hooked(port: u16) -> bool {
+    static LOOKED: Mutex<Option<(std::time::Instant, bool)>> = Mutex::new(None);
+    let mut looked = LOOKED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, hooked)) = *looked {
+        if at.elapsed() < std::time::Duration::from_secs(5) {
+            return hooked;
+        }
+    }
+    let hooked = std::fs::read_to_string(grok_hooks_file()).is_ok_and(|text| text.contains(&grok_hook_url(port)));
+    *looked = Some((std::time::Instant::now(), hooked));
+    hooked
+}
+
 // --- Start at login: this program, from where it is now -------------------------------
 
 #[cfg(windows)]

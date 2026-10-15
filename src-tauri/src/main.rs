@@ -108,8 +108,9 @@ pub struct Shared {
     // When the last Codex event came (ms), 0 never: Codex runs its hooks
     // only once the person trusts them.
     pub codex_seen: std::sync::atomic::AtomicU64,
-    // The same for Antigravity's.
+    // The same for Antigravity's, and Grok's.
     pub agy_seen: std::sync::atomic::AtomicU64,
+    pub grok_seen: std::sync::atomic::AtomicU64,
     // When the last Claude Code event came (ms), 0 never: the settings tell
     // connected from installed, waiting for a session (settings.js).
     pub claude_seen: std::sync::atomic::AtomicU64,
@@ -1216,6 +1217,7 @@ fn main() {
                 greeted: AtomicBool::new(false),
                 codex_seen: std::sync::atomic::AtomicU64::new(0),
                 agy_seen: std::sync::atomic::AtomicU64::new(0),
+                grok_seen: std::sync::atomic::AtomicU64::new(0),
                 claude_seen: std::sync::atomic::AtomicU64::new(0),
                 own: Mutex::new(Vec::new()),
                 prev_focus: Mutex::new(0),
