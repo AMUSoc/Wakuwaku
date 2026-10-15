@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Wakuwaku 是一個 Windows 11 的桌面寵物兼任務列：用 Claude Code、Codex、Antigravity 的 hook 事件顯示每個 AI 會話在做什麼，並能在寵物身上回答權限確認。技術上是 **Tauri 2**：頁面是 `src/` 的 HTML / JS / CSS，由系統的 WebView2 顯示；其餘全在 `src-tauri/` 的 Rust 裡。（2026-10 之前是 Electron 版，在 git 歷史裡。）
+Wakuwaku 是一個 Windows 11 的桌面寵物，住在螢幕頂端的「靈動島」裡：用 Claude Code、Codex、Antigravity 的 hook 事件顯示每個 AI 會話在做什麼，並能在島上回答權限確認。（2026-10 精簡過：任務列替代模式、Win 鍵鉤子、郵件客戶端、改 Windows 深淺色與桌布的設定都已移除。）技術上是 **Tauri 2**：頁面是 `src/` 的 HTML / JS / CSS，由系統的 WebView2 顯示；其餘全在 `src-tauri/` 的 Rust 裡。（2026-10 之前是 Electron 版，在 git 歷史裡。）
 
 更完整的開發說明（簡體中文）在 `docs/DEVELOPMENT.md`，使用者文件在 `README.md` / `README.en.md`。本檔只整理架構與常用指令；細節以那兩份和程式碼為準。
 
@@ -11,11 +11,11 @@ cd src-tauri
 cargo run                 # 除錯版，有主控台視窗
 cargo build --release     # target/release/wakuwaku.exe：單一檔案，沒有主控台
 cargo test                # Rust 單元測試（hook 對應、多會話狀態機、確認的回覆與排隊、hooks 安裝、寵物網址……）
-cd .. && node --test "test/*.test.js"   # 頁面的單元測試（i18n、注視方向、status、widgets…），不需要 npm install
+cd .. && node --test "test/*.test.js"   # 頁面的單元測試（i18n、注視方向、status、widgets、外掛腳本、中繼…），不需要 npm install
 ```
 
 - 頁面是打包進 exe 的（`Cargo.toml` 預設開啟 `custom-protocol`）：改了 `src/` 要重新編譯，cargo 會自己發現。**不需要 Node 和 Tauri CLI** 就能建置。
-- 改了 `settings.js`、`i18n.js` 等頁面腳本時，可以用 `node --check <檔案>` 先檢查語法。
+- 改了 `settings.js`、`i18n.js` 等頁面腳本時，可以用 `node --check <檔案>` 先檢查語法；但它抓不到呼叫已刪除函式這類執行期錯誤。要在真的頁面上驗證，可以用 `WAKUWAKU_PORT=<別的埠>`、`WAKUWAKU_USER_DATA=<暫存資料夾>`、`WAKUWAKU_DEBUG=1` 另外啟動一份 release exe，再用 `POST /debug/eval { page: "island" | "pet", code }` 在頁面裡執行檢查，最後 `POST /quit`。
 - 搬動專案資料夾後要 `cargo clean` 一次（`target/` 裡有絕對路徑）。
 - 從原始碼執行時，設定、寵物、日誌都在專案的 `data/`（不進 git）；資料夾裡放一個 `debug.on` 就會寫 `debug.log`（含兩個頁面的 console.log）。
 
@@ -24,21 +24,20 @@ cd .. && node --test "test/*.test.js"   # 頁面的單元測試（i18n、注視�
 ## 目錄
 
 ```
-src/pet/           頁面：她的視窗（?role=pet）和島 / 任務列（?role=island）共用 index.html；bar.html 是其他螢幕上的任務列
+src/pet/           頁面：她的視窗（?role=pet）和島（?role=island）共用 index.html
 src/shared/i18n.js 中英文字串（Rust 端少數字串在 src-tauri/src/i18n.rs）
 src-tauri/src/     Rust 主程式（下表）
 src-tauri/capabilities/  頁面可用的 Tauri 權限：新視窗一定要列進去
 integrations/claude-code/  Claude Code 外掛 wakuwaku（只有 HTTP hooks）；.claude-plugin/ 是外掛市集入口
-integrations/thunderbird/  Thunderbird 擴充
-examples/widgets/  島上外掛的範例腳本
-test/              頁面的 node --test 測試，以及假的 IMAP / SMTP / 中繼伺服器
+examples/widgets/  島上外掛的範例腳本（她代跑的那幾個會編進 exe）
+test/              頁面的 node --test 測試，以及假的當機報告中繼、假的發布
 relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計算）
 ```
 
 ## Rust 模組的職責
 
 **入口與共用狀態**
-- `main.rs`：入口。依參數分流成 `--wakuwaku-ensure-running`（Claude Code 的 SessionStart）、`--wakuwaku-codex-hook`、`--wakuwaku-agy-hook <事件>`、任務列守護程序；否則以「誰佔著連接埠誰就是寵物」做單實例，建立 `Shared`（所有部分共用的狀態，**任何時候都不同時持有兩把鎖**），註冊頁面可呼叫的 Tauri 命令，並啟動 pointer、widgets、monitor、fullscreen、ticker 等背景執行緒。
+- `main.rs`：入口。依參數分流成 `--wakuwaku-ensure-running`（Claude Code 的 SessionStart）、`--wakuwaku-codex-hook`、`--wakuwaku-agy-hook <事件>`、`--wakuwaku-guard`（當機報告的守護程序）；否則以「誰佔著連接埠誰就是寵物」做單實例，建立 `Shared`（所有部分共用的狀態，**任何時候都不同時持有兩把鎖**），註冊頁面可呼叫的 Tauri 命令，並啟動 pointer、widgets、monitor、fullscreen、ticker 等背景執行緒。
 - `server.rs`：127.0.0.1:47213 的 HTTP 介面（`/hook`、`/state`、`/widget`、`/health`、`/come-home`、`/quit`、`/debug/*`）。
 - `state.rs`：狀態機。按會話記 mood、名字、執行中的工具、任務清單、改過的檔案、結果，挑出最需要你的那一個顯示；也負責閒置會話的隱藏（`is_shown`）與遺忘。
 - `events.rs` / `events_codex.rs` / `events_agy.rs`：把 Claude Code / Codex / Antigravity 的 hook 事件換算成統一的「訊息」；會話名、專案名（git 倉庫名，含 worktree）。
@@ -49,23 +48,18 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 
 **視窗與家**
 - `pet.rs`：她的視窗：大小位置、眼睛、拖動與被攜帶、走動、頭頂的確認面板、飛回島裡。
-- `island.rs`：她的家的視窗（頂端的靈動島，或取代 Windows 的任務列），依頁面要求擴大、把她吸回去、為設定臨時升起。
-- `bars.rs`：其他螢幕上的任務列。`notch.rs`：macOS 瀏海裡的島。`backplate.rs`：島下面的壓克力模糊。
-- `pointer.rs`（點擊穿透）、`screen.rs`（各螢幕工作區）、`focus.rs`（鍵盤焦點的取與還）、`fullscreen.rs`（別的程式是否全螢幕）。
-
-**任務列模式（Windows 端）**
-- `taskbar.rs`：自己的執行緒和訊息迴圈：藏起 Windows 的任務列、接管系統匣、視窗按鈕、縮圖、工作區自癒。
-- `appbar.rs`（AppBar 佔位）、`shell.rs`（藏 / 還 Windows 任務列、守護程序）、`systray.rs`（接管系統匣）、`tasks.rs`（該有按鈕的視窗、程式圖示、啟動程式）、`pins.rs`（讀一次 Windows 的釘選）、`winkeys.rs`（Win+數字 / Win+T / Win+B 的低階鍵盤鉤子）、`inputs.rs`（輸入法）、`clock.rs`、`audio.rs`（音量）、`wallpaper.rs` / `paper.rs` / `theme.rs`（桌布、雲母、深淺色與強調色）、`icons.rs`（桌面圖示讓位）。
+- `island.rs`：靈動島的視窗：放在螢幕頂端正中，依頁面要求擴大、伸手夠她、把她吸回去、為設定臨時升起、置頂；底部的 `os` 模組是島用的 Win32 小工具（`raise_top`、`covered`、`maximized_on`、`no_transitions`）。
+- `notch.rs`：macOS 瀏海裡的島。`backplate.rs`：島下面的壓克力模糊。`wallpaper.rs`：只讀 Windows 的深淺色和強調色（檔名沿用舊的）。
+- `pointer.rs`（點擊穿透）、`screen.rs`（各螢幕工作區）、`focus.rs`（鍵盤焦點的取與還）、`fullscreen.rs`（別的程式是否全螢幕，每 1.5 秒看一次）。
 
 **其他**
 - `jump.rs`：點會話跳到它的視窗（行程鏈、找視窗、叫到前面、Claude 桌面版的會話連結）。
 - `widgets.rs`（島上的外掛：腳本送來的、內建的今天 / token / 監控）、`scripts.rs`（她代跑的外掛腳本）、`tokens.rs`（讀三種 agent 自己的紀錄算今天的 token）。
-- `mail.rs`、`mail/`：郵件（IMAP / SMTP、交給 AI 處理）。`proxy.rs`：系統代理。
-- `tray.rs`（系統匣圖示與選單）、`notify.rs`（toast 通知）、`updates.rs`（自動更新）、`crash.rs`、`crash/`（當機報告）、`power.rs`（省電、EcoQoS）、`gpu.rs`（WebView2 用哪張顯卡）、`detach.rs`（以檔案總管為父行程啟動自己，脫離 agent 的 job）、`fetch.rs`（codex-pets.net 下載寵物）、`i18n.rs`。
+- `tray.rs`（系統匣圖示與選單）、`notify.rs`（toast 通知）、`updates.rs`（自動更新）、`crash.rs`、`crash/`（當機報告，含守護程序 `guard` / `spawn_guard`）、`proxy.rs`（Windows 系統代理，當機報告送中繼時用）、`power.rs`（省電、EcoQoS）、`gpu.rs`（WebView2 用哪張顯卡）、`detach.rs`（以檔案總管為父行程啟動自己，脫離 agent 的 job）、`fetch.rs`（codex-pets.net 下載寵物）、`i18n.rs`。
 
 **頁面（`src/pet/`）**
 - `bridge.js`：`window.pet`，頁面和 Rust 之間的呼叫與事件；所有監聽註冊完才送 `pet_ready`，並把 invoke 排隊依序送出。
-- `pet.js`（動畫、走動、東張西望）、`island.js`（島與任務列的各種形狀）、`settings.js`（長在島裡的設定）、`panel.js`（確認面板）、`status.js`（把會話說成一句話）、`sprite.js`（圖集與 16 個注視方向）、`widgets.js`、`mica.js`、`presses.js`。
+- `pet.js`（動畫、走動、東張西望）、`island.js`（島的各種形狀、她在島裡、拉出來與放回去、外觀）、`settings.js`（長在島裡的設定：通用、外觀、插件三頁）、`panel.js`（確認面板）、`status.js`（把會話說成一句話）、`sprite.js`（圖集與 16 個注視方向）、`widgets.js`（外掛的圖示與文字、監控的讀數格）。
 
 ## Hook 事件的流向：hook → server.rs → state.rs → 前端
 
@@ -119,7 +113,8 @@ Antigravity ──command hook：wakuwaku.exe --wakuwaku-agy-hook <名> ─┤  
 ## 開發時要注意
 
 - 持有鎖時絕不呼叫 Tauri 的視窗 getter（它們要等主執行緒，而選單回呼在主執行緒上拿鎖）；同時不拿兩把鎖；頁面的命令一律寫成 `async`。
-- 新視窗要加進 `src-tauri/capabilities/` 的 `windows`，否則頁面的 `listen()` 會被拒。
+- 新視窗要加進 `src-tauri/capabilities/` 的 `windows`（目前只有 `pet`、`island`），否則頁面的 `listen()` 會被拒。
+- 設定只有島一種家（`display` 永遠是 `island`）；已移除功能留下的設定鍵，讀設定時由 `data.rs` 的 `GONE` 丟掉。新增設定鍵要同時改 `data.rs` 的預設值和 `settings.rs` 的 `is_ok` 白名單。
 - 她的視窗一律經 `Shared::show_window` 顯示（`show()` 會啟用視窗，要暫時忽略島的失焦）。
 - hook 的回覆必須是物件；自動壓縮觸發的 `SessionStart`（`source: compact`）要忽略。
 - 動到 hook 事件或安裝內容時，外掛的 `integrations/claude-code/` 與 `connection.rs` 要一起改。
