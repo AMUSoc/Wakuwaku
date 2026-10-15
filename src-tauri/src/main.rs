@@ -499,30 +499,21 @@ impl Shared {
         }
     }
 
-    // Another app full screen or no longer: she (and the taskbar, as Windows'
-    // own does) steps aside or comes back. Looked at on a thread of its own
-    // (setup): at once when a window comes to the front or the one in front
-    // changes its size (fullscreen::ask, from the taskbar's hooks), else
-    // every 1.5 s. Never on the taskbar's thread: the strip shown again from
-    // there waited on the main thread while that waited on it, and coming
-    // back after an app full screen took 3.8 s (2026-10-10). Every look
-    // logged for 10 s after a change: asked how, and what it saw.
-    pub fn look_fullscreen(self: &Arc<Self>, asked: Option<Instant>) {
+    // Another app full screen or no longer: she steps aside or comes back.
+    // Looked at on a thread of its own (setup), every 1.5 s. Every look
+    // logged for 10 s after a change: what it saw.
+    pub fn look_fullscreen(self: &Arc<Self>) {
         static CHANGED: Mutex<Option<Instant>> = Mutex::new(None);
         let watching = fullscreen::AVAILABLE && self.flag("hideInFullscreen");
         let own = self.own.lock().unwrap().clone();
         let cover = if watching { fullscreen::covering(&own) } else { Some(None) };
         let on = self.displays();
         let is_full = cover.map(|c| c.is_some_and(|mon| on.is_empty() || on.contains(&mon)));
-        let how = match asked {
-            Some(at) => format!("event, {} ms after", at.elapsed().as_millis()),
-            None => "timer".to_string(),
-        };
         let changed = is_full.is_some_and(|f| self.by_fullscreen.swap(f, Ordering::SeqCst) != f);
         if !changed {
             if CHANGED.lock().unwrap().is_some_and(|at| at.elapsed() < Duration::from_secs(10)) {
                 let saw = is_full.map_or("one of hers in front".to_string(), |f| f.to_string());
-                self.log(&format!("full screen looked at ({how}): {saw}"));
+                self.log(&format!("full screen looked at: {saw}"));
             }
             return;
         }
@@ -530,7 +521,7 @@ impl Shared {
         let is_full = is_full == Some(true);
         let which = if is_full { format!(", {}", fullscreen::front()) } else { String::new() };
         let which = format!("{which}; hers on {:?}", self.displays());
-        self.log(&format!("another app full screen: {is_full}{which} ({how})"));
+        self.log(&format!("another app full screen: {is_full}{which}"));
         let t = Instant::now();
         self.apply_visibility();
         self.log(&format!("full screen: {} in {} ms", if is_full { "stepped aside" } else { "back" }, t.elapsed().as_millis()));
@@ -1358,8 +1349,8 @@ fn main() {
             // (Shared::look_fullscreen).
             let watcher = sh.clone();
             spawn_named("fullscreen", move || loop {
-                let asked = fullscreen::wait(Duration::from_millis(1500));
-                watcher.look_fullscreen(asked);
+                std::thread::sleep(Duration::from_millis(1500));
+                watcher.look_fullscreen();
                 island::look_over_max(&watcher);
             });
 

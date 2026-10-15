@@ -107,71 +107,6 @@ fn is_island_look(v: &Value) -> bool {
         })
 }
 
-// The taskbar's layout: { left, center, right }, each a list of its parts
-// (island.js TB_PARTS), none twice and nothing else; one left out goes where
-// the default has it.
-const TASKBAR_PARTS: [&str; 8] = ["her", "start", "apps", "monitor", "tray", "keys", "quick", "clock"];
-
-// A widget put on the taskbar (widgets.js isEntry): { id, type, of, size,
-// name, icon }, its id "w" and up to 15 of a-z 0-9; a widget's or a
-// plugin's (of: its id), or a spacer (flex, gap, sep).
-fn is_taskbar_widget(v: &Value) -> Option<&str> {
-    let w = v.as_object()?;
-    let id = w.get("id")?.as_str()?;
-    let ok_id = id.len() >= 2 && id.len() <= 16 && id.starts_with('w') && id[1..].chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
-    let kind = w.get("type")?.as_str()?;
-    let of = w.get("of").map(|of| of.as_str().filter(|of| crate::widgets::is_id(of)));
-    let ok_of = match kind {
-        "widget" => matches!(of, Some(Some(_))),
-        "plugin" => matches!(of, Some(Some(of)) if crate::scripts::SCRIPTS.iter().any(|s| s.id == of)),
-        "flex" | "gap" | "sep" => of.is_none(),
-        _ => false,
-    };
-    let ok_rest = w.iter().all(|(key, v)| match key.as_str() {
-        "id" | "type" | "of" => true,
-        "size" => matches!(v.as_str(), Some("S" | "M")),
-        "name" => v.as_str().is_some_and(|n| n.chars().count() <= 40 && !n.chars().any(char::is_control)),
-        "icon" => v.as_str().is_some_and(|i| crate::widgets::ICONS.contains(&i)),
-        _ => false,
-    });
-    (ok_id && ok_of && ok_rest).then_some(id)
-}
-
-// Whether a taskbar layout shows this widget: put there by itself, or its
-// plugin's.
-pub fn is_on_taskbar(layout: &Value, widget: &str) -> bool {
-    let owner = crate::scripts::owner_of(widget);
-    layout.as_object().into_iter().flat_map(|runs| runs.values()).filter_map(Value::as_array).flatten().any(|e| match (e["type"].as_str(), e["of"].as_str()) {
-        (Some("widget"), Some(of)) => of == widget,
-        (Some("plugin"), Some(of)) => Some(of) == owner,
-        _ => false,
-    })
-}
-
-// Its runs: the parts each once, and up to 32 widgets, each once.
-fn is_taskbar_layout(v: &Value) -> bool {
-    let Some(runs) = v.as_object() else { return false };
-    let mut seen: Vec<&str> = Vec::new();
-    let mut widgets = 0;
-    runs.iter().all(|(run, parts)| {
-        matches!(run.as_str(), "left" | "center" | "right")
-            && parts.as_array().is_some_and(|parts| {
-                parts.iter().all(|p| match (p.as_str(), is_taskbar_widget(p)) {
-                    (Some(p), _) if TASKBAR_PARTS.contains(&p) && !seen.contains(&p) => {
-                        seen.push(p);
-                        true
-                    }
-                    (None, Some(id)) if !seen.contains(&id) && widgets < 32 => {
-                        seen.push(id);
-                        widgets += 1;
-                        true
-                    }
-                    _ => false,
-                })
-            })
-    })
-}
-
 // What a settings patch may hold, checked: anything else is dropped.
 fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
     let is_bool = v.is_boolean();
@@ -184,19 +119,9 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "updateFrom" => matches!(v.as_str(), Some("auto" | "github" | "gitee")),
         // Crash reports sent by themselves, never, or asked about (crash.rs).
         "crashReports" => matches!(v.as_str(), Some("auto" | "off" | "ask")),
-        // The taskbar home stands in for Windows' own: elsewhere, only the island.
+        // Her home: the island.
         "display" => v.as_str() == Some("island"),
         "islandWidth" => matches!(v.as_str(), Some("narrow" | "normal" | "wide")),
-        "taskbarMaterial" => matches!(v.as_str(), Some("mica" | "black" | "clear")),
-        "taskbarClearWhen" => matches!(v.as_str(), Some("mica" | "solid" | "always")),
-        "taskbarButtons" => matches!(v.as_str(), Some("icons" | "labels")),
-        "taskbarAlign" => matches!(v.as_str(), Some("center" | "left")),
-        "taskbarEdge" => matches!(v.as_str(), Some("bottom" | "top" | "left" | "right")),
-        "taskbarDisplays" => matches!(v.as_str(), Some("main" | "all")),
-        // The taskbar's parts in three runs (island.js tbLayout), each once.
-        "taskbarLayout" => v.is_null() || is_taskbar_layout(v),
-        // The programs' buttons in the order dragged: their keys (paths).
-        "taskbarOrder" => v.as_array().is_some_and(|keys| keys.len() <= 200 && keys.iter().all(|k| k.as_str().is_some_and(|s| s.len() <= 1024))),
         "hold" => v.as_str() == Some("seen") || matches!(v.as_u64(), Some(8 | 30 | 120)),
         // Minutes a session at rest stays in sight, or 0: always (state.rs is_shown).
         "idleHideMin" => matches!(v.as_u64(), Some(0 | 15 | 30 | 60 | 120)),
@@ -215,11 +140,9 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "widgetNudge" => is_bool,
         // Not to be reminded that nothing is connected (island.js isHinting).
         "connectHintOff" => is_bool,
-        // Her island's look on the taskbar, by Windows' mode (island.js
-        // drawIslandLook): none, or a mode's none, is Windows' own grey.
-        // And at the top of the screen (island.js lookNow), kept apart:
-        // none is black, as it always was.
-        "islandLook" | "islandTopLook" => v.is_null() || v.as_object().is_some_and(|m| m.iter().all(|(mode, look)| matches!(mode.as_str(), "dark" | "light") && is_island_look(look))),
+        // Her island's look, by Windows' mode (island.js lookNow): none, or
+        // a mode's none, is black.
+        "islandTopLook" => v.is_null() || v.as_object().is_some_and(|m| m.iter().all(|(mode, look)| matches!(mode.as_str(), "dark" | "light") && is_island_look(look))),
         _ => false,
     }
 }
@@ -455,62 +378,5 @@ mod tests {
         assert!(!super::is_island_look(&json!({ "edge": "glow" })));
         assert!(!super::is_island_look(&json!({ "bare": 1 })));
         assert!(!super::is_island_look(&json!({ "ink": "light" })));
-    }
-}
-
-#[cfg(test)]
-mod layout_tests {
-    use serde_json::json;
-
-    #[test]
-    fn taskbar_layouts() {
-        assert!(super::is_taskbar_layout(&json!({ "left": ["her"], "center": ["start", "apps"], "right": ["monitor", "tray", "keys", "quick", "clock"] })));
-        // The sessions' tags are no part any more (data.rs drops them as it reads).
-        assert!(!super::is_taskbar_layout(&json!({ "center": ["start", "apps", "tags"] })));
-        assert!(super::is_taskbar_layout(&json!({ "left": ["start", "apps"], "right": ["clock", "her"] })));
-        assert!(!super::is_taskbar_layout(&json!({ "left": ["her", "her"] })));
-        assert!(!super::is_taskbar_layout(&json!({ "left": ["her"], "right": ["her"] })));
-        assert!(!super::is_taskbar_layout(&json!({ "top": ["her"] })));
-        assert!(!super::is_taskbar_layout(&json!({ "left": ["desk"] })));
-        assert!(!super::is_taskbar_layout(&json!({ "left": "her" })));
-        assert!(!super::is_taskbar_layout(&json!(["her"])));
-    }
-
-    #[test]
-    fn widgets_on_the_taskbar() {
-        let ok = |w| super::is_taskbar_layout(&json!({ "right": [w, "clock"] }));
-        assert!(ok(json!({ "id": "wa1", "type": "widget", "of": "today", "size": "M" })));
-        assert!(ok(json!({ "id": "wa1", "type": "widget", "of": "inbox-x2", "name": "me@example.com", "icon": "mail" })));
-        assert!(ok(json!({ "id": "wa1", "type": "plugin", "of": "weather", "size": "S", "icon": "weather" })));
-        assert!(ok(json!({ "id": "wa1", "type": "flex" })));
-        assert!(ok(json!({ "id": "wa1", "type": "sep" })));
-        // Not a plugin she runs; no widget's id; a spacer of something.
-        assert!(!ok(json!({ "id": "wa1", "type": "plugin", "of": "nope" })));
-        assert!(!ok(json!({ "id": "wa1", "type": "widget" })));
-        assert!(!ok(json!({ "id": "wa1", "type": "widget", "of": "Not An Id" })));
-        assert!(!ok(json!({ "id": "wa1", "type": "gap", "of": "today" })));
-        // Its id, size, icon, name; nothing else.
-        assert!(!ok(json!({ "id": "start", "type": "flex" })));
-        assert!(!ok(json!({ "id": "w", "type": "flex" })));
-        assert!(!ok(json!({ "id": "wa1", "type": "widget", "of": "today", "size": "L" })));
-        assert!(!ok(json!({ "id": "wa1", "type": "widget", "of": "today", "icon": "nope" })));
-        assert!(!ok(json!({ "id": "wa1", "type": "widget", "of": "today", "name": "x".repeat(41) })));
-        assert!(!ok(json!({ "id": "wa1", "type": "flex", "colour": "#fff" })));
-        assert!(!ok(json!({ "id": "wa1", "type": "clock" })));
-        // Each once, 32 at most.
-        assert!(!super::is_taskbar_layout(&json!({ "left": [{ "id": "wa1", "type": "sep" }], "right": [{ "id": "wa1", "type": "sep" }] })));
-        let many: Vec<_> = (0..33).map(|i| json!({ "id": format!("w{i}"), "type": "gap" })).collect();
-        assert!(!super::is_taskbar_layout(&json!({ "right": many })));
-        assert!(super::is_taskbar_layout(&json!({ "right": many[..32] })));
-    }
-
-    #[test]
-    fn what_the_taskbar_shows() {
-        let layout = json!({ "left": ["her"], "right": [{ "id": "wa", "type": "widget", "of": "tokens" }, { "id": "wb", "type": "plugin", "of": "stock" }, "clock"] });
-        assert!(super::is_on_taskbar(&layout, "tokens"));
-        assert!(super::is_on_taskbar(&layout, "stock-aapl"));
-        assert!(!super::is_on_taskbar(&layout, "today"));
-        assert!(!super::is_on_taskbar(&layout, "weather"));
-        assert!(!super::is_on_taskbar(&json!(null), "tokens"));
     }
 }

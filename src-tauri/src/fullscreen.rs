@@ -4,32 +4,8 @@
 // Full screen: the foreground window covers its whole monitor and has no title
 // bar. A maximised window has one (and stops at the taskbar), so it is not.
 // And only on a display she is on (on: their rects; none given, any): a
-// video full screen on the second display hid her taskbar on the main one
-// (the user, 2026-10-13); Windows' own steps aside only on its own display.
-
-use std::sync::{Condvar, Mutex};
-use std::time::{Duration, Instant};
-
-// Asked to look now: a window came to the front, or the one in front was
-// sized (the taskbar's hooks, taskbar.rs). When it was first asked, until
-// looked at: however many asks come meanwhile, one look.
-static ASKED: Mutex<Option<Instant>> = Mutex::new(None);
-static WAKE: Condvar = Condvar::new();
-
-pub fn ask() {
-    let mut asked = ASKED.lock().unwrap();
-    if asked.is_none() {
-        *asked = Some(Instant::now());
-        WAKE.notify_one();
-    }
-}
-
-// Until asked, or the time is up: when it was asked (None: the time).
-pub fn wait(most: Duration) -> Option<Instant> {
-    let asked = ASKED.lock().unwrap();
-    let (mut asked, _) = WAKE.wait_timeout_while(asked, most, |a| a.is_none()).unwrap();
-    asked.take()
-}
+// video full screen on the second display is none of hers (the user,
+// 2026-10-13). Looked at every 1.5 s (main.rs).
 
 #[cfg(windows)]
 mod imp {

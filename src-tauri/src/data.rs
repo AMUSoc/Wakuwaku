@@ -72,25 +72,8 @@ fn defaults() -> Map<String, Value> {
         "out": false,
         // The compact island's width: narrow, normal or wide (island.js WIDTHS).
         "islandWidth": "normal",
-        // The taskbar's strip: mica (the desktop's picture through it, mica.js),
-        // black (solid: black, or light in Windows' light mode) or clear (the
-        // desktop itself through it, a new user's since 2026-10-13); clear,
-        // Mica or solid while a window is maximized or full screen on its
-        // display (mica, solid), or clear always.
-        "taskbarMaterial": "clear",
-        // Her taskbar on the main display alone (Windows' own on the others)
-        // or on all of them (bars.rs).
-        "taskbarDisplays": "main",
-        "taskbarClearWhen": "mica",
-        // Its programs' buttons: icons alone or with their titles; in the
-        // middle of the screen or after her end (island.js alignApps).
-        "taskbarButtons": "icons",
-        "taskbarAlign": "center",
-        // The screen's edge it is along: bottom (Windows' own place), top,
-        // left or right (side bars: an upright capsule, icons alone).
-        "taskbarEdge": "bottom",
-        // OLED's guard, on unless turned off: the island's and the taskbar's
-        // icons and words a screen pixel off by turns (island.js oledShift).
+        // OLED's guard, on unless turned off: the island a screen pixel off
+        // by turns (island.js oledShift).
         "oledShift": true,
         // Her updates looked for as she starts and once a day (updates.rs;
         // a downloaded exe only); downloaded from Gitee first in China and
@@ -121,9 +104,6 @@ fn defaults() -> Map<String, Value> {
         "dnd": false,
         "hideInFullscreen": true,
         "onboarded": false,
-        // Which defaults a config was written under (load: one from before
-        // 2026-10-13 keeps the look it had).
-        "lookDefaults": 2,
     }) else {
         unreachable!()
     };
@@ -132,8 +112,7 @@ fn defaults() -> Map<String, Value> {
 
 pub fn load(dir: &Path) -> Map<String, Value> {
     let mut settings = defaults();
-    if let Ok(Value::Object(mut saved)) = fs::read_to_string(dir.join("config.json")).map_err(|_| ()).and_then(|t| serde_json::from_str(&t).map_err(|_| ())) {
-        keep_old_look(&mut saved);
+    if let Ok(Value::Object(saved)) = fs::read_to_string(dir.join("config.json")).map_err(|_| ()).and_then(|t| serde_json::from_str(&t).map_err(|_| ())) {
         settings.extend(saved);
     }
     // The homes of earlier versions are the island now: the capsule, the
@@ -149,51 +128,41 @@ pub fn load(dir: &Path) -> Map<String, Value> {
         }
         _ => {}
     }
-    settings.remove("corner");
-    settings.remove("bubble");
+    for gone in GONE {
+        settings.remove(*gone);
+    }
     adopt_monitor(&mut settings);
-    drop_part(&mut settings, "tags");
-    // The gear, gone on 2026-10-14 (zhoupengjie/Wakuwaku#38), and its switch.
-    drop_part(&mut settings, "gear");
-    settings.remove("taskbarGear");
     settings
 }
 
-// A part the taskbar no longer has taken out of a layout kept with it, the
-// rest kept as it was (the sessions' tags, gone from the taskbar on
-// 2026-10-12, and the settings' gear on 2026-10-14: settings.rs would turn
-// down the whole layout for either).
-fn drop_part(settings: &mut Map<String, Value>, part: &str) {
-    if let Some(Value::Object(runs)) = settings.get_mut("taskbarLayout") {
-        for run in runs.values_mut() {
-            if let Some(list) = run.as_array_mut() {
-                list.retain(|p| p.as_str() != Some(part));
-            }
-        }
-    }
-}
-
-// The defaults changed on 2026-10-13 (a new user's taskbar clear, and her
-// island bare in the dark mode, the person's own look): a config written
-// before keeps the look it had, once (lookDefaults then 2): Mica where none
-// was chosen, and her island in the dark mode Windows' grey flyout, not
-// bare, where it was the default.
-fn keep_old_look(saved: &mut Map<String, Value>) {
-    if saved.contains_key("lookDefaults") {
-        return;
-    }
-    saved.insert("lookDefaults".into(), json!(2));
-    saved.entry("taskbarMaterial").or_insert_with(|| json!("mica"));
-    let looks = saved.entry("islandLook").or_insert(Value::Null);
-    if !looks.is_object() {
-        *looks = json!({});
-    }
-    if let Some(looks) = looks.as_object_mut() {
-        if !looks.get("dark").is_some_and(Value::is_object) {
-            looks.insert("dark".into(), json!({ "bg": "#2c2c2c", "op": 100, "blur": 0, "edge": "line", "bare": false }));
-        }
-    }
-}
+// Settings of what she no longer has: the bubble and the corner; the
+// taskbar home, its look, layout, tray and pins, and her island's look on
+// it; the mail; the Windows look and wallpaper pages kept nothing.
+const GONE: &[&str] = &[
+    "corner",
+    "bubble",
+    "taskbarMaterial",
+    "taskbarDisplays",
+    "taskbarClearWhen",
+    "taskbarButtons",
+    "taskbarAlign",
+    "taskbarEdge",
+    "taskbarLayout",
+    "taskbarOrder",
+    "taskbarGear",
+    "taskbarPinsImported",
+    "taskbarPinned",
+    "trayPinned",
+    "trayOrder",
+    "islandLook",
+    "lookDefaults",
+    "mail",
+    "mailAgent",
+    "mailAgentConf",
+    "mailPanes",
+    "mailOffline",
+    "mailProxy",
+];
 
 // CPU · memory, the network and the battery were widgets of their own: now
 // they are the monitor's parts. It is on if any of them was, with those
@@ -361,38 +330,15 @@ mod tests {
     }
 
     #[test]
-    fn a_config_from_before_keeps_its_look() {
-        // Written before 2026-10-13, nothing chosen: Mica, and her island grey.
-        let mut s = settings(json!({ "pet": "x" }));
-        keep_old_look(&mut s);
-        assert_eq!(s["taskbarMaterial"], "mica");
-        assert_eq!(s["islandLook"]["dark"]["bare"], false);
-        assert_eq!(s["lookDefaults"], 2);
-        // What was chosen stays; a light look stays; the dark one as it was.
-        let mut s = settings(json!({ "taskbarMaterial": "black", "islandLook": { "light": { "bare": true }, "dark": { "bg": "#000000", "bare": true } } }));
-        keep_old_look(&mut s);
-        assert_eq!(s["taskbarMaterial"], "black");
-        assert_eq!(s["islandLook"]["light"]["bare"], true);
-        assert_eq!(s["islandLook"]["dark"]["bg"], "#000000");
-        // Reset to the default before (null): the old default, grey.
-        let mut s = settings(json!({ "islandLook": { "dark": null } }));
-        keep_old_look(&mut s);
-        assert_eq!(s["islandLook"]["dark"]["bare"], false);
-        // Once only: one written since keeps whatever it says, the new defaults included.
-        let mut s = settings(json!({ "lookDefaults": 2, "islandLook": null }));
-        keep_old_look(&mut s);
-        assert_eq!(s["islandLook"], Value::Null);
-        assert!(!s.contains_key("taskbarMaterial"));
-        // A new user: the new defaults.
-        assert_eq!(defaults()["taskbarMaterial"], "clear");
-    }
-
-    #[test]
     fn the_taskbar_home_is_the_island_now() {
         let dir = std::env::temp_dir().join(format!("wakuwaku-home-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
-        fs::write(dir.join("config.json"), r#"{ "display": "taskbar", "out": false }"#).unwrap();
-        assert_eq!(load(&dir)["display"], "island");
+        fs::write(dir.join("config.json"), r#"{ "display": "taskbar", "out": false, "taskbarEdge": "left", "islandLook": {}, "mail": [], "walk": false }"#).unwrap();
+        let s = load(&dir);
+        assert_eq!(s["display"], "island");
+        // What she no longer has is let go; the rest kept.
+        assert!(!s.contains_key("taskbarEdge") && !s.contains_key("islandLook") && !s.contains_key("mail"));
+        assert_eq!(s["walk"], false);
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(defaults()["display"], "island");
     }
@@ -413,19 +359,4 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn the_sessions_tags_leave_a_kept_layout() {
-        let w = json!({ "id": "wa1", "type": "sep" });
-        let mut s = settings(json!({ "taskbarLayout": { "left": ["her"], "center": ["start", "apps", "tags"], "right": [w, "clock"] } }));
-        drop_part(&mut s, "tags");
-        assert_eq!(s["taskbarLayout"], json!({ "left": ["her"], "center": ["start", "apps"], "right": [w, "clock"] }));
-        // The gear too (#38), wherever it was moved to.
-        let mut s = settings(json!({ "taskbarLayout": { "left": ["gear", "her"], "center": ["start", "apps"], "right": ["clock", "gear"] } }));
-        drop_part(&mut s, "gear");
-        assert_eq!(s["taskbarLayout"], json!({ "left": ["her"], "center": ["start", "apps"], "right": ["clock"] }));
-        // None kept: nothing to do.
-        let mut s = settings(json!({ "taskbarLayout": null }));
-        drop_part(&mut s, "tags");
-        assert_eq!(s["taskbarLayout"], Value::Null);
-    }
 }

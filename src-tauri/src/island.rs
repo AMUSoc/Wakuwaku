@@ -101,12 +101,6 @@ pub fn hwnd(sh: &Shared) -> isize {
     sh.island.lock().unwrap().hwnd
 }
 
-// Where its window is (physical) and its scale: the page's px to the screen's.
-pub fn origin(sh: &Shared) -> ((i32, i32), f64) {
-    let isl = sh.island.lock().unwrap();
-    (isl.pos, isl.sf())
-}
-
 // Where its window is and its size (physical), and its scale.
 pub fn frame(sh: &Shared) -> ((i32, i32), (i32, i32), f64) {
     let isl = sh.island.lock().unwrap();

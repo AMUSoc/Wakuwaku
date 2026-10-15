@@ -406,46 +406,6 @@ mod sys {
         fn GetIfTable(table: *mut u8, size: *mut u32, order: i32) -> u32;
     }
 
-    // The battery as Windows' quick settings show it, or None without a
-    // battery. Its state unknown (255), the level still counts.
-    pub fn power() -> Option<super::Power> {
-        let mut p = PowerStatus::default();
-        // SAFETY: fills our own struct.
-        if unsafe { GetSystemPowerStatus(&mut p) } == 0 || (p.battery_flag != 255 && p.battery_flag & 128 != 0) || p.percent > 100 {
-            return None;
-        }
-        let plugged = p.ac_line == 1;
-        let known = p.battery_flag != 255;
-        Some(super::Power {
-            percent: p.percent,
-            plugged,
-            charging: known && p.battery_flag & 8 != 0,
-            saver: p.saver & 1 != 0,
-            critical: known && p.battery_flag & 4 != 0,
-            left: (p.life_secs != u32::MAX && !plugged).then_some(p.life_secs),
-        })
-    }
-
-    // Windows' own battery glyphs (SysBatt Fluent Icons), the font its
-    // taskbar draws the battery in, from where Windows keeps it; None before
-    // Windows 11 has it.
-    pub fn battery_font() -> Option<Vec<u8>> {
-        let windows = std::env::var_os("WINDIR").map(std::path::PathBuf::from).unwrap_or_else(|| r"C:\Windows".into());
-        [r"SystemApps\MicrosoftWindows.Client.Core_cw5n1h2txyewy\SystemTray\Assets\Sysbatt.ttf", r"SystemResources\Windows.UI.ControlCenter\Assets\Sysbatt.ttf"]
-            .iter()
-            .find_map(|at| std::fs::read(windows.join(at)).ok())
-    }
-
-    // Windows' "Battery percentage" (Settings > System > Power & battery):
-    // the percentage beside the battery on the taskbar.
-    pub fn battery_percent_shown() -> bool {
-        use winreg::enums::HKEY_CURRENT_USER;
-        winreg::RegKey::predef(HKEY_CURRENT_USER)
-            .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced")
-            .and_then(|k| k.get_value::<u32, _>("IsBatteryPercentageEnabled"))
-            .is_ok_and(|on| on != 0)
-    }
-
     // (percent, charging, seconds left if known), or None without a battery.
     pub fn battery() -> Option<(u8, bool, Option<u32>)> {
         let mut p = PowerStatus::default();
@@ -527,55 +487,9 @@ mod sys {
     pub fn battery() -> Option<(u8, bool, Option<u32>)> {
         None
     }
-    pub fn power() -> Option<super::Power> {
-        None
-    }
-    pub fn battery_font() -> Option<Vec<u8>> {
-        None
-    }
-    pub fn battery_percent_shown() -> bool {
-        false
-    }
     pub fn network_bytes() -> Option<(u64, u64)> {
         None
     }
-}
-
-// The battery: its level, plugged in, charging (a battery kept from charging
-// while plugged in, as a laptop's battery care does at 80%, is plugged in and
-// not charging), the battery saver on, critically low, the seconds left when
-// Windows knows them.
-pub struct Power {
-    percent: u8,
-    plugged: bool,
-    charging: bool,
-    saver: bool,
-    critical: bool,
-    left: Option<u32>,
-}
-
-// The battery for the taskbar's quick settings, beside the network and the
-// volume as Windows' own shows it there on a laptop (taskbar.rs keys_loop,
-// island.js showBattery), with whether Windows shows its percentage beside
-// it; null without a battery (a desktop), and none is shown.
-pub fn battery_state() -> Value {
-    match sys::power() {
-        Some(p) => json!({
-            "percent": p.percent,
-            "plugged": p.plugged,
-            "charging": p.charging,
-            "saver": p.saver,
-            "critical": p.critical,
-            "left": p.left,
-            "shown": sys::battery_percent_shown(),
-        }),
-        None => Value::Null,
-    }
-}
-
-// Windows' battery font (taskbar_battery_font), or nothing to have it from.
-pub fn battery_font() -> Vec<u8> {
-    sys::battery_font().unwrap_or_default()
 }
 
 // Bytes a second, in a few characters: 512B, 8.4K, 80K, 1.2M, 35M, 1.1G.
