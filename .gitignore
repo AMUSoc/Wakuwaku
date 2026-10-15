@@ -8,6 +8,7 @@ data/*
 !data/pets/
 data/pets/*
 !data/pets/grok-chan/
+!data/pets/gpt-astra/
 # A test copy's data folder (WAKUWAKU_USER_DATA=data2)
 data2/
 
@@ -30,8 +31,9 @@ Thumbs.db
 # Only the note about them goes in (see art/README.md).
 art/*
 !art/README.md
-# Except Grok小姐's pose sheet and its preview (art/README.md).
+# Except the sheets and previews of the pets made here (art/README.md).
 !art/grok/
+!art/astra/
 
 # The Thunderbird extension, packed (integrations/thunderbird/build.ps1)
 integrations/thunderbird/*.xpi
@@ -40,5 +42,5 @@ integrations/thunderbird/*.xpi
 tools/dumps/
 
 # tools/slice_sheet.py's frames, made again from the pose sheet; Python's cache
-tools/grok-frames/
+tools/*-frames/
 __pycache__/

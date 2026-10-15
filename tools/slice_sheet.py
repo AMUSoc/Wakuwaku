@@ -1,7 +1,8 @@
 """把 3×3 的 Q 版姿勢表切成 Wakuwaku 寵物的各列幀，排成圖集（docs/MAKING_A_PET.md）。
 
 用法：
-  python tools/slice_sheet.py <姿勢表.png> <輸出資料夾> [--run-b 檔案] [--id 寵物id] [--name 顯示名]
+  python tools/slice_sheet.py <姿勢表.png> <輸出資料夾> [--run-a 檔案] [--run-b 檔案] [--id 寵物id]
+                              [--name 顯示名] [--description 說明] [--match-eyes] [--eyes-preview 對照.png]
                               [--fit same|each | --height N] [--preview 預覽.png]
                               [--crop-preview 裁切預覽.png] [--look 視線表.png] [--breathe]
                               [--look-preview 視線預覽.png]
@@ -10,6 +11,15 @@
   idle-a、idle-b、wave、jump、failed、waiting、working、review、run-a
 --run-b：第二張跑步幀（一張圖，透明背景）；沒有就全部用 run-a。它和姿勢表通常畫得不一樣大，
   所以用自己的比例：縮放後和 run-a 一樣高；腳底、置中和 run-a 相同。
+--run-a：用另外畫的一張取代姿勢表第 9 格的跑步幀。這時 run-a 和 run-b 用同一個比例（兩張是一起
+  畫的）：run-a 縮放後和姿勢表第 9 格一樣高，run-b 照同一比例。
+--description：寫進 pet.json 的說明；不給就沿用已有 pet.json 的說明。
+--match-eyes：run-a、run-b 的眼睛顏色對齊到 idle-a（另外畫的跑步幀常和姿勢表的眼睛深淺不一）。
+  眼睛的找法：人的上面 45% 裡，色相在紫色附近（225–290°）、有點飽和的連通區塊中，正上方深色
+  睫毛最多的那塊（idle-a 正面，取兩塊）。目標色是 idle-a 虹膜的飽和度、亮度中位數；跑步幀眼睛
+  範圍裡的紫色像素（不含白色反光和黑色睫毛），飽和度、亮度按比例縮放到中位數和目標一樣，深淺
+  層次留著，色相不動，其他像素不碰。找到的範圍和前後的數值會印出來；--eyes-preview 另存前後的
+  眼睛局部放大對照。
 
 做的事：
   1. 用透明區域的投影切出 9 格（先切列，再在每一列裡切欄），各自裁掉多餘的透明邊。
@@ -55,7 +65,6 @@ CELL_W, CELL_H = make_sheet.CELL_W, make_sheet.CELL_H
 FIT_W, FIT_H = 180, 200
 FEET_Y = {'jump': 196}
 FEET_Y_DEFAULT = 204
-DESCRIPTION = '角色設計參考自 B 站 UP 主「沉默寡言佰佰」的 Grok 4.7 形象，非官方 Q 版二創。'
 
 
 def clean(im, floor):
@@ -154,6 +163,119 @@ def cut(sheet, n=3):
             cell = drop_strays(sheet.crop((x0, y0, x1, y1)))
             cells.append(cell.crop(cell.getbbox()))
     return cells
+
+
+# 眼睛：紫色的色相範圍（度）、算虹膜的飽和度下限、上面幾成算頭。
+EYE_HUE = (225, 290)
+EYE_HEAD = 0.45
+
+
+def hsv_of(im):
+    """H（度）、S、V（0–1）三個陣列。"""
+    h = np.array(im.convert('RGB').convert('HSV'), dtype=float) / 255.0
+    return h[..., 0] * 360, h[..., 1], h[..., 2]
+
+
+def components(mask):
+    """8 連通的區塊編號（不用 scipy）。"""
+    lab = np.zeros(mask.shape, dtype=np.int32)
+    height, width = mask.shape
+    n = 0
+    for y0, x0 in zip(*np.nonzero(mask)):
+        if lab[y0, x0]:
+            continue
+        n += 1
+        lab[y0, x0] = n
+        todo = [(y0, x0)]
+        while todo:
+            y, x = todo.pop()
+            for yy in (y - 1, y, y + 1):
+                for xx in (x - 1, x, x + 1):
+                    if 0 <= yy < height and 0 <= xx < width and mask[yy, xx] and not lab[yy, xx]:
+                        lab[yy, xx] = n
+                        todo.append((yy, xx))
+    return lab, n
+
+
+def find_eyes(im, count):
+    """人的上面 EYE_HEAD 裡，紫色、有點飽和的區塊中，正上方睫毛（很暗的點）最多的 count 塊的範圍。"""
+    hue, sat, val = hsv_of(im)
+    a = np.array(im.getchannel('A'))
+    top = int(a.shape[0] * EYE_HEAD)
+    iris = (a > 200) & (hue > EYE_HUE[0]) & (hue < EYE_HUE[1]) & (sat >= 0.2) & (val > 0.35) & (val < 0.97)
+    iris[top:] = False
+    lash = (a > 200) & (val < 0.18)
+    lab, n = components(iris)
+    found = []
+    for k in range(1, n + 1):
+        ys, xs = np.nonzero(lab == k)
+        if len(ys) < 12:
+            continue
+        x0, y0, x1, y1 = int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+        reach = max(3, (y1 - y0) // 4)
+        found.append((int(lash[max(0, y0 - reach):y0 + 3, x0:x1].sum()), (x0, y0, x1, y1)))
+    found.sort(reverse=True)
+    if not found:
+        sys.exit('找不到眼睛：上面沒有紫色、上方有睫毛的區塊')
+    # 第二塊得分不到第一塊的一半就不是眼睛（側臉只看得到一隻）。
+    best = found[0][0]
+    return [box for score, box in found[:count] if score >= best / 2]
+
+
+def eye_pixels(im, boxes, margin=3):
+    """眼睛範圍（各往外 margin）裡要調的像素：紫色、不是白色反光（S < 0.1）也不是睫毛（V < 0.15）。"""
+    hue, sat, val = hsv_of(im)
+    a = np.array(im.getchannel('A'))
+    inside = np.zeros(a.shape, dtype=bool)
+    for x0, y0, x1, y1 in boxes:
+        inside[max(0, y0 - margin):y1 + margin, max(0, x0 - margin):x1 + margin] = True
+    return inside & (a > 0) & (hue > EYE_HUE[0]) & (hue < EYE_HUE[1]) & (sat >= 0.1) & (val >= 0.15) & (val < 0.97)
+
+
+def eye_color(im, boxes):
+    """眼睛範圍裡要調的像素的飽和度、亮度、色相中位數。"""
+    hue, sat, val = hsv_of(im)
+    m = eye_pixels(im, boxes)
+    return float(np.median(sat[m])), float(np.median(val[m])), float(np.median(hue[m]))
+
+
+def match_eyes(im, boxes, target):
+    """眼睛的紫色像素：飽和度、亮度各乘一個倍數，中位數對齊到 target；色相不動，其他像素原樣。"""
+    m = eye_pixels(im, boxes)
+    s_now, v_now, _ = eye_color(im, boxes)
+    hsv = np.array(im.convert('RGB').convert('HSV'), dtype=float)
+    hsv[..., 1][m] = np.clip(hsv[..., 1][m] * target[0] / s_now, 0, 255)
+    hsv[..., 2][m] = np.clip(hsv[..., 2][m] * target[1] / v_now, 0, 255)
+    rgb = np.array(Image.fromarray(hsv.round().astype(np.uint8), 'HSV').convert('RGB'))
+    out = np.array(im)
+    out[..., :3][m] = rgb[m]
+    return Image.fromarray(out, 'RGBA'), int(m.sum())
+
+
+def eyes_preview(rows, out, height=150):
+    """眼睛局部放大對照：每一列 [標題, 圖, 範圍] 的幾格並排；範圍各往外留一點，放大到同一個高度。"""
+    tiles = []
+    for row in rows:
+        line = []
+        for im, boxes in row:
+            x0 = min(b[0] for b in boxes); y0 = min(b[1] for b in boxes)
+            x1 = max(b[2] for b in boxes); y1 = max(b[3] for b in boxes)
+            pad = max(8, (y1 - y0) // 2)
+            crop = im.crop((x0 - pad, y0 - pad, x1 + pad, y1 + pad))
+            board = Image.new('RGBA', crop.size, (255, 255, 255, 255))
+            board.alpha_composite(crop)
+            z = height / crop.height
+            line.append(board.convert('RGB').resize((max(1, round(crop.width * z)), height), Image.NEAREST if z >= 2 else Image.LANCZOS))
+        tiles.append(line)
+    gap = 12
+    width = max(sum(t.width for t in line) + gap * (len(line) + 1) for line in tiles)
+    sheet = Image.new('RGB', (width, len(tiles) * (height + gap) + gap), (255, 255, 255))
+    for i, line in enumerate(tiles):
+        x = gap
+        for t in line:
+            sheet.paste(t, (x, gap + i * (height + gap)))
+            x += t.width + gap
+    sheet.save(out)
 
 
 def scale_of(im):
@@ -309,7 +431,11 @@ def main():
     p = argparse.ArgumentParser(description='把 3×3 姿勢表排成 Wakuwaku 的寵物圖集')
     p.add_argument('sheet')
     p.add_argument('out')
+    p.add_argument('--run-a', help='另外畫的跑步幀，取代姿勢表第 9 格')
     p.add_argument('--run-b')
+    p.add_argument('--description', help='pet.json 的說明（不給就沿用已有的）')
+    p.add_argument('--match-eyes', action='store_true', help='run-a、run-b 的眼睛顏色對齊到 idle-a')
+    p.add_argument('--eyes-preview', help='另存 --match-eyes 前後的眼睛局部放大對照')
     p.add_argument('--id')
     p.add_argument('--name')
     p.add_argument('--fit', choices=['same', 'each'], default='same')
@@ -331,14 +457,40 @@ def main():
     else:
         same = min(scale_of(im) for im in poses.values())
     scales = {k: scale_of(im) if args.fit == 'each' and not args.height else same for k, im in poses.items()}
+
+    def drawn(path):
+        im = drop_strays(clean(Image.open(path).convert('RGBA'), args.alpha))
+        return im.crop(im.getbbox())
+
+    if args.run_a:
+        # 另外畫的一張：縮放後和姿勢表第 9 格一樣高；run-b 和它一起畫的，用同一比例。
+        sheet_run = poses['run-a']
+        poses['run-a'] = drawn(args.run_a)
+        scales['run-a'] = scales['run-a'] * sheet_run.height / poses['run-a'].height
     if args.run_b:
-        run_b = drop_strays(clean(Image.open(args.run_b).convert('RGBA'), args.alpha))
-        poses['run-b'] = run_b.crop(run_b.getbbox())
-        # 另外畫的一張：縮放後和 run-a 一樣高。
-        scales['run-b'] = scales['run-a'] * poses['run-a'].height / poses['run-b'].height
+        poses['run-b'] = drawn(args.run_b)
+        # 和 run-a 一起畫的：同一比例；否則縮放後和 run-a 一樣高。
+        scales['run-b'] = scales['run-a'] if args.run_a else scales['run-a'] * poses['run-a'].height / poses['run-b'].height
     else:
         poses['run-b'] = poses['run-a']
         scales['run-b'] = scales['run-a']
+
+    if args.match_eyes:
+        idle_eyes = find_eyes(poses['idle-a'], 2)
+        target = eye_color(poses['idle-a'], idle_eyes)
+        print(f'眼睛目標色（idle-a，{len(idle_eyes)} 隻 {idle_eyes}）：S {target[0]:.2f}、V {target[1]:.2f}、H {target[2]:.0f}°')
+        rows = [[(poses['idle-a'], idle_eyes)]]
+        for k in ['run-a', 'run-b'] if args.run_b else ['run-a']:
+            eyes = find_eyes(poses[k], 2)
+            before = eye_color(poses[k], eyes)
+            was = poses[k]
+            poses[k], changed = match_eyes(was, eyes, target)
+            after = eye_color(poses[k], eyes)
+            print(f'{k} 眼睛 {eyes}：{changed} px，S {before[0]:.2f} → {after[0]:.2f}、V {before[1]:.2f} → {after[1]:.2f}、H {before[2]:.0f}° → {after[2]:.0f}°')
+            rows.append([(was, eyes), (poses[k], eyes)])
+        if args.eyes_preview:
+            eyes_preview(rows, args.eyes_preview)
+            print(f'眼睛對照：{args.eyes_preview}')
 
     frames = {}
     for k, im in poses.items():
@@ -375,10 +527,16 @@ def main():
     pet = ROOT / 'data' / 'pets' / pet_id
     pet.mkdir(parents=True, exist_ok=True)
     make_sheet.main(out, pet / 'spritesheet.webp')
+    description = args.description
+    if description is None:
+        try:
+            description = json.loads((pet / 'pet.json').read_text(encoding='utf-8')).get('description', '')
+        except (OSError, ValueError):
+            description = ''
     meta = {
         'id': pet_id,
         'displayName': name,
-        'description': DESCRIPTION,
+        'description': description,
         'spritesheetPath': 'spritesheet.webp',
         'spriteVersionNumber': 2,
         'kind': 'person',
