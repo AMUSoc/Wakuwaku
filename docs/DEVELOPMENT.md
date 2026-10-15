@@ -7,7 +7,7 @@ Wakuwaku 是一个 Tauri 2 程序：页面是 `src/` 里的 HTML / JS / CSS，�
 ```
 src/                      页面，Tauri 直接把整个文件夹打进 exe（tauri.conf.json 的 frontendDist）
   pet/
-    index.html            她的窗口（?role=pet）和灵动岛的窗口（?role=island）共用的页面
+    index.html            桌宠窗口（?role=pet&agent=<agent>）和灵动岛的窗口（?role=island）共用的页面
     bridge.js             window.pet：页面和 Rust 之间的调用和事件；替页面补发鼠标进出（见"点击穿透"）
     pet.js                她的动画、空闲时走动和东张西望
     island.js             灵动岛：几种形状、她在岛里、把她拉出来和放回去
@@ -21,7 +21,7 @@ src/                      页面，Tauri 直接把整个文件夹打进 exe（ta
 src-tauri/
   src/
     main.rs               入口：--wakuwaku-ensure-running、--wakuwaku-codex-hook、--wakuwaku-agy-hook、守护进程、单实例、各部分共享的 Shared、页面能调的命令
-    pet.rs                她的窗口：大小和位置、眼睛、拖动和被"携带"、走动、头顶的面板、飞回岛里
+    pet.rs                桌宠窗口（每个 agent 一个，pet-<agent>）：大小和位置、眼睛、拖动和被"携带"、走动、头顶的面板、飞回岛里
     island.rs             灵动岛的窗口：放在哪、按页面要求扩大、伸手够她、把她吸回去、为设置临时升起、置顶
     backplate.rs          垫在岛的窗口正下面的亚克力：一个自己的原生窗口，DWM 模糊它后面的别的窗口（#20）
     updates.rs            软件更新：看 GitHub 和 Gitee 的最新发布、在岛上提示、下载校验替换并重启
@@ -52,7 +52,7 @@ src-tauri/
     data.rs               数据目录、设置读写、已下载的宠物和 Codex 的宠物
     detach.rs             以资源管理器为父进程启动她（hook 拉起、更新、守护进程），不落在启动者的作业里；启动时自查
   icons/                  exe、窗口、托盘和通知的图标（npm 不需要：scripts/make-icons.js 用 ImageMagick 画）
-  capabilities/           页面能用的 Tauri 权限：两个窗口都要列进去
+  capabilities/           页面能用的 Tauri 权限：岛和桌宠窗口（pet-*）都要列进去
 integrations/claude-code/ Claude Code 插件 wakuwaku（只有 HTTP hooks）
 .claude-plugin/           插件市场入口 marketplace.json（位置是 Claude Code 规定的）
 scripts/make-icons.js     画图标（node + ImageMagick），输出提交在 src-tauri/icons
@@ -183,7 +183,7 @@ hook 事件在 `events.rs`（Codex 的在 `events_codex.rs`）换算成消息，
 | `POST /widget` | 岛上的一个插件（见"岛上的插件"）；回 `{ ok: true }`，或者 400 和 `{ error }` |
 | `POST /come-home` | 再次启动时用：她重新出现 |
 | `POST /quit` | 像菜单里的「退出」一样退出；换新版本时用，别直接杀进程 |
-| `POST /debug/eval` | `{ page: "pet" \| "island", code }`：在页面里运行一段表达式，返回结果（可以是 Promise） |
+| `POST /debug/eval` | `{ page: "island" \| "pet-<agent>", code }`：在页面里运行一段表达式，返回结果（可以是 Promise）；`"pet"` 是 Claude 的桌宠 |
 | `POST /debug/walk` | `{ dx, ms }`：立刻走一段 |
 
 ## 在宠物上确认
@@ -264,7 +264,7 @@ examples/widgets 里的天气、股票、番茄钟、倒计时、久坐提醒、
 
 ## 她的家：灵动岛
 
-`display` 是她的家，只有 `island`；`out` 是她在不在桌面上。旧设置里的 `pet`、`capsule`、`corner`、`bar`、`taskbar` 读进来都换成 `island`（`pet` 另外设 `out: true`）；已经没有的功能留下的设置（`corner`、`bubble`，任务栏的 `taskbar*`、`tray*`、`islandLook`，邮件的 `mail*` 等）读的时候丢掉（`data.rs` 的 `load`、`GONE`）。
+`display` 是她的家，只有 `island`；`desktop`（`{ claude, codex, agy, grok }`）是哪几个 agent 的桌宠在桌面上，`spots` 是各自放在哪（物理像素，`pet.rs` 写）。旧的 `out`、`x`、`y` 读进来变成 Claude 的（`data.rs` 的 `adopt_out`）。旧设置里的 `pet`、`capsule`、`corner`、`bar`、`taskbar` 读进来都换成 `island`（`pet` 另外让 Claude 的桌宠在桌面上）；已经没有的功能留下的设置（`corner`、`bubble`，任务栏的 `taskbar*`、`tray*`、`islandLook`，邮件的 `mail*` 等）读的时候丢掉（`data.rs` 的 `load`、`GONE`）。
 
 **谁说话**：她的家。她出门在桌面上时只做动作：`pet.js` 不显示状态气泡（气泡只在没有宠物可显示时说一句怎么下载），确认面板只在岛的窗口里（`panel.js` 的 `holdsPanel`），提示音和通知也发给岛的窗口；状态变化、插件冒头时岛自己展开。
 
@@ -280,9 +280,9 @@ examples/widgets 里的天气、股票、番茄钟、倒计时、久坐提醒、
 
 她在岛里只有一个元素 `#island-her`：外层管裁剪框（位置、大小、圆角），里层 `.sheet` 是原尺寸的一格图集，用 `transform: translate() scale()` 缩放。收起时是 0.21 倍、24px 的圆形头像；设置里是 0.28 倍、32px 的头像；展开和面板时是 0.5 倍的全身。都是同一组 CSS 属性，所以头像是"长成"全身的。形状变化全在 CSS 里（弹簧曲线 `cubic-bezier(0.3, 1.45, 0.5, 1)`，0.56 秒），不逐帧改窗口大小：需要更多空间时页面先通过 `pet_panel` 让窗口变大，40ms 后再让岛长大；收回时等动画做完再缩窗口。
 
-**把她拉出来**：在 `#island-her` 上按下并移动超过 5px，岛的窗口扩到 760×440。`#goo` 层里岛的替身、一段脖子、一滴水三块黑色形状套 SVG 滤镜，就像液体一样连在一起。拉过 110px 断开：页面发 `island_release`（她的中心相对光标的偏移），Rust 把她的窗口放到光标下、设 `out: true`，然后跟随光标"携带"她（这时她的窗口完全穿透，按键还在岛的窗口上）。松手由岛的页面发 `island_drop`，或者由 Rust 读到按键已松开。没拉断就松手，她弹回座位。拉完那一下浏览器会在岛上补发一次 click，岛会忽略它（`pulledAt`），不当成"单击打开设置"。
+**把她拉出来**：在 `#island-her` 上按下并移动超过 5px，岛的窗口扩到 760×440。`#goo` 层里岛的替身、一段脖子、一滴水三块黑色形状套 SVG 滤镜，就像液体一样连在一起。拉过 110px 断开：页面发 `island_release`（她的中心相对光标的偏移），Rust 把岛正在代表的那个 agent 的桌宠窗口（没有就现在建）放到光标下、让它在桌面上（`desktop`），然后跟随光标"携带"她（这时她的窗口完全穿透，按键还在岛的窗口上）。松手由岛的页面发 `island_drop`，或者由 Rust 读到按键已松开。没拉断就松手，她弹回座位。拉完那一下浏览器会在岛上补发一次 click，岛会忽略它（`pulledAt`），不当成"单击打开设置"。
 
-**放回去**：她的窗口被拖动时，Rust 每帧算她的中心离岛下沿多远（280px 内靠近，140px 内够近），通过 `island:reach` 告诉岛的页面（坐标用逻辑像素，和页面的 `window.screenX` 一致），页面伸出一滴去够她。够近时松手：Rust 立刻藏起她的窗口，岛的页面播一段吸回去的动画（`island:absorb`），380ms 后设 `out: false`。在桌面上双击她，她会飞回岛里（`pet.rs` 的 `fly_home`）。
+**放回去**：她的窗口被拖动时，Rust 每帧算她的中心离岛下沿多远（280px 内靠近，140px 内够近），通过 `island:reach` 告诉岛的页面（坐标用逻辑像素，和页面的 `window.screenX` 一致），页面伸出一滴去够她。够近时松手：Rust 立刻藏起她的窗口，岛的页面播一段吸回去的动画（`island:absorb`），380ms 后让那只回家（`desktop` 里设为 false，窗口关掉）。在桌面上双击她，她会飞回岛里（`pet.rs` 的 `fly_home`）。
 
 **它自己的外观**（#27）：设置 `islandTopLook`，`{ dark, light }`，各自 `{ bg, op, blur, edge }`；没设时纯黑、一圈 `rgba(255,255,255,0.07)` 的细线、白字，和以前一样，所以老用户什么都不变。`island.js` 的 `lookNow` 按 `pet:update` 的 `winLight`（Windows 的浅色、深色；`island.rs` 的 `look_over_max` 发现模式变了就重画一次）选哪一份；样式是 `style.css` 的 `home-island` 一节（`--i-bg`、`--i-edge`、`--i-line`，浅底上线和字都变深）。页面自己的 `backdrop-filter` 在这里没有东西可模糊，所以不设 `--i-blur`：半透明又开了毛玻璃时，`backplate.rs` 的亚克力底板跟着岛走，收起、展开、确认都垫着（设置不垫），大小变的时候不藏（见上面 #20 的 `movePlate`），静默时不垫。底板用不了时（Windows 10、关了透明效果），设置里不显示「云母毛玻璃」预设和毛玻璃滑块。半透明又没有模糊时，所在屏幕上有窗口最大化（`island.rs` 的 `os::maximized_on`：会有任务栏按钮的窗口、最大化、中心在这块屏上），底色加深到 90%：`look_over_max` 跟着全屏检测每 1.5 秒看一次（只在设了顶部外观、不透明度低于 90%、没有底板模糊、有人在用电脑时），变了才发 `island:over-max`。设置「外观」页的「灵动岛外观」放在灵动岛那一组里，预设是纯黑（默认）、Windows 深灰、云母毛玻璃、深灰 + 状态色光圈（深色），纯黑、Windows 浅灰、近白、云母毛玻璃、白 + 状态色光圈（浅色），上面一句说明这是顶部灵动岛的（`s.ilookTop`）；预览是桌面顶上的一颗岛，展开往下长。
 
@@ -394,6 +394,30 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 | 静默：工作集 | 549 MB | 171 MB |
 | 渲染所在的显卡 | 核显（屏在独显上，#13 测的） | 独显（输出她那块屏的） |
 
+## 每个 agent 一只桌宠（multi）
+
+岛还是一个，行为不变：显示最需要你的会话，用那个 agent 的角色。桌面上可以同时有多只桌宠，每个 agent 最多一只，各自只反映自己 agent 的会话。
+
+- **窗口**：`pet.rs` 每个 agent 一个窗口，标签 `pet-<agent>`（`capabilities` 写 `pet-*`），页面是 `index.html?role=pet&agent=<agent>`。状态在 `Shared.pets`（`pet::Pets`，每只一把锁；遍历时一只一只拿，不同时拿两把）。设置的 `desktop` 打开时才建窗口，关掉就关窗口（`pet::open_or_close`，`Shared::apply_visibility` 里每只看一次）：藏起来的 WebView 仍占着它的内存。没有窗口的 agent，`pointer` 线程、`ticker` 都直接跳过。
+- **各自的会话**：`state.rs` 的 `get_for`、`list_for`、`mood_for`、`seen_for` 只看那个 agent 的会话（`state::agent_key`：Claude Code 的会话没有 `agent`，算 `claude`）。每只的 `pet:update` 是 `Shared::pet_payload`：岛的那份里共用的部分（设置、语言、静默、插件……）加上自己 agent 的会话和自己 agent 的角色（`data::pet_of`），带 `agent`；页面只收自己 agent 的。会话的反应（`pet:react`，`state.rs` 在里面写上会话的 agent）只发给岛和那个 agent 的桌宠；她自己的反应（没有会话）发给全部。点一下桌宠：只有它跳，跳到它自己 agent 的会话的窗口。指针移到它上面：只把它自己 agent 的结束算看过。眼睛跟光标看的是它自己 agent 的心情。
+- **岛代表谁**：`Shared::island_agent` 是岛正在显示的会话的 agent（没有会话就是 `claude`）。岛上、托盘的「放她出来 / 叫她回家」，设置「通用」的「她在桌面上」快捷开关，从岛里把她拉出来，都是对这只；桌宠自己的右键菜单对它自己（`tray::Over::Her(agent)`，菜单项 `out:<agent>`、`corner:<agent>`）。岛上显示的那个 agent 的桌宠在桌面上时，岛里放她的头像，不放她本人（`herOut`）。
+- **确认面板**留在岛里（`panel.js` 的 `holdsPanel` 只有岛），等你的那个 agent 的桌宠自己会播等待的动作。
+- **位置**：每只各自记在 `spots`；没有记过的，从右下角起，按 `data::AGENTS` 的顺序每只往左挪一个窗口宽，不会叠在一起。大小、闲逛、眼睛跟光标是全部桌宠共用的设置。
+- **设置**：「外观」页「各个 agent 的角色」每一行有「放到桌面上」开关（`data-agent-out`，改 `desktop`）。
+- **测试副本**：`/health` 带 `pets`（每只的窗口：`made`、`shown`、位置），`/debug/walk` 可以带 `agent`。
+
+实测（2026-10-16，Windows 11，release 版测试副本，三个 agent 各有一个干活中的会话；每种情况等 20 秒，3 秒一次取 3 次平均；她的进程加上它的 WebView2 进程）：
+
+| | 进程（渲染进程） | 私有内存 | 工作集 | 6 秒内的 CPU 时间 |
+| --- | --- | --- | --- | --- |
+| 岛 + 0 只 | 6（1） | 187 MB | 92 MB | 0.09 s |
+| 岛 + 1 只 | 7（2） | 220 MB | 257 MB | 1.17 s |
+| 岛 + 2 只 | 8（3） | 280 MB | 417 MB | 1.23 s |
+| 岛 + 3 只 | 9（4） | 313 MB | 497 MB | 1.44 s |
+| 再全部关掉 | 6（1） | 208 MB | 265 MB | 0.16 s |
+
+每只桌宠一个自己的渲染进程，私有内存多 30–60 MB；浏览器、GPU、工具进程共用。CPU 主要是第一只：她一动，GPU 进程就要一直合成透明窗口；第二、第三只加得不多。全部关掉后窗口和渲染进程都没了，私有内存多出的约 20 MB 留在浏览器进程里。工作集受静默时的内存目标影响（没人碰时被压低），看私有内存比较准。
+
 ## 踩过的坑
 
 - **藏窗口不等于藏页面**：`WebviewWindow::hide` 只藏窗口，WebView2 照样当页面可见，定时器和动画都在跑；要连 WebView 一起藏（`win.as_ref().hide()`，即 `SetIsVisible(false)`），`document.hidden` 才是真。
@@ -402,7 +426,8 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 - **右键菜单一闪就没**：muda 弹菜单前调用 `SetForegroundWindow`，不能获得焦点的窗口做不到，菜单立刻关掉。弹菜单前临时让窗口可获得焦点（`main.rs` 的 `pet_menu`）。
 - **页面的 CSP**：精灵图走 `http://asset.localhost`，IPC 走 `http://ipc.localhost`，图库图片来自 `https://codex-pets.net`，都要在 `index.html` 的 CSP 里放行；否则 IPC 会退回 postMessage，图也加载不出来。
 - **监听要先注册好**：`listen()` 本身也是一次 IPC，是异步的。bridge 等所有监听注册完再发 `pet_ready`，Rust 收到后才开始推状态。
-- **新窗口要写进 capability**：`capabilities/default.json` 的 `windows` 里没有 `island` 时，岛的页面调 `listen()` 会被拒绝，页面永远等不到 `pet_ready`。
+- **新窗口要写进 capability**：`capabilities/default.json` 的 `windows` 里没有 `island` 时，岛的页面调 `listen()` 会被拒绝，页面永远等不到 `pet_ready`。桌宠窗口按 agent 命名，写成 `pet-*`。
+- **PowerShell 的 `Measure`**：测试脚本里自己定义的函数叫 `Measure` 时，调用的是 `Measure-Object` 的别名，函数根本没跑、也没输出（量内存时踩到）。
 - **调用要排队**：每次 `invoke` 都是独立请求，async 命令的执行顺序没有保证。拉她出来时页面依次发 holding、release、drop，顺序乱了就会出错，所以 bridge 把调用排成队一个个发（`walk` 除外，它要等走完才回复）。
 - **锁和窗口 getter**：Tauri 的 getter（`outer_position`、`cursor_position` 等）要等主线程回复，菜单回调又在主线程上拿锁。所以拿着锁时绝不调 getter，同一时间也不拿两把锁；页面的命令一律写成 async，不在主线程上跑。
 - **在主线程上建窗口会卡死**：菜单回调在主线程上，第一次建岛的窗口要放到另一个线程去建。

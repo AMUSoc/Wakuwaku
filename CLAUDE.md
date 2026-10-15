@@ -27,7 +27,7 @@ cd .. && node --test "test/*.test.js"   # 頁面的單元測試（i18n、注視�
 src/pet/           頁面：她的視窗（?role=pet）和島（?role=island）共用 index.html
 src/shared/i18n.js 簡中（zh）、繁中（zh-TW，預設語言）、英文字串（Rust 端少數字串在 src-tauri/src/i18n.rs）；新字串照 docs/zh-TW-glossary.md 翻
 src-tauri/src/     Rust 主程式（下表）
-src-tauri/capabilities/  頁面可用的 Tauri 權限：新視窗一定要列進去
+src-tauri/capabilities/  頁面可用的 Tauri 權限：新視窗一定要列進去（桌寵視窗是 pet-*）
 integrations/claude-code/  Claude Code 外掛 wakuwaku（只有 HTTP hooks）；.claude-plugin/ 是外掛市集入口
 examples/widgets/  島上外掛的範例腳本（她代跑的那幾個會編進 exe）
 test/              頁面的 node --test 測試，以及假的當機報告中繼、假的發布
@@ -47,7 +47,7 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 - `connection.rs`：外掛偵測、寫入 `~/.claude/settings.json` 的 hooks、Codex 的 `hooks.json`、Antigravity 的 `hooks.json`、Grok 的 `~/.grok/hooks/wakuwaku.json`（整個檔案是我們的，移除就刪掉；`GROK_HOME`）（安裝 / 移除 / 狀態），開機自啟。
 
 **視窗與家**
-- `pet.rs`：她的視窗：大小位置、眼睛、拖動與被攜帶、走動、頭頂的確認面板、飛回島裡。
+- `pet.rs`：桌面上的桌寵視窗，**每個 agent 一個**（`pet-claude`、`pet-codex`、`pet-agy`、`pet-grok`，狀態在 `Shared.pets`，每隻一把鎖）：大小位置、眼睛、拖動與被攜帶、走動、飛回島裡。設定 `desktop` 打開才建視窗，關掉就關視窗（`open_or_close`）；位置各自記在 `spots`。
 - `island.rs`：靈動島的視窗：放在螢幕頂端正中，依頁面要求擴大、伸手夠她、把她吸回去、為設定臨時升起、置頂；底部的 `os` 模組是島用的 Win32 小工具（`raise_top`、`covered`、`maximized_on`、`no_transitions`）。
 - `notch.rs`：macOS 瀏海裡的島。`backplate.rs`：島下面的壓克力模糊。`wallpaper.rs`：只讀 Windows 的深淺色和強調色（檔名沿用舊的）。
 - `pointer.rs`（點擊穿透）、`screen.rs`（各螢幕工作區）、`focus.rs`（鍵盤焦點的取與還）、`fullscreen.rs`（別的程式是否全螢幕，每 1.5 秒看一次）。
@@ -108,7 +108,7 @@ Grok Build ──HTTP hook（~/.grok/hooks/wakuwaku.json）───────
 
 ### 4. 到前端
 
-- `Shared::redraw()` = `to_pages("pet:update", payload())` + `tray::refresh` + `push_settings()`。
+- `Shared::redraw()` = 島收 `payload()`、每隻在桌面上的桌寵收自己的 `pet_payload(agent)`（`pet:update`）+ `tray::refresh` + `push_settings()`。
 - `payload()` 的 `sprite` / `spriteVersion` 是目前顯示的會話的 agent 的寵物（`data::pet_for`）；`payload()` 由 `pet.get(now)`（目前顯示的會話）、`second()`（下一個要你處理的會話）、`list()`（所有顯示中的會話）加上設定、語言、精靈圖網址、外掛等組成。她的視窗藏著時不收 `pet:update`，顯示時一次補上整份狀態。
 - 其他事件：`pet:react`（一次性動作）、`pet:asks`（確認請求清單）、`pet:alert`、`pet:widgets`、`settings:changed`（設定開著時，每秒最多 4 次）。
 - `bridge.js` 收到後交給 `pet.js`、`island.js`、`panel.js`、`settings.js` 等；`status.js` 把會話說成一句話。使用者在面板上回答時，頁面呼叫 `pet_answer` 命令 → `asks.answer` → `Responder` 回覆那個掛起的 HTTP 請求。
@@ -116,7 +116,8 @@ Grok Build ──HTTP hook（~/.grok/hooks/wakuwaku.json）───────
 ## 開發時要注意
 
 - 持有鎖時絕不呼叫 Tauri 的視窗 getter（它們要等主執行緒，而選單回呼在主執行緒上拿鎖）；同時不拿兩把鎖；頁面的命令一律寫成 `async`。
-- 新視窗要加進 `src-tauri/capabilities/` 的 `windows`（目前只有 `pet`、`island`），否則頁面的 `listen()` 會被拒。
+- 新視窗要加進 `src-tauri/capabilities/` 的 `windows`（目前是 `pet-*`、`island`），否則頁面的 `listen()` 會被拒。
+- **島一顆、桌寵每個 agent 一隻**：島顯示最需要你的會話（`state.get`）；桌寵只看自己 agent 的會話（`get_for`、`list_for`、`mood_for`、`seen_for`，`main.rs` 的 `pet_payload`）。「放她出來／叫她回家」、從島裡拉出來，都是對島正在代表的 agent（`island_agent`：顯示中的會話的 agent，沒有就 `claude`）；確認面板只在島裡。細節和實測的記憶體見 `docs/DEVELOPMENT.md` 的「每个 agent 一只桌宠」。
 - 設定只有島一種家（`display` 永遠是 `island`）；已移除功能留下的設定鍵，讀設定時由 `data.rs` 的 `GONE` 丟掉。新增設定鍵要同時改 `data.rs` 的預設值和 `settings.rs` 的 `is_ok` 白名單。
 - 她的視窗一律經 `Shared::show_window` 顯示（`show()` 會啟用視窗，要暫時忽略島的失焦）。
 - hook 的回覆必須是物件；自動壓縮觸發的 `SessionStart`（`source: compact`）要忽略。
