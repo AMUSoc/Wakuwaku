@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Wakuwaku 是一個 Windows 11 的桌面寵物，住在螢幕頂端的「靈動島」裡：用 Claude Code、Codex、Antigravity 的 hook 事件顯示每個 AI 會話在做什麼，並能在島上回答權限確認。（2026-10 精簡過：任務列替代模式、Win 鍵鉤子、郵件客戶端、改 Windows 深淺色與桌布的設定都已移除。）技術上是 **Tauri 2**：頁面是 `src/` 的 HTML / JS / CSS，由系統的 WebView2 顯示；其餘全在 `src-tauri/` 的 Rust 裡。（2026-10 之前是 Electron 版，在 git 歷史裡。）
+Wakuwaku 是一個 Windows 11 的桌面寵物，住在螢幕頂端的「靈動島」裡：用 Claude Code、Codex、Antigravity、Grok Build 的 hook 事件顯示每個 AI 會話在做什麼，並能在島上回答權限確認（Grok 的確認只顯示「在等你」，要回到 Grok 裡回答）。（2026-10 精簡過：任務列替代模式、Win 鍵鉤子、郵件客戶端、改 Windows 深淺色與桌布的設定都已移除。）技術上是 **Tauri 2**：頁面是 `src/` 的 HTML / JS / CSS，由系統的 WebView2 顯示；其餘全在 `src-tauri/` 的 Rust 裡。（2026-10 之前是 Electron 版，在 git 歷史裡。）
 
 更完整的開發說明（簡體中文）在 `docs/DEVELOPMENT.md`，使用者文件在 `README.md` / `README.en.md`。本檔只整理架構與常用指令；細節以那兩份和程式碼為準。
 
@@ -40,11 +40,11 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 - `main.rs`：入口。依參數分流成 `--wakuwaku-ensure-running`（Claude Code 的 SessionStart）、`--wakuwaku-codex-hook`、`--wakuwaku-agy-hook <事件>`、`--wakuwaku-guard`（當機報告的守護程序）；否則以「誰佔著連接埠誰就是寵物」做單實例，建立 `Shared`（所有部分共用的狀態，**任何時候都不同時持有兩把鎖**），註冊頁面可呼叫的 Tauri 命令，並啟動 pointer、widgets、monitor、fullscreen、ticker 等背景執行緒。
 - `server.rs`：127.0.0.1:47213 的 HTTP 介面（`/hook`、`/state`、`/widget`、`/health`、`/come-home`、`/quit`、`/debug/*`）。
 - `state.rs`：狀態機。按會話記 mood、名字、執行中的工具、任務清單、改過的檔案、結果，挑出最需要你的那一個顯示；也負責閒置會話的隱藏（`is_shown`）與遺忘。
-- `events.rs` / `events_codex.rs` / `events_agy.rs`：把 Claude Code / Codex / Antigravity 的 hook 事件換算成統一的「訊息」；會話名、專案名（git 倉庫名，含 worktree）。
+- `events.rs` / `events_codex.rs` / `events_agy.rs` / `events_grok.rs`：把 Claude Code / Codex / Antigravity / Grok Build 的 hook 事件換算成統一的「訊息」；會話名、專案名（git 倉庫名，含 worktree）。`events_grok.rs` 的測試直接用 `src-tauri/fixtures/grok/` 裡 Grok 1.0.52 實際送來的 payload（用 `tools/hook_dump.py` 抓的）。
 - `asks.rs`：確認請求（PermissionRequest）：顯示什麼、每個選擇回給 agent 什麼、排隊與逾時。
 - `data.rs`：資料目錄、設定讀寫、已下載的寵物和 Codex 的寵物、「使用者主動退出」標記。
 - `settings.rs`：設定頁的快照、白名單校驗後的設定補丁、設定相關命令。
-- `connection.rs`：外掛偵測、寫入 `~/.claude/settings.json` 的 hooks、Codex 的 `hooks.json`、Antigravity 的 `hooks.json`（安裝 / 移除 / 狀態），開機自啟。
+- `connection.rs`：外掛偵測、寫入 `~/.claude/settings.json` 的 hooks、Codex 的 `hooks.json`、Antigravity 的 `hooks.json`、Grok 的 `~/.grok/hooks/wakuwaku.json`（整個檔案是我們的，移除就刪掉；`GROK_HOME`）（安裝 / 移除 / 狀態），開機自啟。
 
 **視窗與家**
 - `pet.rs`：她的視窗：大小位置、眼睛、拖動與被攜帶、走動、頭頂的確認面板、飛回島裡。
@@ -68,6 +68,7 @@ Claude Code ──HTTP hook（POST /hook?from=wakuwaku）───────�
            └─SessionStart：wakuwaku.exe --wakuwaku-ensure-running ─┤  （沒在跑就以獨立行程啟動她，否則轉送事件）
 Codex ──command hook：wakuwaku.exe --wakuwaku-codex-hook ──────────┤  POST /hook?from=wakuwaku&agent=codex
 Antigravity ──command hook：wakuwaku.exe --wakuwaku-agy-hook <名> ─┤  POST /hook?from=wakuwaku&agent=agy
+Grok Build ──HTTP hook（~/.grok/hooks/wakuwaku.json）───────────────┤  POST /hook?from=wakuwaku&agent=grok
                                                                     ▼
                                             server.rs handle("/hook")
                                                                     │ events*.rs::to_message → 統一訊息
@@ -83,16 +84,17 @@ Antigravity ──command hook：wakuwaku.exe --wakuwaku-agy-hook <名> ─┤  
 - **Claude Code**：除 `SessionStart` 外都是 HTTP hook（`type: "http"`），不開行程。Claude Code **不對 `SessionStart` 執行 HTTP hook**，所以 settings.json 方式為它配一條背景命令（`async: true`）：`main.rs` 的 `ensure_running` 從 stdin 讀事件，連接埠上有 wakuwaku 回應就轉送，沒有就用 `detach::spawn` 啟動她（使用者主動退出過則不啟動，`data::may_start`）。外掛方式只有 HTTP hook，靠開機自啟。外掛的 `hooks.json` 要和 `connection.rs` 的 `EVENTS` 保持一致。
 - **Codex**：只有 command hook。每個事件都執行一次 `main.rs` 的 `codex_hook`：補上行程鏈（`wakuwaku_chain`，供跳到視窗用），一般事件用 `post_and_go` 送出就走；只有 `PermissionRequest` 會等她的回答並把 `hookSpecificOutput` 印到 stdout（其他事件什麼都不印，Codex 會把輸出當成給模型的話）。永遠以 0 結束。
 - **Antigravity**：`agy_hook` 先立刻印出回答（`Stop` 回 `{"decision":"allow"}`，其餘 `{}`），再把事件加上事件名送出。
+- **Grok Build**：全是 HTTP hook（包括 `SessionStart`），`/hook` 一律立刻回 `{}`。Grok 沒有 `PermissionRequest`，hook 回 allow 也不會替你批准（只表示不攔），所以不攔 `PreToolUse`：它的確認畫面在等人時送 `Notification`（`permission_prompt`），`events_grok.rs` 換成 `event: "permission"`，島上只顯示「要批准：……」。Grok 也會執行 Claude Code 的 hooks（外掛與 `~/.claude/settings.json`），同一事件會從沒有 `agent` 的網址再來一次：`server.rs` 的 `sender_of` 以 body 有沒有 `hookEventName`（Claude Code 不送）認出它，Grok 自己的檔案裝著就丟掉（`connection::grok_hooked`），沒裝就當成 Grok 的。細節（camelCase 欄位、工具名、`Stop` 的 `shutdown`、子 agent）見 `docs/DEVELOPMENT.md` 的「Grok Build」一節。
 
 ### 2. server.rs 的 `/hook`
 
-1. 讀 JSON，`connection::note_connected` 標記「已連接」；依 `?agent=` 在事件上加 `agent` 欄位，更新 `claude_seen` / `codex_seen` / `agy_seen`。
-2. 依 agent 呼叫 `events::to_message`、`events_codex::to_message` 或 `events_agy::to_message`，得到統一格式的訊息（`/state` 也接受這個格式）：
+1. 讀 JSON，`connection::note_connected` 標記「已連接」；依 `?agent=` 在事件上加 `agent` 欄位，更新 `claude_seen` / `codex_seen` / `agy_seen` / `grok_seen`（沒有 `agent` 的 Grok 事件見上）。
+2. 依 agent 呼叫 `events::to_message`、`events_codex::to_message`、`events_agy::to_message` 或 `events_grok::to_message`，得到統一格式的訊息（`/state` 也接受這個格式）：
    ```json
    { "session": "…", "project": "wakuwaku", "mood": "working", "detail": "Bash", "event": "tool-start", "toolId": "toolu_…", "step": { "key": "step.run", "vars": { … } } }
    ```
    主要欄位：`mood`（`idle` / `working` / `waiting` / `done` / `review` / `error`）、`event`（`turn-start` / `tool-start` / `tool-done` / `tool-failed` / `turn-end` / `session-end`）、`react` / `say`、`title` / `task`、`step` / `toolId`、`todo`、`file`、`reply` / `error`、`agent` / `turn`。完整表格見 `docs/DEVELOPMENT.md` 的「消息」一節。
-3. 補上會話所在的行程鏈 `chain`（Claude Code 用請求的對端連接埠查 TCP 表；Codex / agy 用 hook 自己算好的），然後 `sh.apply(&msg)`。
+3. 補上會話所在的行程鏈 `chain`（Claude Code 和 Grok 用請求的對端連接埠查 TCP 表；Codex / agy 用 hook 自己算好的），然後 `sh.apply(&msg)`。
 4. 如果是 `PermissionRequest` 且她看得見（`asks_seen`）：把 tiny_http 的請求包成 `Responder` 交給 `asks.rs` 掛起，`push_asks()` 通知頁面；使用者回答、逾時（`promptWaitSec`，Codex 最多 60 秒）、或終端機已回答時才回覆。看不見（勿擾、隱藏、全螢幕）就直接回 `{}` 交給終端機。
 5. 其他事件：`asks.seen(&event)` 收掉同一呼叫或同一會話已在終端機處理掉的確認，然後立刻回 `{}`。
 
@@ -101,6 +103,7 @@ Antigravity ──command hook：wakuwaku.exe --wakuwaku-agy-hook <名> ─┤  
 - `Pet::apply(msg, now, hold)` 依 `session` 更新各會話的狀態，回傳 `Outcome`：`changed`（要重畫）、`react`（播一次 wave / jump / failed）、`alerts`（提示音與系統通知）、`turns` / `worked_ms`（「今天」的統計）。
 - 顯示哪個會話：等你確認 > 出錯 > 改好了 > 做完 > 工作中 > 閒置，同級取最新。做完 / 改好 / 出錯依設定 `hold` 停留（預設 8 秒，或直到滑鼠經過她）。
 - Codex 的背景 hook 可能亂序到達：`state.rs` 記住最近結束的回合（`turn-end`），之後到達的同一回合事件不再改狀態。
+- Grok 的 `StopCancelled` 可能比下一輪的 `UserPromptSubmit` 晚到：`state.rs` 記住最近開始過的回合（`begun_turns`），開始過、又不是現在這一輪的結束只記下不改狀態。Grok 的 `idle_prompt` 是 `event: "settle"`，只收掉還在工作中 / 等待的會話。
 - `ticker` 執行緒每秒呼叫 `tick`、`hide_quiet`（閒置會話隱藏，`idleHideMin`），每分鐘 `check_stale`（15 分鐘無事件的工作中 / 等待視為結束，2 小時遺忘）；有變化就 `redraw()`。
 
 ### 4. 到前端

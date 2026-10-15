@@ -48,6 +48,7 @@ src-tauri/
     state.rs              状态机：按会话记 mood、名字、在跑的工具、任务清单、改过的文件、结果，挑最需要你的那个显示
     events.rs             Claude Code 的 hook 事件 → 消息；会话名（session_title 或会话记录）、项目名（git 仓库名）
     events_codex.rs       Codex 的 hook 事件 → 消息（步骤、任务、回复、项目名的说法用 events.rs 的）
+    events_grok.rs        Grok Build 的 hook 事件 → 消息（它的 camelCase 字段、工具名，Notification 的等你确认和安静下来）；is_grok 认出经 Claude Code 的 hooks 来的 Grok 事件
     data.rs               数据目录、设置读写、已下载的宠物和 Codex 的宠物
     detach.rs             以资源管理器为父进程启动她（hook 拉起、更新、守护进程），不落在启动者的作业里；启动时自查
   icons/                  exe、窗口、托盘和通知的图标（npm 不需要：scripts/make-icons.js 用 ImageMagick 画）
@@ -56,6 +57,9 @@ integrations/claude-code/ Claude Code 插件 wakuwaku（只有 HTTP hooks）
 .claude-plugin/           插件市场入口 marketplace.json（位置是 Claude Code 规定的）
 scripts/make-icons.js     画图标（node + ImageMagick），输出提交在 src-tauri/icons
 test/                     页面的单元测试（node --test，不需要 npm install）；fake-relay.js 是假的崩溃报告中转，fake-release.js 是假的发布
+src-tauri/fixtures/grok/  Grok Build 1.0.52 实际发来的 hook payload（tools/hook_dump.py 抓的），events_grok.rs 和 state.rs 的测试直接用
+tools/hook_dump.py        抓 hook payload：127.0.0.1:47299 收到的每个 POST 原样写进 tools/dumps/（不进仓库），只用标准库
+tools/grok-hooks/         指向 hook_dump.py 的 Grok hooks.json，抓 Grok 的 payload 用
 relay/                    崩溃报告中转（Cloudflare Worker → GitHub issue；阿里云函数计算 → Gitee issue），部署步骤在 relay/README.md
 examples/widgets/         岛上插件的示例脚本：waku、CI、番茄钟、截止日期、开发服务器、股票、天气……
 docs/prototypes/          设计原型：island-settings.html 是设置长在岛里的手感原型
@@ -84,6 +88,7 @@ cd .. && node --test "test/*.test.js"   # 页面的单元测试
 | `WAKUWAKU_USER_DATA` | 换一个数据目录 |
 | `CLAUDE_CONFIG_DIR` | Claude Code 的配置目录（测试里指向临时目录，不碰真实设置） |
 | `CODEX_HOME` | Codex 的配置目录（`hooks.json`、`pets/`），默认 `~/.codex` |
+| `GROK_HOME` | Grok Build 的目录（`hooks/wakuwaku.json`），默认 `~/.grok` |
 | `WAKUWAKU_DEBUG=1` | `/health` 带上两个窗口和设置，开放 `/debug/eval`、`/debug/walk` |
 | `WAKUWAKU_IDLE_HIDE_MS` | 空闲会话多久不再显示（毫秒，`0` 一直显示），代替设置 `idleHideMin` |
 
@@ -120,6 +125,22 @@ Codex（CLI 0.114 起）的 hooks 和 Claude Code 很像，但**只有 command �
 
 Codex 桌面版的宠物在 `~/.codex/pets/<id>/`（`pet.json` + `spritesheet.webp`，格式和 codex-pets.net 下载的一样），`data.rs` 把它排在自己的宠物之后一起读，只读不写，也不替它建文件夹。
 
+## Grok Build
+
+Grok Build（xAI 的命令行 coding agent，2026-07 以 Apache 2.0 开源：[xai-org/grok-build](https://github.com/xai-org/grok-build)）的 hooks 格式和 Claude Code 插件的 `hooks.json` 一样，**所有事件（包括 `SessionStart`）都能发 HTTP hook**。下面按 1.0.52 实测（2026-10-16，`tools/hook_dump.py` 抓的 payload 在 `src-tauri/fixtures/grok/`），细节都对过源码。
+
+- **装在哪**：`connection.rs` 写 `~/.grok/hooks/wakuwaku.json`（`GROK_HOME`）。Grok 自己会读 `$GROK_HOME/hooks/*.json`，一直受信任，不用在 `/hooks` 里加路径（源码 `xai-grok-config/src/global_hook_sources.rs`；`/hooks` 加的路径记在 `~/.grok/hooks-paths`，一行一个绝对路径，不是 `config.toml`）。整个文件是我们的：移除就删掉，不用备份。事件：`SessionStart`、`SessionEnd`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`Stop`、`StopFailure`、`StopCancelled`，`Notification` 只要 `permission_prompt|idle_prompt`；全是 `type: "http"`，`/hook?from=wakuwaku&agent=grok`，`timeout` 2。状态：`absent`（没有 `~/.grok`）、`ok`、`stale`（别的端口、旧版本的事件）、`missing`、`unreadable`。已经开着的 Grok 会话要重开，或在 `/hooks` 里按 `r`。
+- **字段**：Grok 自己的字段是 camelCase（`hookEventName: "pre_tool_use"`、`sessionId`、`toolName`、`toolInput`、`promptId`、`workspaceRoot`、`lastAssistantMessage`……），只给 10 个加了 snake_case 别名（`hook_event_name` 带 Claude 的 PascalCase 值，`session_id`、`transcript_path`、`permission_mode`、`tool_name`、`tool_input`、`tool_response`、`tool_use_id`、`duration_ms`、`is_interrupt`；源码 `xai-grok-hooks/src/event.rs` 的 `SNAKE_CASE_ALIASES`）。所以 `lastAssistantMessage`、`promptId`、`errorDetails`、`notificationType`、`subagentType` 只能按 camelCase 读。
+- **工具**：`run_terminal_command`（`{command, description}`，Windows 上是 PowerShell 命令）、`write`（`{file_path, content}`）、`search_replace`（`{file_path, old_string, new_string}`）、`read_file`（`{target_file, offset?, limit?}`）、`grep`（`{pattern, path}`）、`list_dir`、`web_search`、`spawn_subagent`；MCP 工具是 `server__tool`（没有 `mcp__`）。`write`、`search_replace` 算改动（`state.rs` 的 `EDIT_TOOLS`）。`toolResult` 不读：读一整个文件时有几十 KB，shell 的输出还是字节数组。
+- **没有 `PermissionRequest`，hook 也替不了你批准**：`PreToolUse` 回 `{"decision": "allow"}`（或 `hookSpecificOutput.permissionDecision`）只表示「不拦」，Grok 照样弹自己的确认（源码测试 `pre_tool_use_allow_does_not_auto_approve`）；能做的只有 `deny`、`ask`、`defer`。所以岛上不回答 Grok 的确认，只显示它在等你：Grok 的确认画面真的在等人时发 `Notification`（`notificationType: "permission_prompt"`，不带工具名，紧跟在那个工具的 `PreToolUse` 之后），`events_grok.rs` 发 `event: "permission"`，`state.rs` 用正在跑的那一步说「要批准：……」（没有就说「等你在终端里确认」）。批准了就接着来那个工具的 `PostToolUse`；拒绝了是 `StopCancelled`（`reason: "permission_rejected"`）。`/hook` 对 Grok 一律马上回 `{}`。
+- **回合的结束**：`Stop`（`reason: "end_turn"`）、`StopFailure`（`error` 是 `rate_limit` 等，`errorDetails`）、`StopCancelled`（`reason` 是 `user_interrupt`、`permission_rejected`……）。会话结束时还会多来一个 `Stop`（`reason: "shutdown"`），**在 `SessionEnd` 之后到**，不算数，不然会话又被拉回「做完」。`StopCancelled` 不在 Grok 的主循环里发，可能比下一轮的 `UserPromptSubmit` 晚到：`state.rs` 记住最近几个开始过的回合，一个开始过、又不是现在这一轮的回合的结束只记下，不改状态；没看到开始的回合（它的 `UserPromptSubmit` 丢了）照常结束。
+- **安静下来**：一轮结束、闲了大约一分钟后 Grok 发 `Notification`（`idle_prompt`）。它只收掉还停在干活或等你的会话（`event: "settle"`），不碰没看过的「做完」，也不为没见过的会话建一个。
+- **子 agent**：子 agent 自己会话的事件带 `subagentType`，全部不算（它的 `SessionEnd` 会把主会话结束掉）。
+- **Grok 也会读 Claude Code 的 hooks**：Claude Code 插件（`~/.claude/plugins/installed_plugins.json`）和 `~/.claude/settings.json`（源码 `xai-grok-agent/src/plugins/discovery.rs`、`xai-grok-hooks/src/discovery.rs`），所以同一个事件也会从 `/hook?from=wakuwaku`（没有 `agent`）来。Grok 只合并网址完全一样的 hook，网址不同就两边都发。`server.rs` 的 `sender_of` 用 body 里有没有 `hookEventName`（Claude Code 不发）认出它们：Grok 自己的文件装着（`connection::grok_hooked`，5 秒看一次）就丢掉，没装就当成 Grok 的。
+- **找窗口**：Grok 的 hook 是 HTTP 的，和 Claude Code 一样用连接对端的端口查进程链（`server.rs` 的 `chain_for`）。
+- **今天的统计**：Grok 的回合和 Antigravity 的一起算进 `agy_turns`（批准不经过她的回合），全是这种回合又没批准过时，批准显示「—」。今天的 token 不读 Grok 的记录。
+- **抓 payload**：`python tools/hook_dump.py`（127.0.0.1:47299），把 `tools/grok-hooks/hooks.json` 放进 `~/.grok/hooks/`（或用 `/hooks` 加它所在的文件夹），重开 Grok 会话。
+
 ## 消息
 
 hook 事件在 `events.rs`（Codex 的在 `events_codex.rs`）换算成消息，`/state` 也收这个格式：
@@ -133,14 +154,14 @@ hook 事件在 `events.rs`（Codex 的在 `events_codex.rs`）换算成消息，
 | `session` / `project` | 会话 id、项目文件夹名；每个会话单独记状态 |
 | `mood` | `idle` / `working` / `waiting` / `done` / `review` / `error` |
 | `detail` | 工具名，或 `{ key, vars }`（按当前语言显示；vars 里可以再套一层 `{ key, vars }`，比如「要批准：$ git push」） |
-| `event` | `turn-start` / `tool-start` / `tool-done` / `tool-failed` / `turn-end`（Codex 的回合结束）/ `session-end` |
+| `event` | `turn-start` / `tool-start` / `tool-done` / `tool-failed` / `turn-end`（Codex、Grok 的回合结束）/ `session-end`；Grok 另有 `permission`（它自己的确认在等你）和 `settle`（安静下来，见下面的 Grok 一节） |
 | `react` / `say` | `wave` / `jump` / `failed`，在当前 mood 上播一次，岛展开说 `say` |
 | `title` / `task` | 会话名；你发的第一句话（只认 `source` 是用户的，少于 4 个字的「继续」「好的」不算）。有 title 就用 title |
 | `step` / `toolId` | 工具在做什么（`step.*`，`events.rs` 的 `step_of`）；`toolId` 把开始和结束配成对，子 agent 的工具也能对上 |
 | `todo` | 任务清单的变化：TodoWrite 给 `{ set }`，TaskCreate / TaskUpdate 给 `{ add }` / `{ update }` |
 | `file` | 刚改过的文件（这一轮改了几个文件） |
 | `reply` / `error` | Stop / StopFailure 的 `last_assistant_message` 摘前一两句；StopFailure 的 `error`（`error.*`）或 `error_details` |
-| `agent` / `turn` | Codex 的消息带 `agent: "codex"` 和回合 id（见上面的 Codex 一节） |
+| `agent` / `turn` | Codex 的消息带 `agent: "codex"` 和回合 id（见上面的 Codex 一节）；Antigravity 是 `agy`，Grok 是 `grok`，回合 id 是 `promptId` |
 
 **会话名**：hook 自带的 `session_title`（只有 UserPromptSubmit、SessionStart 带，而且只是自定义标题：`/rename` 或桌面版起的名字）；没有时，在一轮开始和结束时读 `transcript_path` 末尾 256 KB 里最后一条 `custom-title`，没有再用 `ai-title`。**项目名**：从 `cwd` 往上找 `.git`，是目录就取它所在文件夹的名字；是文件（worktree）就按里面的 `gitdir: <仓库>/.git/worktrees/<名字>` 取仓库名；不在 git 里就用 `cwd` 的文件夹名。按 `cwd` 缓存。
 
@@ -207,7 +228,7 @@ hook 事件在 `events.rs`（Codex 的在 `events_codex.rs`）换算成消息，
 **私密**（`private: true`）：「显示具体内容」关掉时，页面不显示它的 `label` 和冒头的话，只显示 `value`（`widgets.js` 的 `words(lang, w, detailed)`）。
 
 **内置的**（标题和数值是 `{ key, vars }`，按当前语言显示）：
-- `today`：今天开始了几轮（state 的 `Outcome.turns`）、结束的几轮一共用了多久（`Outcome.worked_ms`，几个会话同时跑会叠加；被人停下的一轮（Codex 的 Interrupt、Antigravity 的取消，`idle` 加 `turn-end`）也算到停下时；一轮没说结束、下一轮就开始了，算到它最后一个事件）、在宠物上批准了几次（`pet_answer` 的 allow / always）。时长按 `h:mm` 显示，不满一分钟按秒（`widget.todaySeconds`），免得几轮短的一直是 0:00。Antigravity 的批准不经过她，今天的轮次全是它的（`Today.agy_turns`）又没批准过时，批准显示「—」（`widget.todayValueAgy`）。存在数据目录的 `today.json`，按本地日期换天。
+- `today`：今天开始了几轮（state 的 `Outcome.turns`）、结束的几轮一共用了多久（`Outcome.worked_ms`，几个会话同时跑会叠加；被人停下的一轮（Codex 的 Interrupt、Antigravity 的取消，`idle` 加 `turn-end`）也算到停下时；一轮没说结束、下一轮就开始了，算到它最后一个事件）、在宠物上批准了几次（`pet_answer` 的 allow / always）。时长按 `h:mm` 显示，不满一分钟按秒（`widget.todaySeconds`），免得几轮短的一直是 0:00。Antigravity 和 Grok 的批准不经过她，今天的轮次全是它们的（`Today.agy_turns`）又没批准过时，批准显示「—」（`widget.todayValueAgy`）。存在数据目录的 `today.json`，按本地日期换天。
 - `monitor`（监控，`widgets::Monitor`）：CPU（两次 `GetSystemTimes` 之差）、内存（`GlobalMemoryStatusEx`）、网速（两次 `GetIfTable` 之差，只算开着的以太网和 Wi-Fi，Windows 会把一块网卡经过各层过滤器列好几遍，按 MAC 地址只算一次；计数是 32 位的，过 4 GB 会从头再来，按回绕相减）、电池（`GetSystemPowerStatus`，没有电池这项就没有）。每项一个开关，设置 `monitor: { cpu, mem, net, battery, every }`，`every` 是几秒读一次，1 到 10，默认 2，「插件」页那一行的「设置」里 − / + 调。它的数值是 `{ parts: [{ icon, text }] }`：`cpu 12%`、`memory 46%`、`down 1.2M`、`up 80K`（每秒字节，`rate`）、`battery 85%`（充电时图标是 `bolt`）；岛上收起时只显示这一串读数（`widgets.js` 的 `partsHTML`），没有标题。每个读数是一个小格（`cellHTML`，`style.css` 的 `.wcell`）：Windows 自己图标字体里的图标（`Segoe Fluent Icons`，Windows 10 上是 `Segoe MDL2 Assets`；处理器 E950、内存 E964、下行 E74B、上行 E74A，电池按电量 E850–E859/E83F，充电 E85A–E863/E83E）和数字装在一起，底色从左往右填到读数那么多（`shareOf`：CPU、内存、电量就是百分比；网速没有 100%，按数量级，1 KB/s 空、100 MB/s 满，每大十倍多五分之一）；颜色跟文字走（深底白、浅底黑，`--cell-ink`），只有 CPU、内存到 90% 以上（或电池低于 20%）填成橙色；每格一样宽（按「100%」），数字变了列也不动。监控自己的图标是 Windows 的 E9D9（任务管理器「性能」那种，`widgets.js` 的 `GLYPHS`）。要两次读数的（CPU、网速）从第二次起才有。一个线程单独读它（`main.rs`），每 0.25 秒看一眼设置，打开或改了频率马上读。默认关闭。以前的 `sys`、`net`、`battery` 三个插件读设置时并进来（`data::adopt_monitor`）：哪个开着，监控就开着、开着那几项。
 - `tokens`（`tokens.rs`）：今天的 token，每分钟读一次。Claude Code：`<配置目录>/projects/**/*.jsonl` 里每条回复的 `message.usage`（输入 + 缓存写 + 缓存读 + 输出），同一个 `message.id` 会按片段写好几行，只算一次。Codex：`~/.codex/sessions/**/*.jsonl` 的 `token_count` 事件是这个会话到那时的总数，今天的用量 = 今天最后一个 − 今天之前最后一个。Antigravity：`~/.gemini/<产品>/brain/<会话>/.system_generated/logs/transcript.jsonl`（agy 是 `antigravity-cli`，2.0 桌面版是 `antigravity`，文档里 IDE 是 `antigravity-ide`），一行一步，模型的每次回答（`PLANNER_RESPONSE`）带 `input_tokens`、`cache_read_tokens`、`output_tokens`（含思考）和 `created_at`（UTC，到秒），按 `step_index` 每步只算一次（文件被重写、从头再读也不重复）；合计 = 输入 + 缓存读 + 输出（按 Claude Code 的意思理解：输入不含缓存读；目前见到的缓存读都是 0）。旁边的 `transcript_full.jsonl`（hook 的 `transcriptPath` 指的是它）步骤一样、内容完整，更大，不读；`chunks/` 下是分块的副本，也不读。这个格式没公开文档，按 agy 1.3.4 实测（2026-10-14）。只读今天改过的文件，每个文件从上次读到的地方接着读，只读完整的行；换天从头算。默认打开。
 

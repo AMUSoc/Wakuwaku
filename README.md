@@ -24,7 +24,7 @@ https://github.com/user-attachments/assets/7814d71a-77f0-43af-97a6-210d2cbb31dc
 
 ## 她能做什么
 
-- **认识你所有 AI 会话。** Claude Code 和 Codex 在干什么、跑了多久，屏幕顶上的灵动岛里一眼看到。同时开好几个也分得清。
+- **认识你所有 AI 会话。** Claude Code、Codex、Antigravity 和 Grok Build 在干什么、跑了多久，屏幕顶上的灵动岛里一眼看到。同时开好几个也分得清。
 - **要批准？岛上点一下。** 允许、以后都允许、拒绝，回答 Claude 的问题，批准计划。终端那边照常弹，谁先答算谁的。
 - **做完了自己弹出来。** 改了几个文件、Claude 回了什么，都写在上面。点一下会话，直接跳到它的窗口：终端、VS Code，或者 Claude 桌面版。
 - **插件。** 没有会话时，岛上轮流放今天的用量、token、天气、番茄钟、倒计时；系统监控常驻。一行 PowerShell 就能写自己的插件，`waku <命令>` 跑完叫你。
@@ -79,6 +79,7 @@ https://github.com/user-attachments/assets/7814d71a-77f0-43af-97a6-210d2cbb31dc
   - `claude -p` 这类非交互模式会先等 hook 回复再做决定，没人点的话最多会卡到面板等待时间结束。
   - MCP 弹出的表单（Elicitation）只做提醒。
 - Codex 的授权请求也会弹到面板上，但只有**允许** / **拒绝**（Codex 不接受 hook 加规则）。Codex 要等面板交出才会弹自己的确认框，所以面板最多等 1 分钟；想在终端里答，点「去终端处理」。
+- Grok Build 要你确认时，岛上会显示「要批准：……」，但**要回到 Grok 里回答**：Grok 的 hook 回「允许」只表示不拦，替不了你批准，Grok 还是会弹自己的确认（xai-org/grok-build 的源码和测试都是这样）。
 
 ## 安装
 
@@ -129,6 +130,16 @@ Codex 桌面版里装过的宠物（`~/.codex/pets`）格式相同，会直接�
 和 Claude Code 的区别：Antigravity 没有「等你批准」的事件，所以她能跟着开始、干活、调用工具、做完和出错，但提醒不了批准，也不能在她这里确认。
 
 Antigravity 的 hook 只能是命令，并且由 `cmd` 运行、不认引号：程序的路径里有空格时，用它的 8.3 短路径写进去；连短路径也没有（有的盘关掉了短文件名），就装不上，把程序放到路径没有空格的文件夹即可。agy 每一步都会等 hook 跑完，大约 0.1–0.2 秒。
+
+### 5. 连上 Grok Build（可选）
+
+在「连接」页的 Grok Build 一栏点「安装」，会写一个 `~/.grok/hooks/wakuwaku.json`（Grok 自己会读这个文件夹，不用在 `/hooks` 里加路径；整个文件是我们的，移除时直接删掉）。已经开着的 Grok 会话要重开一次，或在 `/hooks` 里按 `r` 重新载入。
+
+和 Claude Code 的区别：
+
+- Grok 没有「等你批准」的事件，hook 也替不了你批准。她用 Grok 的 `Notification`（`permission_prompt`）知道 Grok 在等你，岛上显示「要批准：……」，回答还是在 Grok 里。
+- Grok 也会读 Claude Code 的 hooks（插件和 `~/.claude/settings.json`），所以同一个事件会发两次。装了 Grok 这一份时，从 Claude Code 那边来的 Grok 事件她会丢掉；没装时，就把它们当成 Grok 的。
+- 今天的「批准」次数不算 Grok 的（和 Antigravity 一样，批准不经过她）。
 
 ### 从源码运行
 
@@ -198,7 +209,7 @@ cargo build --release     # target/release/wakuwaku.exe，单个文件
 ### 卸载
 
 1. 如果打开过**开机自动启动**，先在设置的「连接」页里关掉。
-2. 用插件连接的：在 Claude Code 里 `/plugin uninstall wakuwaku@wakuwaku`，再 `/plugin marketplace remove wakuwaku`。写入 settings.json 的：在「连接」页点「移除」，只会删掉本项目加的条目，你自己的 hooks 不受影响，第一次修改前的原文件备份在 `~/.claude/settings.json.wakuwaku.bak`。连过 Codex 的：在 Codex 一栏点「移除」，备份在 `~/.codex/hooks.json.wakuwaku.bak`。
+2. 用插件连接的：在 Claude Code 里 `/plugin uninstall wakuwaku@wakuwaku`，再 `/plugin marketplace remove wakuwaku`。写入 settings.json 的：在「连接」页点「移除」，只会删掉本项目加的条目，你自己的 hooks 不受影响，第一次修改前的原文件备份在 `~/.claude/settings.json.wakuwaku.bak`。连过 Codex 的：在 Codex 一栏点「移除」，备份在 `~/.codex/hooks.json.wakuwaku.bak`。连过 Grok 的：在 Grok Build 一栏点「移除」，会删掉 `~/.grok/hooks/wakuwaku.json`。
 3. 退出她，然后删掉 exe 或项目文件夹。系统通知用的应用登记在注册表 `HKCU\Software\Classes\AppUserModelId\com.zhoupengjie.wakuwaku`，可以一并删掉。
 4. 删除她的设置和下载的宠物：exe 旁边的 `wakuwaku-data`，从源码运行是项目里的 `data/`。
 
@@ -210,6 +221,7 @@ cargo build --release     # target/release/wakuwaku.exe，单个文件
 Claude Code ──HTTP hooks──▶ 宠物窗口 (127.0.0.1:47213/hook)
             └─SessionStart─▶ 程序本身 --wakuwaku-ensure-running（后台运行，她没开就启动）
 Codex ──命令 hooks──▶ 程序本身 --wakuwaku-codex-hook ──▶ 宠物窗口 (/hook?agent=codex)
+Grok Build ──HTTP hooks──▶ 宠物窗口 (/hook?agent=grok)
 ```
 
 - 所有事件都用 Claude Code 的 **HTTP hook** 直接发给她，调用工具时不启动任何进程（本机实测每次约 0.3ms）。她立刻回 `{}`，表示不做任何决定；只有确认请求会等你在面板上点了再回。
@@ -221,6 +233,7 @@ Codex ──命令 hooks──▶ 程序本身 --wakuwaku-codex-hook ──▶ �
 | `WAKUWAKU_PORT` | 换端口（默认 47213），她和 hooks 两边都要设 |
 | `CLAUDE_CONFIG_DIR` | Claude Code 的配置目录不在 `~/.claude` 时 |
 | `CODEX_HOME` | Codex 的配置目录不在 `~/.codex` 时 |
+| `GROK_HOME` | Grok Build 的目录不在 `~/.grok` 时 |
 
 ## 测试
 

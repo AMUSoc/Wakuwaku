@@ -26,7 +26,7 @@ https://github.com/user-attachments/assets/7814d71a-77f0-43af-97a6-210d2cbb31dc
 
 ## What she can do
 
-- **She knows all your AI sessions.** What Claude Code and Codex are doing, and for how long, right in the island at the top of the screen. Several at once, each kept apart.
+- **She knows all your AI sessions.** What Claude Code, Codex, Antigravity and Grok Build are doing, and for how long, right in the island at the top of the screen. Several at once, each kept apart.
 - **Needs your OK? Click it on the island.** Allow, always allow, deny; answer Claude's questions; approve a plan. The terminal asks too, and whichever answers first counts.
 - **Done, and she tells you.** How many files changed and what Claude said. Click a session to go straight to its window: a terminal, VS Code, or the Claude desktop app.
 - **Plugins.** With no session at work, the island takes turns with today's usage, tokens, the weather, a pomodoro, a countdown; a system monitor stays put. One line of PowerShell makes a plugin of your own, and `waku <command>` tells you when a command is done.
@@ -81,6 +81,7 @@ Each pet has 11 animations, and every one of them has a job:
   - Non-interactive runs such as `claude -p` wait for the hook before deciding, so with nobody clicking they wait until the panel gives up.
   - MCP forms (Elicitation) are announced, not filled in.
 - Codex's permission prompts come to the panel too, with **Allow** / **Deny** only (Codex takes no rules from a hook). Codex shows its own dialog only once the panel lets go, so the panel waits 1 minute at most; to answer in the terminal, click Handle in terminal.
+- When Grok Build asks for your OK, the island says "Needs your OK: …", but **you answer in Grok**: a Grok hook's allow only means "not blocked" and can't approve for you, so Grok still shows its own prompt (as xai-org/grok-build's source and tests have it).
 
 ## Install
 
@@ -131,6 +132,16 @@ Google's Antigravity is supported: the `agy` CLI and the Antigravity 2.0 desktop
 How it differs from Claude Code: Antigravity has no "needs your approval" event, so she follows its sessions starting, working, using tools, finishing and failing, but can't remind you to approve, and you can't approve on her.
 
 Antigravity hooks can only be commands, run by `cmd` without reading quotes: if the app's path has a space, its 8.3 short path is written instead; with no short path either (some drives have short names turned off), installing fails, and moving the app to a folder with no spaces in its path fixes it. agy waits for the hook at each step, about 0.1–0.2 s.
+
+### 5. Connect Grok Build (optional)
+
+Click Install in the Grok Build part of the Connect page. It writes `~/.grok/hooks/wakuwaku.json` (Grok reads that folder by itself, with no path to add in `/hooks`; the whole file is ours, and removing deletes it). Restart a Grok session already open, or press `r` in `/hooks` to reload.
+
+How it differs from Claude Code:
+
+- Grok has no "needs your approval" event, and a hook can't approve for you. She learns from Grok's `Notification` (`permission_prompt`) that Grok is waiting on you and the island says "Needs your OK: …", but you answer in Grok.
+- Grok also runs Claude Code's hooks (the plugin and `~/.claude/settings.json`), so each event comes twice. With Grok's own file in, she drops the Grok events that come through Claude Code's; without it, she takes them as Grok's.
+- Today's approvals leave Grok out (as with Antigravity, its approvals never come to her).
 
 ### From source
 
@@ -200,7 +211,7 @@ After she quits unexpectedly (a crash), the island asks you once, at her next st
 ### Uninstall
 
 1. If you turned on **Start at login**, turn it off on the Connect page.
-2. With the plugin: in Claude Code, `/plugin uninstall wakuwaku@wakuwaku`, then `/plugin marketplace remove wakuwaku`. With hooks in settings.json: click Remove on the Connect page; only this project's entries go, your own hooks stay, and the file as it was before the first change is at `~/.claude/settings.json.wakuwaku.bak`. With Codex: click Remove in its part of the Connect page; the backup is `~/.codex/hooks.json.wakuwaku.bak`.
+2. With the plugin: in Claude Code, `/plugin uninstall wakuwaku@wakuwaku`, then `/plugin marketplace remove wakuwaku`. With hooks in settings.json: click Remove on the Connect page; only this project's entries go, your own hooks stay, and the file as it was before the first change is at `~/.claude/settings.json.wakuwaku.bak`. With Codex: click Remove in its part of the Connect page; the backup is `~/.codex/hooks.json.wakuwaku.bak`. With Grok: click Remove in the Grok Build part; it deletes `~/.grok/hooks/wakuwaku.json`.
 3. Quit her, then delete the exe or the project folder. Notifications register her name in `HKCU\Software\Classes\AppUserModelId\com.zhoupengjie.wakuwaku`; delete that key too.
 4. Delete her settings and downloaded pets: the `wakuwaku-data` folder beside the exe, or the project's `data/` when run from source.
 
@@ -212,6 +223,7 @@ After she quits unexpectedly (a crash), the island asks you once, at her next st
 Claude Code ──HTTP hooks──▶ the pet (127.0.0.1:47213/hook)
             └─SessionStart─▶ the app itself --wakuwaku-ensure-running (in the background; starts her if she's not up)
 Codex ──command hooks──▶ the app itself --wakuwaku-codex-hook ──▶ the pet (/hook?agent=codex)
+Grok Build ──HTTP hooks──▶ the pet (/hook?agent=grok)
 ```
 
 - Every event is a Claude Code **HTTP hook** sent straight to her, so a tool call starts no process (about 0.3 ms here). She answers `{}` at once, meaning no decision; only a prompt waits until you answer on the panel.
@@ -223,6 +235,7 @@ Codex ──command hooks──▶ the app itself --wakuwaku-codex-hook ──�
 | `WAKUWAKU_PORT` | Another port (default 47213); set it for both her and the hooks |
 | `CLAUDE_CONFIG_DIR` | Claude Code's config folder, when it isn't `~/.claude` |
 | `CODEX_HOME` | Codex's config folder, when it isn't `~/.codex` |
+| `GROK_HOME` | Grok Build's folder, when it isn't `~/.grok` |
 
 ## Tests
 
