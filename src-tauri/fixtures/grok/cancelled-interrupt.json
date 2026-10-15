@@ -1,0 +1,18 @@
+{
+ "hookEventName": "stop_cancelled",
+ "sessionId": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "cwd": "C:\\Users\\iaedo\\grok-test",
+ "workspaceRoot": "C:\\Users\\iaedo\\grok-test",
+ "timestamp": "2026-10-15T18:09:30.598820400+00:00",
+ "transcriptPath": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "promptId": "1f84ca07-3f4b-47c1-b80f-50722c15e4e2",
+ "permissionMode": "default",
+ "reason": "user_interrupt",
+ "cancelledBy": "user",
+ "cancelTrigger": "ctrl_c",
+ "lastAssistantMessage": "開始執行：每秒印出一次目前時間，持續 120 秒。",
+ "hook_event_name": "StopCancelled",
+ "session_id": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "transcript_path": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permission_mode": "default"
+}

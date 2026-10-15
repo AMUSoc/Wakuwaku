@@ -1,0 +1,26 @@
+{
+ "hookEventName": "pre_tool_use",
+ "sessionId": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "cwd": "C:\\Users\\iaedo\\grok-test",
+ "workspaceRoot": "C:\\Users\\iaedo\\grok-test",
+ "timestamp": "2026-10-15T18:04:04.302444100+00:00",
+ "transcriptPath": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permissionMode": "default",
+ "toolName": "run_terminal_command",
+ "toolUseId": "call-afaad287-b857-4015-83b2-452fb0131079-6",
+ "toolInput": {
+  "command": "Get-Content -Path \"C:\\Users\\iaedo\\grok-test\\hello.txt\"",
+  "description": "Print hello.txt file contents"
+ },
+ "toolInputTruncated": false,
+ "hook_event_name": "PreToolUse",
+ "session_id": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "transcript_path": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permission_mode": "default",
+ "tool_name": "run_terminal_command",
+ "tool_input": {
+  "command": "Get-Content -Path \"C:\\Users\\iaedo\\grok-test\\hello.txt\"",
+  "description": "Print hello.txt file contents"
+ },
+ "tool_use_id": "call-afaad287-b857-4015-83b2-452fb0131079-6"
+}

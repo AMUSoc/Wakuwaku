@@ -1,0 +1,26 @@
+{
+ "hookEventName": "pre_tool_use",
+ "sessionId": "01a140b0-7300-72c0-9058-04843dc2a5da",
+ "cwd": "C:\\Users\\iaedo\\grok-test",
+ "workspaceRoot": "C:\\Users\\iaedo\\grok-test",
+ "timestamp": "2026-10-15T17:51:17.647183200+00:00",
+ "transcriptPath": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b0-7300-72c0-9058-04843dc2a5da\\updates.jsonl",
+ "permissionMode": "default",
+ "toolName": "write",
+ "toolUseId": "call-b9d9a1ea-d945-4aea-bf1f-75486178bb44-0",
+ "toolInput": {
+  "file_path": "C:\\Users\\iaedo\\grok-test\\hello.txt",
+  "content": "hello"
+ },
+ "toolInputTruncated": false,
+ "hook_event_name": "PreToolUse",
+ "session_id": "01a140b0-7300-72c0-9058-04843dc2a5da",
+ "transcript_path": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b0-7300-72c0-9058-04843dc2a5da\\updates.jsonl",
+ "permission_mode": "default",
+ "tool_name": "write",
+ "tool_input": {
+  "file_path": "C:\\Users\\iaedo\\grok-test\\hello.txt",
+  "content": "hello"
+ },
+ "tool_use_id": "call-b9d9a1ea-d945-4aea-bf1f-75486178bb44-0"
+}

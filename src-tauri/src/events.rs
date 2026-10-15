@@ -159,7 +159,7 @@ pub(crate) fn reply_of(message: &str) -> Option<String> {
 }
 
 // Why a turn failed: one of Claude Code's error kinds, or its own words.
-fn error_of(e: &Value) -> Value {
+pub(crate) fn error_of(e: &Value) -> Value {
     const KINDS: [&str; 10] = [
         "authentication_failed",
         "oauth_org_not_allowed",

@@ -1,0 +1,18 @@
+{
+ "hookEventName": "stop_cancelled",
+ "sessionId": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "cwd": "C:\\Users\\iaedo\\grok-test",
+ "workspaceRoot": "C:\\Users\\iaedo\\grok-test",
+ "timestamp": "2026-10-15T18:02:15.602143100+00:00",
+ "transcriptPath": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "promptId": "b9540db1-f303-40dd-86b2-275ed5c771c5",
+ "permissionMode": "default",
+ "reason": "permission_rejected",
+ "cancelledBy": "user",
+ "reasonDetails": "search_replace: User rejected the execution",
+ "lastAssistantMessage": "我先讀 `hello.txt`，並用 grep 找出這個資料夾裡含有 hello 的檔案。",
+ "hook_event_name": "StopCancelled",
+ "session_id": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "transcript_path": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permission_mode": "default"
+}

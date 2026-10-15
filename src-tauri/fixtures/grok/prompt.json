@@ -1,0 +1,15 @@
+{
+ "hookEventName": "user_prompt_submit",
+ "sessionId": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "cwd": "C:\\Users\\iaedo\\grok-test",
+ "workspaceRoot": "C:\\Users\\iaedo\\grok-test",
+ "timestamp": "2026-10-15T18:01:24.978203100+00:00",
+ "transcriptPath": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "promptId": "b9540db1-f303-40dd-86b2-275ed5c771c5",
+ "permissionMode": "default",
+ "prompt": "讀 hello.txt 的內容，用 grep 搜尋這個資料夾裡含有 hello 的檔案，然後把 hello.txt 裡的 hello 改成 world，最後用指令印出檔案內容",
+ "hook_event_name": "UserPromptSubmit",
+ "session_id": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "transcript_path": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permission_mode": "default"
+}

@@ -1,0 +1,14 @@
+{
+ "hookEventName": "session_end",
+ "sessionId": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "cwd": "C:\\Users\\iaedo\\grok-test",
+ "workspaceRoot": "C:\\Users\\iaedo\\grok-test",
+ "timestamp": "2026-10-15T18:09:35.138264400+00:00",
+ "transcriptPath": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permissionMode": "default",
+ "reason": "shutdown",
+ "hook_event_name": "SessionEnd",
+ "session_id": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "transcript_path": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permission_mode": "default"
+}

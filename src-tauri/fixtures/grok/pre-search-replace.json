@@ -1,0 +1,28 @@
+{
+ "hookEventName": "pre_tool_use",
+ "sessionId": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "cwd": "C:\\Users\\iaedo\\grok-test",
+ "workspaceRoot": "C:\\Users\\iaedo\\grok-test",
+ "timestamp": "2026-10-15T18:03:16.633478600+00:00",
+ "transcriptPath": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permissionMode": "default",
+ "toolName": "search_replace",
+ "toolUseId": "call-b922dc80-678c-49bb-aa97-a74ea495e731-5",
+ "toolInput": {
+  "file_path": "C:\\Users\\iaedo\\grok-test\\hello.txt",
+  "old_string": "hello",
+  "new_string": "world"
+ },
+ "toolInputTruncated": false,
+ "hook_event_name": "PreToolUse",
+ "session_id": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "transcript_path": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permission_mode": "default",
+ "tool_name": "search_replace",
+ "tool_input": {
+  "file_path": "C:\\Users\\iaedo\\grok-test\\hello.txt",
+  "old_string": "hello",
+  "new_string": "world"
+ },
+ "tool_use_id": "call-b922dc80-678c-49bb-aa97-a74ea495e731-5"
+}

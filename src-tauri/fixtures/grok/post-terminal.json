@@ -1,0 +1,74 @@
+{
+ "hookEventName": "post_tool_use",
+ "sessionId": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "cwd": "C:\\Users\\iaedo\\grok-test",
+ "workspaceRoot": "C:\\Users\\iaedo\\grok-test",
+ "timestamp": "2026-10-15T18:04:32.281183600+00:00",
+ "transcriptPath": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permissionMode": "default",
+ "toolName": "run_terminal_command",
+ "toolUseId": "call-afaad287-b857-4015-83b2-452fb0131079-6",
+ "toolInput": {
+  "command": "Get-Content -Path \"C:\\Users\\iaedo\\grok-test\\hello.txt\"",
+  "description": "Print hello.txt file contents"
+ },
+ "toolResult": {
+  "type": "Bash",
+  "output": [
+   119,
+   111,
+   114,
+   108,
+   100,
+   13,
+   10
+  ],
+  "output_for_prompt": "exit: 0\nworld\n",
+  "exit_code": 0,
+  "command": "Get-Content -Path \"C:\\Users\\iaedo\\grok-test\\hello.txt\"",
+  "truncated": false,
+  "signal": null,
+  "timed_out": false,
+  "description": "Print hello.txt file contents",
+  "current_dir": "C:\\Users\\iaedo\\grok-test",
+  "output_file": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\terminal\\call-afaad287-b857-4015-83b2-452fb0131079-6.log",
+  "total_bytes": 7
+ },
+ "toolInputTruncated": false,
+ "toolResultTruncated": false,
+ "durationMs": 1095,
+ "isBackgrounded": false,
+ "hook_event_name": "PostToolUse",
+ "session_id": "01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5",
+ "transcript_path": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\updates.jsonl",
+ "permission_mode": "default",
+ "tool_name": "run_terminal_command",
+ "tool_input": {
+  "command": "Get-Content -Path \"C:\\Users\\iaedo\\grok-test\\hello.txt\"",
+  "description": "Print hello.txt file contents"
+ },
+ "tool_response": {
+  "type": "Bash",
+  "output": [
+   119,
+   111,
+   114,
+   108,
+   100,
+   13,
+   10
+  ],
+  "output_for_prompt": "exit: 0\nworld\n",
+  "exit_code": 0,
+  "command": "Get-Content -Path \"C:\\Users\\iaedo\\grok-test\\hello.txt\"",
+  "truncated": false,
+  "signal": null,
+  "timed_out": false,
+  "description": "Print hello.txt file contents",
+  "current_dir": "C:\\Users\\iaedo\\grok-test",
+  "output_file": "C:\\Users\\iaedo\\.grok\\sessions\\C%3A%5CUsers%5Ciaedo%5Cgrok-test\\01a140b9-c1a2-7fa3-96a7-9cb66cd0e5c5\\terminal\\call-afaad287-b857-4015-83b2-452fb0131079-6.log",
+  "total_bytes": 7
+ },
+ "tool_use_id": "call-afaad287-b857-4015-83b2-452fb0131079-6",
+ "duration_ms": 1095
+}

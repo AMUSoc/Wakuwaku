@@ -38,6 +38,7 @@ mod detach;
 mod events;
 mod events_agy;
 mod events_codex;
+mod events_grok;
 mod fetch;
 mod focus;
 mod fullscreen;
