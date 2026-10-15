@@ -27,3 +27,6 @@ art/*
 
 # The Thunderbird extension, packed (integrations/thunderbird/build.ps1)
 integrations/thunderbird/*.xpi
+
+# Hook requests written down by tools/hook_dump.py
+tools/dumps/
