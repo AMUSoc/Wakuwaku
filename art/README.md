@@ -23,6 +23,6 @@ art/
 - 默认宠物 [大肥鱼/Deepseek Chan](https://codex-pets.net/#/pets/deepseek-chan) 的作者是 Dullsaw；`ocean-maid/` 参考了它的造型。
 - `references/` 里的图版权归各自作者。
 
-- `grok/`（**例外，进仓库**）：Grok 小姐的角色设计参考自 B 站 UP 主「沉默寡言佰佰」的 Grok 4.7 形象，是非官方 Q 版二创。`grok-sheet.png` 是姿势表，`preview-grok.png` 是图集前三行的预览；成品在 `data/pets/grok-chan/`，用 `python tools/slice_sheet.py art/grok/grok-sheet.png tools/grok-frames --id grok-chan --name "Grok小姐"` 重新生成。
+- `grok/`（**例外，进仓库**）：Grok 小姐的角色设计参考自 B 站 UP 主「沉默寡言佰佰」的 Grok 4.7 形象，是非官方 Q 版二创。`grok-sheet.png` 是姿势表，`preview-grok.png` 是图集前三行的预览，`preview-grok-crop.png` 是跳和跑两格裁切后的样子；成品在 `data/pets/grok-chan/`，用 `python tools/slice_sheet.py art/grok/grok-sheet.png tools/grok-frames --id grok-chan --name "Grok小姐" --height 200` 重新生成。
 
 要把某套素材放进应用（比如做成默认宠物或换掉图标），需要先确认原作者的授权。
