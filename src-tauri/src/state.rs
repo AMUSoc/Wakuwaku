@@ -1,17 +1,22 @@
 // What the pet is doing, from the messages the hooks bring (events.rs,
-// events_codex.rs). A message is
+// events_codex.rs, events_agy.rs, events_grok.rs). A message is
 //   { session?, project?, mood?, detail?, event?, react?, say?,
 //     title?, task?, step?, toolId?, todo?, file?, reply?, error?, agent?, turn? }
 //   mood     idle | working | waiting | done | review | error
 //   detail   a tool name, or { key, vars } to translate
-//   event    turn-start | tool-start | tool-done | tool-failed | turn-end | session-end
+//   event    turn-start | tool-start | tool-done | tool-failed | turn-end | session-end,
+//            and Grok's: permission (its own prompt waits on the person; what
+//            for is the step under way) and settle (a minute after it went
+//            quiet: one still at work or waiting is not, any other is left)
 //   react    wave | jump | failed: played once over the mood, `say` in the bubble
-//   agent    "codex", "agy", or none for Claude Code
+//   agent    "codex", "agy", "grok", or none for Claude Code
 //   turn     the turn it belongs to (Codex): some of its hooks run in the
 //            background, so one can come after its turn ended (turn-end), and
 //            changes nothing then. Antigravity's turn-start has one too (the
 //            person's words it answers): it starts again, the same turn, once
-//            a task it left running in the background is done
+//            a task it left running in the background is done. Grok's
+//            (promptId): the end of a turn before the one under way changes
+//            nothing (its cancel report may come after the next prompt)
 //   title    the session's name; task   the person's words for the work
 //   step     what a starting tool does, { key, vars }; toolId pairs it with its end
 //   todo     { set: [{ text, active, status }] }, { add: { text, active } }
@@ -31,10 +36,10 @@ use crate::jump;
 
 const MOODS: [&str; 6] = ["idle", "working", "waiting", "done", "review", "error"];
 const REACTS: [&str; 3] = ["wave", "jump", "failed"];
-// apply_patch: every edit Codex makes.
 // Claude Code's, Codex's (apply_patch), Antigravity's (write_to_file, as
-// agy 1.3.4 names it; its edits by the names it keeps from Windsurf).
-const EDIT_TOOLS: [&str; 8] = ["Edit", "Write", "MultiEdit", "NotebookEdit", "apply_patch", "write_to_file", "replace_file_content", "multi_replace_file_content"];
+// agy 1.3.4 names it; its edits by the names it keeps from Windsurf), Grok
+// Build's (write, search_replace).
+const EDIT_TOOLS: [&str; 10] = ["Edit", "Write", "MultiEdit", "NotebookEdit", "apply_patch", "write_to_file", "replace_file_content", "multi_replace_file_content", "write", "search_replace"];
 // The turns remembered as ended, per session.
 const ENDED_TURNS: usize = 4;
 
@@ -352,6 +357,12 @@ impl Pet {
             let agent = str_field(msg, "agent", 20);
             let turn = str_field(msg, "turn", 100);
 
+            // Grok settling: only a session still at work or waiting on the
+            // person, which it is no longer; nothing else, none made for it.
+            let is_settling = |s: &Session| matches!(s.mood.as_str(), "working" | "waiting");
+            if event == "settle" && !self.sessions.get(&id).is_some_and(is_settling) {
+                return Some(out);
+            }
             if event == "session-end" {
                 self.sessions.remove(&id);
             } else {
@@ -372,6 +383,16 @@ impl Pet {
                     if is_edit && s.mood == "done" {
                         s.mood = "review".into();
                         out.changed = true;
+                    }
+                    return Some(out);
+                }
+                // Grok's end of a turn before the one under way (a cancel is
+                // reported off its loop, after the next prompt at times): kept
+                // as ended, and nothing else.
+                if s.agent == "grok" && event == "turn-end" && !turn.is_empty() && !s.turn.is_empty() && turn != s.turn {
+                    s.ended_turns.push(turn);
+                    if s.ended_turns.len() > ENDED_TURNS {
+                        s.ended_turns.remove(0);
                     }
                     return Some(out);
                 }
@@ -453,6 +474,11 @@ impl Pet {
                 if msg.get("error").is_some() {
                     s.error = text(msg.get("error"), 80);
                 }
+                // Grok's prompt: what it waits on, the step under way.
+                let detail = match s.running.last().filter(|_| event == "permission").map(|r| r.step.clone()) {
+                    Some(step) if !step.is_null() && step != "" => json!({ "key": "detail.approve", "vars": { "what": step } }),
+                    _ => detail,
+                };
                 let mut mood = mood;
                 if mood == "done" && s.has_edited {
                     mood = "review";
@@ -465,7 +491,7 @@ impl Pet {
                 let busy_for = s.since.map(|since| now.saturating_sub(since));
                 out.alerts.extend(set(s, mood, detail, now, hold).map(|m| (m, whose)));
                 // Its end: done, or stopped by the person, having worked till then.
-                if is_ending(mood) || (mood == "idle" && event == "turn-end") {
+                if is_ending(mood) || (mood == "idle" && matches!(event, "turn-end" | "settle")) {
                     out.worked_ms += busy_for.unwrap_or(0);
                 }
             }
@@ -611,6 +637,75 @@ mod tests {
 
     fn msg(v: Value) -> Value {
         v
+    }
+
+    // A payload Grok Build sent (src-tauri/fixtures/grok), as events_grok.rs makes it a message.
+    macro_rules! grok {
+        ($name:literal) => {
+            crate::events_grok::to_message(&serde_json::from_str::<Value>(include_str!(concat!("../fixtures/grok/", $name, ".json"))).unwrap()).unwrap()
+        };
+    }
+
+    #[test]
+    fn grok_waits_on_the_person_for_the_step_under_way() {
+        let mut pet = Pet::default();
+        pet.apply(&grok!("prompt"), 1, Hold::Seen);
+        pet.apply(&grok!("pre-search-replace"), 2, Hold::Seen);
+        let out = pet.apply(&grok!("notification-permission"), 3, Hold::Seen).unwrap();
+        let now = pet.get(4);
+        assert_eq!(now["mood"], "waiting");
+        assert_eq!(now["detail"], json!({ "key": "detail.approve", "vars": { "what": { "key": "step.edit", "vars": { "file": "hello.txt" } } } }));
+        assert_eq!(out.alerts.len(), 1);
+        // Approved in Grok: the edit runs, and the turn ends with changes to see.
+        pet.apply(&grok!("post-search-replace"), 5, Hold::Seen);
+        assert_eq!(pet.get(6)["mood"], "working");
+        pet.apply(&grok!("prompt-again"), 7, Hold::Seen);
+        pet.apply(&grok!("pre-search-replace"), 8, Hold::Seen);
+        pet.apply(&grok!("post-search-replace"), 9, Hold::Seen);
+        pet.apply(&grok!("stop-end-turn"), 10, Hold::Seen);
+        assert_eq!(pet.get(11)["mood"], "review");
+        // With no step under way, it says only that Grok waits on the person.
+        let mut pet = Pet::default();
+        pet.apply(&grok!("notification-permission"), 1, Hold::Seen);
+        assert_eq!(pet.get(2)["detail"], json!({ "key": "detail.approveThere", "vars": {} }));
+    }
+
+    #[test]
+    fn grok_s_late_cancel_of_a_turn_before_changes_nothing() {
+        let mut pet = Pet::default();
+        pet.apply(&grok!("prompt"), 1, Hold::Seen);
+        pet.apply(&grok!("prompt-again"), 2, Hold::Seen);
+        // The first turn's cancel, reported after the second began.
+        pet.apply(&grok!("cancelled-rejected"), 3, Hold::Seen);
+        assert_eq!(pet.get(4)["mood"], "working");
+        pet.apply(&grok!("stop-end-turn"), 5, Hold::Seen);
+        assert_eq!(pet.get(6)["mood"], "done");
+        // Its own turn's cancel stops it.
+        let mut pet = Pet::default();
+        pet.apply(&grok!("prompt"), 1, Hold::Seen);
+        pet.apply(&grok!("cancelled-rejected"), 2, Hold::Seen);
+        assert_eq!(pet.get(3)["mood"], "idle");
+    }
+
+    #[test]
+    fn grok_settling_ends_only_work_and_waiting() {
+        // Still at work a minute after it went quiet: no longer.
+        let mut pet = Pet::default();
+        pet.apply(&grok!("prompt"), 1, Hold::Seen);
+        let out = pet.apply(&grok!("notification-idle"), 60_000, Hold::Seen).unwrap();
+        assert!(out.changed);
+        assert_eq!(pet.get(60_001)["mood"], "idle");
+        // An ending not yet seen stays.
+        let mut pet = Pet::default();
+        pet.apply(&grok!("prompt-again"), 1, Hold::Seen);
+        pet.apply(&grok!("stop-end-turn"), 2, Hold::Seen);
+        let out = pet.apply(&grok!("notification-idle"), 60_000, Hold::Seen).unwrap();
+        assert!(!out.changed);
+        assert_eq!(pet.get(60_001)["mood"], "done");
+        // A session never seen is not made for it.
+        let mut pet = Pet::default();
+        pet.apply(&grok!("notification-idle"), 1, Hold::Seen);
+        assert_eq!(pet.get(2)["sessions"], 0);
     }
 
     #[test]
