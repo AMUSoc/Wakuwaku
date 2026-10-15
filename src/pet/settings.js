@@ -3,8 +3,7 @@
 // close them. Five pages:
 //   now       the sessions (a click on one goes to its window), and four quick switches
 //   pets      the pets downloaded, a download by link or id, the gallery
-//   look      her home (island, taskbar), size, strolls, eyes, language; Windows'
-//             own mode and accent colour
+//   look      her home (island, taskbar), size, strolls, eyes, language
 //   alerts    how long endings stay, and idle sessions in sight; notifications,
 //             sound, prompts, quiet
 //   widgets   plugins: the built-in ones, those she runs for you (a switch, their settings folded under), their order, turns, nudges, waku, and how to write one
@@ -86,7 +85,7 @@
   let openPlugin = ''
   const drafts = {}
   // The colour picker is open: the focus it takes does not close the
-  // settings (the desktop's picture has its own, pickingPaper).
+  // settings.
   let picking = false
 
   const T = (key, vars) => t(lang, key, vars)
@@ -505,7 +504,6 @@
       </div>
       ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div></div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
       <div class="grp">${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
-      ${pageWindows()}
       ${sec(T('s.her'))}<div class="grp">
         ${row(esc(T('menu.size')), '', seg('scale', SIZES.map(([name, scale]) => [scale, T(`menu.${name}`)]), s.scale))}
         ${row(esc(T('s.details')), esc(T('s.detailsNote')), sw('details', s.details !== false))}
@@ -513,87 +511,6 @@
         ${row(esc(T('s.look')), '', sw('look', s.look))}
       </div>
       ${part('pets', pagePets())}`
-  }
-
-  // Windows' own mode and accent colour, set as Settings → Personalization →
-  // Colors sets them (theme.rs): its 48 colours to pick from.
-  const ACCENTS = [
-    '#ffb900', '#ff8c00', '#f7630c', '#ca5010', '#da3b01', '#ef6950', '#d13438', '#ff4343',
-    '#e74856', '#e81123', '#ea005e', '#c30052', '#e3008c', '#bf0077', '#c239b3', '#9a0089',
-    '#0078d7', '#0063b1', '#8e8cd8', '#6b69d6', '#8764b8', '#744da9', '#b146c2', '#881798',
-    '#0099bc', '#2d7d9a', '#00b7c3', '#038387', '#00b294', '#018574', '#00cc6a', '#10893e',
-    '#7a7574', '#5d5a58', '#68768a', '#515c6b', '#567c73', '#486860', '#498205', '#107c10',
-    '#767676', '#4c4a48', '#69797e', '#4a5459', '#647c64', '#525e54', '#847545', '#7e735f',
-  ]
-  // The accent colours held back for now: DWM's frames' colour does not yet
-  // follow them for sure (theme.rs set_accent), 2026-10-10.
-  const ACCENT_PICKER = false
-  function pageWindows() {
-    const look = snap.winLook || {}
-    const accent = String(look.accent || '').toLowerCase()
-    // One picked outside these (its own colour in Windows' settings): last, ringed.
-    const colours = /^#[0-9a-f]{6}$/.test(accent) && !ACCENTS.includes(accent) ? [...ACCENTS, accent] : ACCENTS
-    const swatches = colours.map(c => `<span class="acc${c === accent ? ' on' : ''}" data-accent="${c}" style="background:${c}" title="${c}"></span>`).join('')
-    return `${sec(T('s.windows'))}<div class="grp">
-        ${row(esc(T('s.winMode')), esc(T('s.winModeNote')), seg('winMode', [['light', T('s.winMode.light')], ['dark', T('s.winMode.dark')]], look.light ? 'light' : 'dark'))}
-        ${ACCENT_PICKER ? `<div class="r col"><div>${esc(T('s.winAccent'))}</div><div class="accents">${swatches}</div></div>` : ''}
-      </div>
-      ${pagePaper()}`
-  }
-
-  // Windows' dialog open for the desktop's picture: its own mark, held until
-  // the dialog answers (picking, a colour's, is let go a second after
-  // the island has the focus again, which a press on it mid-dialog gives).
-  let pickingPaper = false
-  // One ask at a time: its buttons grey until Windows has done it (a step
-  // waits up to a few seconds to see the picture change; presses meanwhile
-  // went on stepping, 2026-10-10).
-  let paperBusy = false
-
-  // Asked of Windows for the desktop's picture; the snapshot as it is after.
-  function paperDo(what, value) {
-    if (paperBusy) return
-    paperBusy = true
-    pickingPaper = what === 'picture' || what === 'folder'
-    draw()
-    return window.pet.settings
-      .wallpaper(what, value)
-      .then(got => {
-        snap = got
-      })
-      .finally(() => {
-        paperBusy = false
-        pickingPaper = false
-        draw()
-      })
-  }
-
-  // The desktop's picture (paper.rs): one picture or a folder's in turn,
-  // picked in Windows' file dialog; how it is laid; the turns.
-  const PAPER_POSITIONS = ['fill', 'fit', 'stretch', 'tile', 'center', 'span']
-  const PAPER_EVERY = [60000, 600000, 1800000, 3600000, 21600000, 86400000]
-  const lastPart = path => String(path || '').split(/[\\/]/).filter(Boolean).pop() || ''
-  function pagePaper() {
-    const paper = snap.winPaper
-    if (!paper) return ''
-    const now = paper.slideshow
-      ? T('s.paperNowFolder', { name: lastPart(paper.folder) || T('s.paperUnknown') })
-      : T('s.paperNowPicture', { name: lastPart(paper.file) || T('s.paperUnknown') })
-    const every = PAPER_EVERY.map(ms => [ms, ms >= 86400000 ? T('s.paperDay') : ms >= 3600000 ? T('s.paperHours', { n: ms / 3600000 }) : T('settings.minutes', { n: ms / 60000 })])
-    const button = (what, label) => `<button class="pbtn sm" data-paper="${what}" ${paperBusy ? 'disabled' : ''}>${esc(T(label))}</button>`
-    // Back to the picture before the last change made here, while there is one.
-    const pick = `<span class="btns">${button('picture', 's.paperPicture')}${button('folder', 's.paperFolder')}${paper.canUndo ? button('undo', 's.paperUndo') : ''}</span>`
-    return `${sec(T('s.wallpaper'))}<div class="grp">
-        ${row(esc(T('s.paperNow')), esc(now), pick)}
-        ${row(esc(T('s.paperFit')), '', seg('paperPosition', PAPER_POSITIONS.map(p => [p, T(`s.paperPos.${p}`)]), paper.position))}
-        ${
-          paper.slideshow
-            ? `${row(esc(T('s.paperEvery')), '', seg('paperEvery', every, paper.every))}
-        ${row(esc(T('s.paperShuffle')), '', sw('paperShuffle', paper.shuffle))}
-        ${row(esc(T('s.paperNext')), '', `<span class="btns">${button('previous', 's.paperPrevButton')}${button('next', 's.paperNextButton')}</span>`)}`
-            : ''
-        }
-      </div>`
   }
 
   function pageAlerts() {
@@ -1322,16 +1239,12 @@
     const s = snap?.settings
     if (!s) return
 
-    // Mail: an account set up, changed, kept, removed; its server looked
-    // up, or typed in.
-    if (handleMail(at)) return
     const toggle = at('[data-sw]')
     if (toggle && !toggle.disabled) {
       const key = toggle.dataset.sw
       if (key === 'login') return window.pet.settings.login(!snap.loginAtStart).then(got => ((snap = got), draw()))
       // Crash reports: sent by themselves, or never (not asked again).
       if (key === 'crashReports') return patch({ crashReports: snap.crash?.mode === 'auto' ? 'off' : 'auto' })
-      if (key === 'paperShuffle') return paperDo('shuffle', !snap.winPaper?.shuffle)
       if (key === 'ilookBare') return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), bare: !ilookOf(ilookFor()).bare })
       if (key.startsWith('notify.')) return patch({ notify: { ...s.notify, [key.slice(7)]: !s.notify?.[key.slice(7)] } })
       // A widget on or off.
@@ -1393,12 +1306,6 @@
         return draw()
       }
       if (key === 'ilookEdge') return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), edge: raw })
-      if (key === 'paperPosition') return raw !== snap.winPaper?.position && paperDo('position', raw)
-      if (key === 'paperEvery') return Number(raw) !== snap.winPaper?.every && paperDo('every', raw)
-      if (key === 'winMode') {
-        if ((raw === 'light') === !!snap.winLook?.light) return
-        return window.pet.settings.winLook({ light: raw === 'light' }).then(got => ((snap = got), draw()))
-      }
       if (key === 'gallery') {
         if (gallery.sort === raw) return
         gallery.sort = raw
@@ -1448,10 +1355,6 @@
     if (at('[data-crash-show]')) return ((crashShown = !crashShown), draw())
     const crashButton = at('[data-crash]')
     if (crashButton && !crashButton.disabled) return window.pet.settings.crash(crashButton.dataset.crash).then(got => ((snap = got), draw()))
-    const paperButton = at('[data-paper]')
-    if (paperButton && !paperButton.disabled) return paperDo(paperButton.dataset.paper)
-    const accent = at('[data-accent]')
-    if (accent && ACCENT_PICKER) return window.pet.settings.winLook({ accent: accent.dataset.accent }).then(got => ((snap = got), draw()))
     const use = at('[data-use]')
     if (use) return patch({ pet: use.dataset.use })
     if (at('[data-fetch]')) {
@@ -1608,10 +1511,10 @@
     snap = got
     draw()
   })
-  // The keyboard went elsewhere: a click outside the island; not a picker
-  // (a colour, the desktop's picture: its own window takes the focus).
+  // The keyboard went elsewhere: a click outside the island; not the colour
+  // picker (its own window takes the focus).
   // Locked (the button by ✕), they stay.
-  window.pet.onBlur(() => !snap?.settings?.settingsPin && !picking && !pickingPaper && (!window.pet.mac || Date.now() - openedAt > BLUR_GRACE_MS) && close('blur'))
+  window.pet.onBlur(() => !snap?.settings?.settingsPin && !picking && (!window.pet.mac || Date.now() - openedAt > BLUR_GRACE_MS) && close('blur'))
   window.addEventListener('focus', () => setTimeout(() => (picking = false), 1000))
 
   window.Settings = {

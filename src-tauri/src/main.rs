@@ -54,7 +54,6 @@ mod island;
 mod jump;
 mod notch;
 mod notify;
-mod paper;
 mod pet;
 mod pins;
 mod pointer;
@@ -69,7 +68,6 @@ mod state;
 mod systray;
 mod taskbar;
 mod tasks;
-mod theme;
 mod tokens;
 mod tray;
 mod updates;
@@ -1244,8 +1242,6 @@ fn main() {
             settings::settings_closed,
             settings::settings_show_pet,
             settings::settings_login,
-            settings::settings_win_look,
-            settings::settings_wallpaper,
             settings::settings_hooks,
             settings::settings_codex_hooks,
             settings::settings_agy_hooks,

@@ -72,10 +72,8 @@ pub fn snapshot(sh: &Shared) -> Value {
         // only with more than one (Look, taskbarDisplays).
         "displayCount": sh.screens().areas.len(),
         "loginAtStart": connection::is_open_at_login(),
-        // Windows' own mode and accent colour (settings_win_look sets them).
-        "winLook": { "light": win_light, "accent": crate::theme::current_accent().or(win_accent.map(|a| a.base)) },
-        // The desktop's picture as it is (paper.rs).
-        "winPaper": crate::paper::now(),
+        // Windows' own mode and accent colour.
+        "winLook": { "light": win_light, "accent": win_accent.map(|a| a.base) },
         "version": sh.app.package_info().version.to_string(),
         // Her updates: this version, the latest, an update under way (updates.rs).
         "update": crate::updates::view(&sh),
@@ -299,73 +297,6 @@ pub async fn settings_closed(app: AppHandle, window: WebviewWindow) {
 pub async fn settings_show_pet(app: AppHandle, on: bool) -> Value {
     let sh = shared(&app);
     sh.set_hidden(!on);
-    snapshot(&sh)
-}
-
-// Windows' own light or dark mode, or its accent colour ("#rrggbb"), set
-// as Settings → Personalization → Colors sets them (theme.rs).
-#[tauri::command]
-pub async fn settings_win_look(app: AppHandle, light: Option<bool>, accent: Option<String>) -> Value {
-    let sh = shared(&app);
-    if let Some(light) = light {
-        let ok = crate::theme::set_mode(light);
-        sh.log(&format!("settings: Windows' mode set {}: {ok}", if light { "light" } else { "dark" }));
-    }
-    if let Some(rgb) = accent.as_deref().and_then(crate::theme::parse) {
-        let picked = accent.unwrap_or_default();
-        let (later_sh, later_picked) = (sh.clone(), picked.clone());
-        let came = crate::theme::set_accent(rgb, move |note| later_sh.log(&format!("settings: Windows' accent {later_picked}: {note}")));
-        sh.log(&format!("settings: Windows' accent set {picked}: {came}"));
-    }
-    snapshot(&sh)
-}
-
-// The desktop's picture (paper.rs): a picture or a folder picked in Windows'
-// file dialog ("picture", "folder"), how it is laid ("position"), the
-// folder's turns ("every", "shuffle"), the next or the one before ("next",
-// "previous"); a change of these undone ("undo").
-#[tauri::command]
-pub async fn settings_wallpaper(app: AppHandle, what: String, value: Option<String>) -> Value {
-    let sh = shared(&app);
-    let owner = crate::island::hwnd(&sh);
-    let lang = sh.lang();
-    let t = move |key: &str| crate::i18n::t(lang, key);
-    let what_done = what.clone();
-    // What changes the picture is kept to be undone ("undo"), once picked.
-    let changed = |done: bool| {
-        crate::paper::remember();
-        done
-    };
-    let done = tauri::async_runtime::spawn_blocking(move || match what.as_str() {
-        "picture" => crate::paper::pick(false, &t("wallpaper.pickPicture"), &t("wallpaper.pictures"), owner).map(|p| (changed(true) && crate::paper::set_picture(&p), p)),
-        "folder" => crate::paper::pick(true, &t("wallpaper.pickFolder"), "", owner).map(|p| (changed(true) && crate::paper::set_folder(&p), p)),
-        "position" => value.map(|v| (changed(true) && crate::paper::set_position(&v), v)),
-        "every" => value.map(|v| (crate::paper::set_turns(v.parse().ok(), None), v)),
-        "shuffle" => value.map(|v| (crate::paper::set_turns(None, Some(v == "true")), v)),
-        "next" => Some((changed(true) && crate::paper::next(), String::new())),
-        "previous" => Some((changed(true) && crate::paper::previous(), String::new())),
-        "undo" => Some((crate::paper::undo(), String::new())),
-        _ => None,
-    })
-    .await
-    .ok()
-    .flatten();
-    for line in crate::paper::notes() {
-        sh.log(&format!("settings: wallpaper: {line}"));
-    }
-    if let Some((ok, value)) = done {
-        sh.log(&format!("settings: wallpaper {what_done} {value}: {ok}"));
-        // The taskbar's Mica follows the new picture: Windows says nothing
-        // of a change made through IDesktopWallpaper, and the taskbar would
-        // look on its own only every half minute. A moment after, for the
-        // picture to be in place.
-        if ok {
-            std::thread::spawn(|| {
-                std::thread::sleep(std::time::Duration::from_millis(600));
-                crate::taskbar::look_now();
-            });
-        }
-    }
     snapshot(&sh)
 }
 
