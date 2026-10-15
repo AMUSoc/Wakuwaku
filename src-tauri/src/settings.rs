@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, WebviewWindow};
 
-use crate::{connection, data, fetch, fullscreen, i18n, island, mail, now_ms, pet, scripts, set_display, set_out, shared, Shared};
+use crate::{connection, data, fetch, fullscreen, i18n, island, now_ms, pet, scripts, set_display, set_out, shared, Shared};
 
 const REPO: &str = "https://github.com/zhoupengjie/wakuwaku";
 
@@ -87,18 +87,6 @@ pub fn snapshot(sh: &Shared) -> Value {
         "widgets": sh.widgets_view(),
         // The plugins she runs, and where waku is for the terminal.
         "plugins": scripts::view(sh),
-        // The mail accounts, each with how its watch is going.
-        "mail": mail::view(sh),
-        // Who a letter can go to (claude, codex: found or not), and the
-        // letters being read in the background or read this time.
-        "mailAgents": mail::agent::available(),
-        // The models each can be asked for, with the efforts they take.
-        "mailModels": mail::agent::models(sh),
-        "mailTalks": mail::agent::talks(sh),
-        // Windows' proxy as mail would take it (the Mail page's "follow the system").
-        "mailSystemProxy": mail::proxy::system_view(),
-        // The mail kept changed: the Mail page asks for its list again.
-        "mailRev": mail::rev(),
         "waku": scripts::waku_path(sh).to_string_lossy(),
         "port": sh.port,
     })
@@ -234,14 +222,6 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // And at the top of the screen (island.js lookNow), kept apart:
         // none is black, as it always was.
         "islandLook" | "islandTopLook" => v.is_null() || v.as_object().is_some_and(|m| m.iter().all(|(mode, look)| matches!(mode.as_str(), "dark" | "light") && is_island_look(look))),
-        "mailAgent" => matches!(v.as_str(), Some("claude" | "codex" | "agy")),
-        // The Mail page in two panes (list, letter), or one.
-        "mailPanes" => matches!(v.as_str(), Some("one" | "two")),
-        // How much mail is kept whole offline (mail/store.rs Offline).
-        "mailOffline" => matches!(v.as_str(), Some("90d" | "year" | "all" | "opened")),
-        "mailAgentConf" => mail::agent::is_conf_ok(v),
-        // How mail reaches its servers (mail/proxy.rs).
-        "mailProxy" => mail::proxy::Via::of(v).is_some(),
         _ => false,
     }
 }
@@ -277,8 +257,6 @@ pub fn apply_patch(sh: &Arc<Shared>, patch: &Value) -> Value {
         sh.push_asks();
     }
     let plugins = rest.contains_key("plugins");
-    let offline = rest.contains_key("mailOffline");
-    let mail_way = rest.contains_key("mailProxy");
     let crash_auto = rest.get("crashReports").and_then(Value::as_str) == Some("auto");
     if !rest.is_empty() {
         sh.change(Value::Object(rest));
@@ -288,15 +266,6 @@ pub fn apply_patch(sh: &Arc<Shared>, patch: &Value) -> Value {
         crate::crash::send_now(sh);
     }
     if plugins && scripts::sync(sh) {
-        sh.redraw();
-    }
-    // Mail kept offline for more or less: each account's sync at it now,
-    // once the setting is there to be read.
-    if offline {
-        mail::kick_all(sh);
-    }
-    // Mail through another way: the accounts that follow the page's, connected again.
-    if mail_way && mail::sync(sh) {
         sh.redraw();
     }
     snapshot(sh)
@@ -524,15 +493,11 @@ pub async fn settings_crash(app: AppHandle, what: String) -> Value {
     snapshot(&sh)
 }
 
-// Only these places, whatever the page asks: the project, codex-pets.net,
-// or where a mail provider makes app passwords (the Mail page's hint).
+// Only these places, whatever the page asks: the project or codex-pets.net.
 #[tauri::command]
 pub async fn settings_open_site(app: AppHandle, place: String) {
     let url = match place.as_str() {
         "repo" => REPO,
-        "googleAppPasswords" => "https://myaccount.google.com/apppasswords",
-        "appleAppPasswords" => "https://account.apple.com/account/manage",
-        "yahooAppPasswords" => "https://login.yahoo.com/account/security",
         _ => fetch::SITE,
     };
     // By ShellExecute, not `cmd /c start`: run from the installed pet (no

@@ -156,7 +156,7 @@
   const CAPSULE_Y = 5
   // A portrait px across is the sheet at this scale.
   const PER_PX = 0.00875
-  // The settings' width (the Mail page in two panes is wider: settings.js).
+  // The settings' width.
   const SETTINGS_W = 520
   const BODY_SCALE = 0.5
   const BODY_W = Math.round(CELL_W * BODY_SCALE)
@@ -1937,7 +1937,6 @@
       b.dataset.wg = what
       return b
     }
-    if (kind === 'mail') acts.append(button('mail', t(lang, 'taskbar.w.mail')))
     if (kind === 'plugin' || kind === 'builtIn') acts.append(button('settings', t(lang, 'taskbar.w.settings')))
     acts.append(button('remove', t(lang, 'taskbar.w.remove')))
     wgPop.replaceChildren(head, ...rows, acts)
@@ -1968,15 +1967,12 @@
     if (!what || !entry) return
     if (what === 'remove') return removeEntry(entry.id)
     closeWidgetPop()
-    if (what === 'mail') return window.pet.openSettings('mail')
     openWidgetSettings(entry.type === 'plugin' ? { plugin: entry.of } : { id: entry.of })
   })
 
-  // A widget's place in the settings: the mail page for an inbox's unread,
-  // else its row on the plugins page, its own settings folded out (the
-  // monitor's, a plugin's she runs).
+  // A widget's place in the settings: its row on the plugins page, its own
+  // settings folded out (the monitor's, a plugin's she runs).
   function openWidgetSettings(w) {
-    if (w.from === 'mail') return window.pet.openSettings('mail')
     const key = w.plugin || w.id
     if (w.plugin || key === 'monitor') window.Settings?.openPlugin?.(key)
     window.pet.openSettings(key ? `widgets:${key}` : 'widgets')
@@ -3420,14 +3416,13 @@
   }
 
   // Its cards: the built-in widgets (not the monitor, a part of its own),
-  // the plugins she runs, each mail account's, those of anyone else's
+  // the plugins she runs, those of anyone else's
   // scripts there now, and the spacers.
   function cardsOf(all) {
     const cards = []
     const named = w => (w.private ? {} : { name: [...String(Widgets.words(lang, w).label)].slice(0, 40).join('') })
     for (const w of all.filter(w => w.builtIn && w.id !== 'monitor')) cards.push({ kind: 'builtIn', entry: { type: 'widget', of: w.id, icon: w.icon }, w })
     for (const p of libSnap?.plugins || []) cards.push({ kind: 'plugin', entry: { type: 'plugin', of: p.id, icon: p.icon }, w: all.find(w => w.plugin === p.id), plugin: p })
-    for (const w of all.filter(w => w.from === 'mail')) cards.push({ kind: 'mail', entry: { type: 'widget', of: w.id, icon: w.icon, ...named(w) }, w })
     for (const w of all.filter(w => w.from === 'script' && !w.plugin)) cards.push({ kind: 'script', entry: { type: 'widget', of: w.id, icon: w.icon, ...named(w) }, w })
     for (const type of ['flex', 'gap', 'sep']) cards.push({ kind: 'layout', entry: { type } })
     return cards
@@ -4224,12 +4219,7 @@
         if (at >= 0) turnWidget(at - (widgetAt % widgets.length))
         return openWidgetSettings(at >= 0 ? widgets[at] : { id: row.dataset.widget })
       }
-      // A word that points somewhere (an agent answered about a letter): there.
       const open = isNudging() && nudge.widget?.open
-      if (open?.tab === 'mail') {
-        window.Settings?.openLetter?.({ account: open.account, uid: open.uid, folder: open.folder || 'inbox' })
-        return window.pet.openSettings('mail')
-      }
       // A page, or a part of one (a new version: the updates).
       if (open?.tab) return window.pet.openSettings(open.tab)
       window.pet.openSettings()

@@ -110,8 +110,6 @@ fn defaults() -> Map<String, Value> {
         "widgetNudge": true,
         // The plugins she runs (scripts.rs): { id: { on, <Param>: value } }.
         "plugins": {},
-        // Mail accounts (mail.rs); their passwords are in the Credential Manager.
-        "mail": [],
         "walk": true,
         "look": true,
         // Done, changed or failed: shown 8 s, or until seen (8, 30, 120, "seen").

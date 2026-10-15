@@ -212,34 +212,6 @@
       // Her crash reports: 'yes', 'no' (her asking answered), 'send', 'open' (the last one's issue; crash.rs).
       crash: what => invoke('settings_crash', { what }),
     },
-    // Mail accounts (mail.rs): the server for an address, an account kept
-    // once it signs in, one removed, one on or off, a server tried without
-    // signing in (Re-test); an inbox's newest letters (id "*" every
-    // account's; filter all | unseen | flagged), a star put on or off, one
-    // letter opened (and marked read), one handed to an agent (agent claude
-    // | codex | agy, how talk | open), more asked in its talk; a letter sent
-    // (send.rs); Re-test of the outgoing server (kind smtp). The lookup and
-    // Re-test go the way the account being set up does (proxy: its own, or
-    // null for the Mail page's; mail/proxy.rs).
-    mail: {
-      discover: (address, proxy) => invoke('mail_discover', { address: String(address || ''), proxy: proxy || null }),
-      probe: (host, port, security, kind, proxy) =>
-        invoke('mail_probe', { host: String(host || ''), port: String(port ?? ''), security: String(security || 'auto'), kind: kind === 'smtp' ? 'smtp' : 'imap', proxy: proxy || null }),
-      send: letter => invoke('mail_send', { letter }),
-      save: (account, password) => invoke('mail_save', { account, password: String(password || '') }),
-      remove: id => invoke('mail_remove', { id: String(id) }),
-      switch: (id, on) => invoke('mail_switch', { id: String(id), on: on === true }),
-      letters: (id, count, filter) => invoke('mail_letters', { id: String(id), count: Number(count) || 50, filter: String(filter || 'all') }),
-      flag: (id, uid, on, folder) => invoke('mail_flag', { id: String(id), uid: Number(uid), on: on === true, folder: String(folder || 'inbox') }),
-      say: (key, text) => invoke('mail_say', { key: String(key), text: String(text || '') }),
-      letter: (id, uid, folder) => invoke('mail_letter', { id: String(id), uid: Number(uid), folder: String(folder || 'inbox') }),
-      // An account's sync (or every one's, '*') to look at the server now.
-      kick: id => invoke('mail_kick', { id: String(id) }),
-      // The letter being written, as kept in the data folder (null: none).
-      draft: () => invoke('mail_draft'),
-      keepDraft: draft => invoke('mail_keep_draft', { draft: draft || null }),
-      hand: (id, uid, agent, how, folder) => invoke('mail_hand', { id: String(id), uid: Number(uid), agent: String(agent), how: String(how), folder: String(folder || 'inbox') }),
-    },
   }
 
   // --- Mouse moves while clicks pass through ------------------------------------

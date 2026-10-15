@@ -52,7 +52,6 @@ mod icons;
 mod inputs;
 mod island;
 mod jump;
-mod mail;
 mod notch;
 mod notify;
 mod paper;
@@ -113,8 +112,6 @@ pub struct Shared {
     pub today: Mutex<widgets::Today>,
     // The plugins she runs for you (scripts.rs).
     pub scripts: Mutex<scripts::Runner>,
-    // The mail accounts being watched (mail.rs).
-    pub mail: Mutex<mail::Runner>,
     screens: Mutex<screen::Screens>,
     // Out of sight: hidden from the tray, or another app is full screen.
     pub hidden: AtomicBool,
@@ -1265,20 +1262,6 @@ fn main() {
             settings::settings_open_site,
             settings::settings_update,
             settings::settings_crash,
-            mail::mail_discover,
-            mail::mail_probe,
-            mail::mail_save,
-            mail::mail_remove,
-            mail::mail_switch,
-            mail::letters::mail_letters,
-            mail::letters::mail_letter,
-            mail::agent::mail_hand,
-            mail::agent::mail_say,
-            mail::letters::mail_flag,
-            mail::send::mail_send,
-            mail::mail_kick,
-            mail::mail_draft,
-            mail::mail_keep_draft,
             taskbar::taskbar_tray,
             taskbar::taskbar_open,
             taskbar::taskbar_volume,
@@ -1334,7 +1317,6 @@ fn main() {
                 asks: Mutex::new(asks::Asks::default()),
                 widgets: Mutex::new(widgets::Widgets::default()),
                 scripts: Mutex::new(scripts::Runner::default()),
-                mail: Mutex::new(mail::Runner::default()),
                 today: Mutex::new(today),
                 screens: Mutex::new(screen::read(app.handle())),
                 hidden: AtomicBool::new(false),
@@ -1371,8 +1353,6 @@ fn main() {
             island::apply_visibility(&sh);
             tray::create(&sh)?;
             server::serve(sh.clone(), listener);
-            // The mail accounts that are on, watched from the start.
-            mail::sync(&sh);
             // Her updates looked for (a downloaded exe only).
             updates::start(&sh);
             // Crashes since: their reports made, sent or asked about.
@@ -1576,10 +1556,9 @@ fn main() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 let sh = shared(app);
-                sh.log("quitting: the bar given back, the plugins and the mail stopped");
+                sh.log("quitting: the bar given back, and the plugins stopped");
                 island::release_bar(&sh);
                 scripts::stop_all(&sh);
-                mail::stop_all(&sh);
                 sh.log("quitting: done");
             }
         });
