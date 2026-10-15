@@ -73,7 +73,6 @@ mod tray;
 mod updates;
 mod wallpaper;
 mod widgets;
-mod winkeys;
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -654,10 +653,10 @@ impl Shared {
             }
             let _ = window.set_focusable(true);
             // To the front by borrowing the input of the window there
-            // (jump::bring_window): taken after Win came up (winkeys.rs), the
-            // foreground was not hers to take, and tao's way (an Alt pressed
-            // for it) went to the window in front, its menu bar opened, the
-            // keyboard left there (with Narrator on, 2026-10-14).
+            // (jump::bring_window): when the foreground is not hers to take,
+            // tao's way (an Alt pressed for it) went to the window in front,
+            // its menu bar opened, the keyboard left there (with Narrator on,
+            // 2026-10-14).
             #[cfg(windows)]
             crate::jump::bring_window(mine);
             let _ = window.set_focus();
@@ -1268,7 +1267,6 @@ fn main() {
             taskbar::taskbar_window,
             taskbar::taskbar_windows,
             taskbar::taskbar_held,
-            taskbar::taskbar_keys_pause,
             taskbar::taskbar_window_menu,
             taskbar::taskbar_watch_presses,
             taskbar::taskbar_tray_pin,

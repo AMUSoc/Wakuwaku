@@ -604,8 +604,6 @@ mod imp {
             wake_keys();
         };
         crate::inputs::start(png_of, Box::new(changed), Box::new(move |line: &str| input_sh.log(&format!("taskbar: {line}"))));
-        // Win+1…9, Win+T, Win+B hers, not Windows' put away (winkeys.rs).
-        crate::winkeys::start(&keys_sh);
         *KEYS.lock().unwrap() = Some(crate::spawn_named("taskbar keys", move || keys_loop(keys_sh)));
         true
     }
@@ -712,8 +710,6 @@ mod imp {
 
     // The tray handed back to Explorer and its taskbar shown again.
     pub fn give_back(sh: &Shared) {
-        // Windows' own keys first: its taskbar has them again (winkeys.rs).
-        crate::winkeys::stop();
         TASKS_STOP.store(true, Ordering::SeqCst);
         if let Some(thread) = TASKS.lock().unwrap().take() {
             wake_tasks();
@@ -2956,14 +2952,6 @@ pub async fn taskbar_held() -> serde_json::Value {
     serde_json::json!({ "shift": shift, "ctrl": ctrl })
 }
 
-// Win pressed while her window has the keyboard (the keys on her strip, or
-// her settings): given back while Win is held, so that what comes with it
-// reaches the keys' hook (winkeys.rs pause).
-#[tauri::command]
-pub fn taskbar_keys_pause() {
-    crate::winkeys::pause();
-}
-
 // Shift and a right press on a program's button: its window's own menu, or
 // one for all its windows (Restore, Minimize, Close them all), at the pointer.
 // Answered once it has gone: till then the page opens no list of windows on
@@ -3037,9 +3025,6 @@ pub fn thumbs(who: u8, items: Vec<(isize, (i32, i32, i32, i32))>) {
 pub async fn taskbar_app(app: tauri::AppHandle, path: String, what: String, id: Option<String>) -> bool {
     imp::app(&crate::shared(&app), &what, &path, id.as_deref().filter(|s| !s.is_empty()))
 }
-
-// The same from the keys: Win+digit, Win+Shift+digit (winkeys.rs).
-pub use imp::app;
 
 // A tray icon kept out on the taskbar or folded away (dragged there), by
 // its name (systray.rs Shown), in the settings (trayPinned); Windows' own

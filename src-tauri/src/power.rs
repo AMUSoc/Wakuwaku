@@ -63,7 +63,6 @@ mod imp {
         fn SetProcessInformation(process: isize, class: i32, info: *const c_void, size: u32) -> i32;
         fn GetProcessInformation(process: isize, class: i32, info: *mut c_void, size: u32) -> i32;
         fn SetThreadInformation(thread: isize, class: i32, info: *const c_void, size: u32) -> i32;
-        fn SetThreadPriority(thread: isize, priority: i32) -> i32;
         fn GetTickCount() -> u32;
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
         fn CloseHandle(handle: isize) -> i32;
@@ -182,21 +181,6 @@ mod imp {
         unsafe { SetThreadInformation(GetCurrentThread(), THREAD_POWER_THROTTLING, &state as *const Throttling as *const c_void, std::mem::size_of::<Throttling>() as u32) != 0 }
     }
 
-    // The calling thread quick, whatever the process is: the keys' hook
-    // (winkeys.rs), which Windows waits on for every key and drops should
-    // it answer late. Never slowed (its speed set, and set to none: the
-    // process's efficiency mode, while quiet, is not its), and before the
-    // others when it has something to do.
-    pub fn thread_brisk() -> bool {
-        const THREAD_PRIORITY_HIGHEST: i32 = 2;
-        let state = Throttling { version: VERSION, control: EXECUTION_SPEED, state: 0 };
-        // SAFETY: our own thread; the struct is ours, its size passed.
-        unsafe {
-            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-            SetThreadInformation(GetCurrentThread(), THREAD_POWER_THROTTLING, &state as *const Throttling as *const c_void, std::mem::size_of::<Throttling>() as u32) != 0
-        }
-    }
-
     // Since the keyboard or mouse was last touched, ms; 0 when unknown.
     pub fn idle_ms() -> u64 {
         let mut last = LastInput { size: std::mem::size_of::<LastInput>() as u32, time: 0 };
@@ -217,9 +201,6 @@ mod imp {
     pub fn thread_eco() -> bool {
         false
     }
-    pub fn thread_brisk() -> bool {
-        false
-    }
     pub fn webview_eco(_on: bool) -> usize {
         0
     }
@@ -229,4 +210,4 @@ mod imp {
     }
 }
 
-pub use imp::{idle_ms, process_eco, thread_brisk, thread_eco, webview_eco, webview_memory};
+pub use imp::{idle_ms, process_eco, thread_eco, webview_eco, webview_memory};
