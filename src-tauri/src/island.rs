@@ -408,8 +408,6 @@ fn sync_bar_now(sh: &Shared, keep: bool) {
 // Windows' own taskbar back, for the taskbar's). Waited for, so it is back
 // before she goes (should it take too long, the guard gives it back).
 pub fn release_bar(sh: &Shared) {
-    // Her taskbar on the other displays goes first (bars.rs).
-    crate::bars::close_all(sh);
     let t = std::time::Instant::now();
     while SYNCING.load(Ordering::SeqCst) && t.elapsed() < std::time::Duration::from_secs(5) {
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -706,8 +704,6 @@ fn show_or_hide(sh: &Arc<Shared>) {
     } else {
         crate::backplate::hide();
     }
-    // Her taskbar on the other displays, as the settings say (bars.rs).
-    crate::bars::sync(sh);
 }
 
 // --- The handover with Windows' taskbar (handoff.js) ----------------------------------
@@ -820,8 +816,6 @@ pub fn handoff_out(sh: &Shared) {
 // reaches over its own strip, was pushed up into the work area by the strip's
 // height (2026-10-10, as a game went full screen and back).
 pub fn keep_on_screen(sh: &Shared) {
-    // A display come or gone: her taskbar on the others too (bars.rs).
-    crate::bars::sync(&crate::shared(&sh.app));
     let (is_up, pos, size) = {
         let isl = sh.island.lock().unwrap();
         (isl.shown && !isl.holding && !isl.reaching, isl.pos, isl.size)
@@ -1074,33 +1068,6 @@ pub fn settings_closed(sh: &Arc<Shared>) {
         apply_visibility(&sh);
         sh.redraw();
     });
-}
-
-// --- The prompts, asked for from another display ---------------------------------------
-
-// Her capsule on another display's taskbar pressed (bars.rs bar_asks): the
-// prompt waiting shown in her island, as a press on hers would (it opens
-// for a prompt by itself, so it is there already): risen should an app
-// full screen have hidden it, kept up until the prompts are answered (as
-// for the settings), raised over any window on top, and the page told to
-// draw the eye to it (island:look-here) on its own display.
-pub fn show_asks(sh: &Arc<Shared>) {
-    let risen = {
-        let up = is_shown(sh);
-        let mut isl = sh.island.lock().unwrap();
-        isl.for_asks |= !up;
-        !up
-    };
-    sh.log(&format!("island: the prompt asked for from another display{}", if risen { " (risen for it)" } else { "" }));
-    if risen {
-        apply_visibility(sh);
-    }
-    // (Not while the settings, locked, are let go under other windows.)
-    let hwnd = hwnd(sh);
-    if hwnd != 0 && TOPMOST.load(Ordering::SeqCst) {
-        crate::tasks::raise_top(hwnd);
-    }
-    let _ = sh.app.emit_to("island", "island:look-here", json!({}));
 }
 
 // The prompts answered: an island risen for them goes.

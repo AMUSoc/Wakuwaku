@@ -1095,8 +1095,7 @@ mod imp {
         if *sent != list {
             *sent = list.clone();
             drop(sent);
-            let _ = sh.app.emit_to("island", "taskbar:windows", crate::bars::for_main(sh, &list));
-            crate::bars::refresh(sh);
+            let _ = sh.app.emit_to("island", "taskbar:windows", list);
         }
     }
 
@@ -1459,8 +1458,6 @@ mod imp {
         if let Some(sh) = sh() {
             let ((ox, oy), sf) = crate::island::origin(&sh);
             let _ = sh.app.emit_to("island", "taskbar:press", json!({ "x": (x - ox) as f64 / sf, "y": (y - oy) as f64 / sf }));
-            // A list or menu open over her taskbar on another display.
-            crate::bars::pressed(&sh, (x, y));
         }
     }
 
@@ -1600,8 +1597,6 @@ mod imp {
             let _ = sh.app.emit_to("island", "taskbar:look", look);
         }
         drop(sent);
-        // Her taskbar on the other displays: each one's wallpaper too, for its Mica.
-        crate::bars::read_papers(&sh);
         let Some(strip) = *STRIP.lock().unwrap() else { return };
         let (mon, sf) = monitor_of(strip);
         let Some(paper) = wallpaper::read(mon) else { return };
@@ -1706,7 +1701,7 @@ mod imp {
         }
         let windows = SENT_WINDOWS.lock().unwrap().clone();
         if !windows.is_null() {
-            let _ = sh.app.emit_to("island", "taskbar:windows", crate::bars::for_main(sh, &windows));
+            let _ = sh.app.emit_to("island", "taskbar:windows", windows);
         }
         let keys = SENT_KEYS.lock().unwrap().clone();
         if !keys.is_null() {
@@ -2194,11 +2189,6 @@ mod imp {
                 log(&format!("work area ({}, {}, {}, {}) held in along the {side:?} as by a strip of hers before, the strip along the {edge:?}: that side set to {at}", work.left, work.top, work.right, work.bottom));
                 set_work_side(side, at);
             }
-        }
-        // The other displays' work areas: clear of her strips there, and
-        // whole where there is none (bars.rs).
-        if let Some(sh) = sh() {
-            crate::bars::keep_work(&sh);
         }
         systray::sweep();
         if systray::keep_first() {

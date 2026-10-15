@@ -4261,48 +4261,6 @@ body.hinting #island[data-view='compact'] .hint-dot {
   cursor: pointer;
 }
 
-/* The prompt asked for from her capsule on another display's taskbar
-   (island.js onLookHere, bars.rs): a ring in the waiting colour inside the
-   island's edge, twice, so the eye finds it on this display. */
-#island.look-here::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  border-radius: inherit;
-  box-shadow: inset 0 0 0 2px var(--look, #ffb340);
-  pointer-events: none;
-  animation: look-here 0.8s ease-in-out 2;
-}
-
-@keyframes look-here {
-  0%,
-  100% {
-    opacity: 0;
-  }
-  45% {
-    opacity: 1;
-  }
-}
-
-/* With Windows' animation effects off (reduced motion): no flashing, the
-   ring held still for 1.6 s and then faded (the appearance session). */
-@media (prefers-reduced-motion: reduce) {
-  #island.look-here::after {
-    animation: look-here-still 1.9s linear 1;
-  }
-}
-
-@keyframes look-here-still {
-  0%,
-  84% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
 /* Up over an app full screen for the prompts alone (island.rs over_full):
    her island and its panel, nothing of the strip under them, its ground,
    Mica or line, nor its parts; the pointer goes through there to what is

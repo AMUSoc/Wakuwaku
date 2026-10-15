@@ -116,8 +116,7 @@ mod imp {
 
     // The display an app full screen covers (x, y, w, h): Some(None) when
     // none does; None, the foreground window one of ours (keep what was
-    // decided). Her taskbar on the other displays steps aside on its own
-    // display alone (bars.rs).
+    // decided).
     pub fn covering(own: &[isize]) -> Option<Option<(i32, i32, i32, i32)>> {
         // SAFETY: plain user32 calls; the buffers and structs are ours and sized.
         unsafe {

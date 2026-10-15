@@ -4036,18 +4036,6 @@
 
   blink()
 
-  // The prompt waiting asked for from her capsule on another display's
-  // taskbar (bars.rs): it is open here already; a ring in the waiting
-  // colour goes round the island twice so the eye finds it (style.css
-  // look-here; held still a moment instead with reduced motion).
-  window.pet.onLookHere(() => {
-    if (!isAsking()) return
-    island.style.setProperty('--look', hue().waiting)
-    island.classList.remove('look-here')
-    void island.offsetWidth
-    island.classList.add('look-here')
-  })
-  island.addEventListener('animationend', e => e.animationName.startsWith('look-here') && island.classList.remove('look-here'))
   // Risen over an app full screen for the prompts alone: her island and its
   // panel, not the strip under them (style.css over-full).
   window.pet.onOverFull(({ on } = {}) => body.classList.toggle('over-full', on === true))

@@ -34,7 +34,6 @@ mod appbar;
 mod asks;
 mod audio;
 mod backplate;
-mod bars;
 mod clock;
 mod connection;
 mod crash;
@@ -170,14 +169,10 @@ impl Shared {
         self.screens.lock().unwrap().clone()
     }
 
-    // Where a prompt can be answered: her up, or, put away only by an app
-    // full screen on her display, her taskbar still up on another (bars.rs),
-    // whose capsule shows it waiting and brings up her island for it. Else
-    // nobody can answer here, and the terminal has it at once (server.rs,
-    // apply_visibility); it had them even while her capsule on another
-    // display showed (the test session, 2026-10-13).
+    // Where a prompt can be answered: her up. Else nobody can answer here,
+    // and the terminal has it at once (server.rs, apply_visibility).
     pub fn asks_seen(&self) -> bool {
-        self.is_visible() || (!self.hidden.load(Ordering::SeqCst) && !self.flag("dnd") && self.is_fullscreen() && bars::any_shown())
+        self.is_visible()
     }
 
     pub fn is_visible(&self) -> bool {
@@ -358,9 +353,7 @@ impl Shared {
         };
         self.to_pages("pet:asks", views);
         self.push_settings();
-        // Her taskbar on the other displays says how many wait (bars.rs);
-        // her island risen for them goes once they are answered.
-        bars::refresh(self);
+        // Her island risen for them goes once they are answered.
         if none {
             island::asks_answered(&shared(&self.app));
         }
@@ -525,8 +518,6 @@ impl Shared {
         if touches_visibility {
             self.apply_visibility();
         }
-        // Her taskbar on the other displays: its material, its buttons' alignment, her language (bars.rs).
-        bars::refresh(self);
         if touches_top {
             island::keep_on_top(self);
         }
@@ -545,10 +536,6 @@ impl Shared {
         let watching = fullscreen::AVAILABLE && (self.flag("hideInFullscreen") || self.home() == "taskbar");
         let own = self.own.lock().unwrap().clone();
         let cover = if watching { fullscreen::covering(&own) } else { Some(None) };
-        // Her taskbar on the other displays steps aside on its own display alone.
-        if let Some(cover) = cover {
-            bars::full_screen(self, cover);
-        }
         let on = self.displays();
         let is_full = cover.map(|c| c.is_some_and(|mon| on.is_empty() || on.contains(&mon)));
         let how = match asked {
@@ -1241,14 +1228,6 @@ fn main() {
             settings::settings_hooks,
             settings::settings_codex_hooks,
             settings::settings_agy_hooks,
-            bars::bar_ready,
-            bars::bar_asks,
-            bars::bar_pop,
-            bars::bar_pop_over,
-            bars::barpop_ready,
-            bars::barpop_place,
-            bars::barpop_thumbs,
-            bars::barpop_hide,
             settings::settings_fetch,
             settings::settings_gallery,
             settings::settings_open_site,
