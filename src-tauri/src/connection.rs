@@ -542,7 +542,7 @@ pub fn note_connected(connected: bool) -> bool {
 }
 
 pub fn look_connected(port: u16) -> bool {
-    let connected = connection(port) != "none" || is_codex_connected() || is_agy_connected();
+    let connected = connection(port) != "none" || is_codex_connected() || is_agy_connected() || is_grok_connected(port);
     note_connected(connected);
     connected
 }
@@ -684,12 +684,16 @@ pub fn agy_hooks_status() -> &'static str {
 }
 
 // The tools on this computer by name, in their order (the island names
-// them while none is connected): Claude Code by its folder, Codex and
-// Antigravity by theirs; none found, all (it can not be told).
+// them while none is connected): Claude Code by its folder, Codex,
+// Antigravity and Grok by theirs; none found, all (it can not be told).
 pub fn tools_here() -> Vec<&'static str> {
-    let here: Vec<&str> = [("Claude Code", claude_here()), ("Codex", codex_home().is_dir()), ("Antigravity", agy_here())].into_iter().filter(|(_, is)| *is).map(|(name, _)| name).collect();
+    let here: Vec<&str> = [("Claude Code", claude_here()), ("Codex", codex_home().is_dir()), ("Antigravity", agy_here()), ("Grok", grok_here())]
+        .into_iter()
+        .filter(|(_, is)| *is)
+        .map(|(name, _)| name)
+        .collect();
     if here.is_empty() {
-        vec!["Claude Code", "Codex", "Antigravity"]
+        vec!["Claude Code", "Codex", "Antigravity", "Grok"]
     } else {
         here
     }
@@ -745,20 +749,119 @@ pub fn grok_hook_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/hook?{URL_MARK}&agent=grok")
 }
 
+// The events Grok's hooks bring, and a matcher for one: the run of a turn,
+// its three ends (Stop, StopFailure, StopCancelled), and of its
+// notifications Grok's own prompt waiting on the person and its settling.
+// No PermissionRequest: Grok has none (events_grok.rs).
+const GROK_EVENTS: [(&str, Option<&str>); 10] = [
+    ("SessionStart", None),
+    ("SessionEnd", None),
+    ("UserPromptSubmit", None),
+    ("PreToolUse", None),
+    ("PostToolUse", None),
+    ("PostToolUseFailure", None),
+    ("Notification", Some("permission_prompt|idle_prompt")),
+    ("Stop", None),
+    ("StopFailure", None),
+    ("StopCancelled", None),
+];
+// /hook answers at once ({}: no decision, Grok's own prompt asks), and a
+// refused connection (she is not up) fails open at once.
+const GROK_TIMEOUT: u64 = 2;
+
+// Whether Grok Build is on this computer: its folder.
+pub fn grok_here() -> bool {
+    grok_home().is_dir()
+}
+
+// The whole file, as this copy writes it for its port.
+pub fn grok_file(port: u16) -> Value {
+    let mut hooks = Map::new();
+    for (event, matcher) in GROK_EVENTS {
+        let mut group = json!({ "hooks": [{ "type": "http", "url": grok_hook_url(port), "timeout": GROK_TIMEOUT }] });
+        if let Some(m) = matcher {
+            group["matcher"] = json!(m);
+        }
+        hooks.insert(event.into(), json!([group]));
+    }
+    json!({ "hooks": hooks })
+}
+
+// Whether any hook in a file is one of ours, to whatever port.
+fn grok_has_ours(file: &Value) -> bool {
+    let groups = file.get("hooks").and_then(Value::as_object).into_iter().flat_map(|m| m.values()).filter_map(Value::as_array).flatten();
+    groups
+        .filter_map(|g| g.get("hooks").and_then(Value::as_array))
+        .flatten()
+        .any(|h| h.get("url").and_then(Value::as_str).is_some_and(|u| u.contains(URL_MARK) && u.contains("agent=grok")))
+}
+
+// Our file against what this copy would write: ok, stale (another port,
+// another version's events), or missing.
+pub fn grok_status_of(file: &Value, port: u16) -> &'static str {
+    if *file == grok_file(port) {
+        "ok"
+    } else if grok_has_ours(file) {
+        "stale"
+    } else {
+        "missing"
+    }
+}
+
+// absent (no Grok here), unreadable, or how our file stands.
+pub fn grok_hooks_status(port: u16) -> &'static str {
+    if !grok_here() {
+        return "absent";
+    }
+    match read_json(&grok_hooks_file()) {
+        Ok(file) => grok_status_of(&file, port),
+        Err(_) => "unreadable",
+    }
+}
+
+pub fn is_grok_connected(port: u16) -> bool {
+    matches!(grok_hooks_status(port), "ok" | "stale")
+}
+
 // Whether Grok's own hooks bring its events to this port: our file there,
 // naming our URL. Asked for each Grok event the Claude Code hooks bring
-// (server.rs), so looked at once in a few seconds at most.
+// (server.rs), so looked at once in a few seconds at most, and anew once
+// the file is written.
+static GROK_LOOKED: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+
 pub fn grok_hooked(port: u16) -> bool {
-    static LOOKED: Mutex<Option<(std::time::Instant, bool)>> = Mutex::new(None);
-    let mut looked = LOOKED.lock().unwrap_or_else(|e| e.into_inner());
+    let mut looked = GROK_LOOKED.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((at, hooked)) = *looked {
         if at.elapsed() < std::time::Duration::from_secs(5) {
             return hooked;
         }
     }
     let hooked = std::fs::read_to_string(grok_hooks_file()).is_ok_and(|text| text.contains(&grok_hook_url(port)));
-    *looked = Some((std::time::Instant::now(), hooked));
+    *looked = Some((Instant::now(), hooked));
     hooked
+}
+
+// Write our file in Grok's hooks folder, or take it away. It is all ours:
+// nothing to back up or keep. action: install, remove. An open Grok
+// session takes it up once restarted (or /hooks, r).
+pub fn write_grok_hooks(action: &str, port: u16) -> Result<(), String> {
+    let file = grok_hooks_file();
+    let done = match action {
+        "remove" if !file.exists() => Ok(()),
+        "remove" => fs::remove_file(&file).map_err(|e| e.to_string()),
+        "install" => {
+            let text = serde_json::to_string_pretty(&grok_file(port)).map_err(|e| e.to_string())?;
+            file.parent().map_or(Ok(()), fs::create_dir_all).map_err(|e| e.to_string())?;
+            fs::write(&file, format!("{text}\n")).map_err(|e| e.to_string())
+        }
+        _ => return Err(format!("unknown action {action}")),
+    };
+    // As last read no longer.
+    if let Some(read) = READ.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        read.remove(&file);
+    }
+    *GROK_LOOKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    done
 }
 
 // --- Start at login: this program, from where it is now -------------------------------
@@ -810,6 +913,31 @@ pub use login::{is_on as is_open_at_login, set as set_open_at_login};
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn grok_hooks_bring_each_event_here_and_say_how_they_stand() {
+        use serde_json::json;
+        let file = super::grok_file(47213);
+        let hooks = file["hooks"].as_object().unwrap();
+        let events: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        for event in ["SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "Stop", "StopFailure", "StopCancelled"] {
+            assert!(events.contains(&event), "{event}");
+        }
+        assert!(!events.contains(&"PermissionRequest"));
+        assert_eq!(hooks["Stop"], json!([{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:47213/hook?from=wakuwaku&agent=grok", "timeout": 2 }] }]));
+        assert_eq!(hooks["Notification"][0]["matcher"], "permission_prompt|idle_prompt");
+        assert!(hooks["PreToolUse"][0].get("matcher").is_none());
+
+        assert_eq!(super::grok_status_of(&file, 47213), "ok");
+        // Another port's, or one an older copy wrote with fewer events: ours, not as this one writes it.
+        assert_eq!(super::grok_status_of(&super::grok_file(47299), 47213), "stale");
+        let mut fewer = file.clone();
+        fewer["hooks"].as_object_mut().unwrap().remove("StopCancelled");
+        assert_eq!(super::grok_status_of(&fewer, 47213), "stale");
+        // Someone else's, or nothing.
+        assert_eq!(super::grok_status_of(&json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:47299/hook?from=dump" }] }] } }), 47213), "missing");
+        assert_eq!(super::grok_status_of(&json!({}), 47213), "missing");
+    }
+
     #[test]
     fn agy_hooks_install_status_and_uninstall() {
         let program = r"D:\pet\wakuwaku.exe";

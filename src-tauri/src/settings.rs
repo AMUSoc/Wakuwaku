@@ -68,6 +68,14 @@ pub fn snapshot(sh: &Shared) -> Value {
             "backup": connection::backup_of(&connection::agy_hooks_file()).exists(),
             "seen": sh.agy_seen.load(Ordering::SeqCst) > 0,
         },
+        // Grok Build's hooks file of ours (connection.rs), the same; it has
+        // no prompt to answer here (events_grok.rs).
+        "grok": {
+            "hooks": connection::grok_hooks_status(sh.port),
+            "file": connection::grok_hooks_file().to_string_lossy(),
+            "fileShown": connection::shown_path(&connection::grok_hooks_file()),
+            "seen": sh.grok_seen.load(Ordering::SeqCst) > 0,
+        },
         "loginAtStart": connection::is_open_at_login(),
         // Windows' own mode and accent colour.
         "winLook": { "light": win_light, "accent": win_accent.map(|a| a.base) },
@@ -260,6 +268,16 @@ pub async fn settings_agy_hooks(app: AppHandle, action: String) -> Value {
             let folder = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|p| p.to_string_lossy().into_owned())).unwrap_or_default();
             json!({ "ok": false, "kind": connection::error_kind(&error), "error": error, "folder": folder, "snapshot": snapshot(&sh) })
         }
+    }
+}
+
+// Write Grok Build's hooks file of ours, or take it away (connection.rs).
+#[tauri::command]
+pub async fn settings_grok_hooks(app: AppHandle, action: String) -> Value {
+    let sh = shared(&app);
+    match connection::write_grok_hooks(&action, sh.port) {
+        Ok(()) => json!({ "ok": true, "snapshot": snapshot(&sh) }),
+        Err(error) => json!({ "ok": false, "kind": connection::error_kind(&error), "error": error, "snapshot": snapshot(&sh) }),
     }
 }
 

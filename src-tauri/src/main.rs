@@ -1168,6 +1168,7 @@ fn main() {
             settings::settings_hooks,
             settings::settings_codex_hooks,
             settings::settings_agy_hooks,
+            settings::settings_grok_hooks,
             settings::settings_fetch,
             settings::settings_gallery,
             settings::settings_open_site,
