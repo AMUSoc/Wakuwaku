@@ -124,6 +124,29 @@
           }
         ]
       }
+    ],
+    "StopCancelled": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47299/hook?from=dump",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:47299/hook?from=dump",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
