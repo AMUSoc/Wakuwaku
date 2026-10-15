@@ -232,12 +232,40 @@
         .join('')}</div>`
   }
 
+  // The agents a pet may be set for (data.rs AGENTS), by name.
+  const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity', grok: 'Grok' }
+
+  // Each agent's own pet (agentPets): the island draws a session as its
+  // agent's, one not set (or gone) as the pet in use (data.rs pet_for).
+  function agentPetsPart() {
+    const own = snap.settings.agentPets || {}
+    const inUse = snap.pets.find(p => p.id === snap.settings.pet)
+    const rows = Object.entries(AGENT_NAMES)
+      .map(([agent, name]) => {
+        const pet = snap.pets.find(p => p.id === own[agent])
+        const shown = pet || inUse
+        const note = pet ? pet.name : T('s.agentPetDefault', { name: inUse ? inUse.name : '—' })
+        return `<div class="r petrow">${shown ? thumb(36, shown.url, shown.version) : ''}<div class="grow"><div>${esc(name)}</div><div class="d">${esc(note)}</div></div>
+          ${pet ? `<button class="pbtn sm" data-agent-pet-clear="${agent}">${esc(T('s.agentPetClear'))}</button>` : ''}</div>`
+      })
+      .join('')
+    return `${sec(T('s.agentPets'))}<div class="grp">${rows}<div class="note">${esc(T('s.agentPetsNote'))}</div></div>`
+  }
+
+  // A pet's chips: the agents it is set for, a press setting it or not.
+  function agentChips(p) {
+    const own = snap.settings.agentPets || {}
+    return `<div class="agent-chips">${Object.entries(AGENT_NAMES)
+      .map(([agent, name]) => `<span class="chip pick${own[agent] === p.id ? ' on' : ''}" data-agent-pet="${agent}" data-pet-id="${esc(p.id)}">${esc(name)}</span>`)
+      .join('')}</div>`
+  }
+
   function pagePets() {
     const current = snap.settings.pet
     const installed = snap.pets.length
       ? snap.pets
           .map(
-            p => `<div class="r petrow">${thumb(52, p.url, p.version)}<div class="grow"><div>${esc(p.name)}</div><div class="d">${esc([p.author, p.codex ? T('s.fromCodex') : '', p.version === 1 ? T('home.v1') : ''].filter(Boolean).join(' · '))}</div></div>
+            p => `<div class="r petrow">${thumb(52, p.url, p.version)}<div class="grow"><div>${esc(p.name)}</div><div class="d">${esc([p.author, p.codex ? T('s.fromCodex') : '', p.version === 1 ? T('home.v1') : ''].filter(Boolean).join(' · '))}</div>${agentChips(p)}</div>
             ${p.id === current ? `<span class="d in-use">${esc(T('home.inUse'))}</span>` : `<button class="pbtn" data-use="${esc(p.id)}">${esc(T('home.use'))}</button>`}</div>`,
           )
           .join('')
@@ -259,6 +287,7 @@
     const listTitle = !q ? T('home.gallery') : gallery.loading && !gallery.items.length ? T('s.searching', { q }) : T('s.found', { q, n: gallery.total })
     const none = q && !gallery.loading && !gallery.error && !gallery.items.length ? `<div class="note">${esc(T('s.foundNone', { q }))}</div>` : ''
     return `${sec(T('home.installed'))}<div class="grp">${installed}</div>
+      ${snap.pets.length ? agentPetsPart() : ''}
       ${sec(T('s.download'))}<div class="grp"><div class="r"><input class="in" id="s-ref" spellcheck="false" placeholder="${esc(T('s.fetchPlaceholder'))}"><button class="pbtn al" data-fetch ${fetching ? 'disabled' : ''}>${esc(fetchLabel)}</button></div>${note}</div>
       <div class="sec row-sec"><span class="ellip">${esc(listTitle)}</span><span class="grow"></span>${seg('gallery', [['popular', T('home.popular')], ['newest', T('home.newest')]], gallery.sort)}</div>
       ${gallery.error ? `<div class="note err">${esc(T('home.galleryError', { message: gallery.error }))}</div>` : ''}${none}
@@ -1293,6 +1322,16 @@
     if (crashButton && !crashButton.disabled) return window.pet.settings.crash(crashButton.dataset.crash).then(got => ((snap = got), draw()))
     const use = at('[data-use]')
     if (use) return patch({ pet: use.dataset.use })
+    // An agent's own pet: set, or (pressed again, or Default) the pet in use.
+    const agentPet = at('[data-agent-pet]')
+    const agentClear = at('[data-agent-pet-clear]')
+    if (agentPet || agentClear) {
+      const own = { ...(snap.settings.agentPets || {}) }
+      const agent = agentPet ? agentPet.dataset.agentPet : agentClear.dataset.agentPetClear
+      if (agentPet && own[agent] !== agentPet.dataset.petId) own[agent] = agentPet.dataset.petId
+      else delete own[agent]
+      return patch({ agentPets: own })
+    }
     if (at('[data-fetch]')) {
       const text = typedRef.trim()
       if (!text) return document.getElementById('s-ref')?.focus()

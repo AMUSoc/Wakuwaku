@@ -842,6 +842,27 @@
   background: var(--g2);
 }
 
+/* The agents a pet is set for (settings.js agentChips): pressed, on. */
+#island-settings .agent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+#island-settings .chip.pick {
+  cursor: pointer;
+}
+
+#island-settings .chip.pick:hover {
+  color: var(--fg);
+}
+
+#island-settings .chip.pick.on {
+  background: #4d6bfe;
+  color: #fff;
+}
+
 /* The gallery: three across. */
 #island-settings .cards {
   display: grid;

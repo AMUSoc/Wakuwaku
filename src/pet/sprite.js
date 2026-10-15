@@ -46,7 +46,55 @@
     return { row: LOOK_ROW + Math.floor(index / 8), frame: index % 8, index }
   }
 
-  const api = { CELL_W, CELL_H, CLIPS, MOOD_CLIP, REACTIONS, lookCell }
+  // Her sheet changed (another agent's session shown, its own pet): the one
+  // drawn stays until the next is loaded and decoded, so there is never a
+  // frame of nothing between them; then show(sheet). The last asked for
+  // wins: one that loads after another was asked for is not shown. The
+  // first sheet, and none, are shown at once (nothing drawn to keep); one
+  // that fails to load is shown anyway (as before: a sheet never held back).
+  // sheet: { url, version }. load(url) is a promise (loadSheet in a page).
+  function sheetSwitcher(load, show) {
+    let shown // the url drawn; undefined before the first
+    let wanted
+    return function ask(sheet) {
+      const url = sheet.url || null
+      wanted = url
+      if (url === shown) return
+      const put = () => {
+        if (wanted !== url || shown === url) return
+        shown = url
+        show(sheet)
+      }
+      if (shown === undefined || !url) return put()
+      Promise.resolve()
+        .then(() => load(url))
+        .catch(() => {})
+        .then(put)
+    }
+  }
+
+  // A sheet loaded and decoded in a page, kept (each is a few MB at most,
+  // one for each pet set): drawn again, it is there at once.
+  const loaded = new Map()
+  function loadSheet(url) {
+    if (!loaded.has(url)) {
+      const img = new Image()
+      img.src = url
+      loaded.set(
+        url,
+        img.decode().then(
+          () => img,
+          error => {
+            loaded.delete(url)
+            throw error
+          },
+        ),
+      )
+    }
+    return loaded.get(url)
+  }
+
+  const api = { CELL_W, CELL_H, CLIPS, MOOD_CLIP, REACTIONS, lookCell, sheetSwitcher, loadSheet }
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api

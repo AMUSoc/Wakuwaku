@@ -66,6 +66,9 @@ fn defaults() -> Map<String, Value> {
     let Value::Object(map) = json!({
         "lang": "auto",
         "pet": "claude-chan",
+        // A pet of its own for an agent's sessions ({ claude: id, ... });
+        // one not set, or gone, is the pet above (pet_for).
+        "agentPets": {},
         "scale": 0.55,
         // Her home: the island; out, she is on the desktop.
         "display": "island",
@@ -286,6 +289,30 @@ fn scan_pets(dir: &Path) -> Vec<PetInfo> {
     found
 }
 
+// The agents a pet may be set for, as sessions name them (Claude Code's
+// have none: claude).
+pub const AGENTS: [&str; 4] = ["claude", "codex", "agy", "grok"];
+
+// The agent of a session as the pages draw it (state.rs view), by the
+// name agentPets keeps it under: none for no session at all.
+pub fn agent_key(session: &Value) -> Option<&str> {
+    if session.get("id").and_then(Value::as_str).unwrap_or("").is_empty() {
+        return None;
+    }
+    match session.get("agent").and_then(Value::as_str).unwrap_or("") {
+        "" => Some("claude"),
+        agent => Some(agent),
+    }
+}
+
+// The pet a session is drawn as: its agent's own (agentPets), else the
+// pet set; one not among those found, the next.
+pub fn pet_for<'a>(settings: &Map<String, Value>, session: &Value, found: &'a [PetInfo]) -> Option<&'a PetInfo> {
+    let find = |id: Option<&str>| id.and_then(|id| found.iter().find(|p| p.id == id));
+    let own = agent_key(session).and_then(|agent| settings.get("agentPets")?.get(agent)?.as_str());
+    find(own).or_else(|| find(settings.get("pet").and_then(Value::as_str)))
+}
+
 // The URL the page loads a sheet from: Tauri's asset protocol, as
 // convertFileSrc makes it (encodeURIComponent of the path).
 pub fn asset_url(path: &Path) -> String {
@@ -310,6 +337,32 @@ mod tests {
     fn settings(v: Value) -> Map<String, Value> {
         let Value::Object(map) = v else { unreachable!() };
         map
+    }
+
+    fn pet(id: &str, version: u8) -> PetInfo {
+        PetInfo { id: id.into(), name: id.into(), author: String::new(), sheet: PathBuf::from(format!("{id}/spritesheet.webp")), version, from_codex: false }
+    }
+
+    #[test]
+    fn each_agent_s_sessions_are_drawn_as_its_own_pet() {
+        let found = [pet("claude-chan", 2), pet("owl", 2), pet("cat", 1)];
+        let s = settings(json!({ "pet": "claude-chan", "agentPets": { "codex": "owl", "grok": "cat", "agy": "gone" } }));
+        let drawn = |session: Value| pet_for(&s, &session, &found).map(|p| p.id.clone());
+        // Codex's and Grok's their own; Claude Code's (no agent) none set: the pet set.
+        assert_eq!(drawn(json!({ "id": "a", "agent": "codex" })).as_deref(), Some("owl"));
+        assert_eq!(drawn(json!({ "id": "b", "agent": "grok" })).as_deref(), Some("cat"));
+        assert_eq!(drawn(json!({ "id": "c", "agent": "" })).as_deref(), Some("claude-chan"));
+        // Its own taken away: the pet set.
+        assert_eq!(drawn(json!({ "id": "d", "agent": "agy" })).as_deref(), Some("claude-chan"));
+        // No session at all: the pet set, whatever agentPets says.
+        assert_eq!(drawn(json!({ "id": "", "agent": "" })).as_deref(), Some("claude-chan"));
+        // Claude's own set: Claude Code's sessions are drawn as it.
+        let s = settings(json!({ "pet": "owl", "agentPets": { "claude": "cat" } }));
+        assert_eq!(pet_for(&s, &json!({ "id": "c", "agent": "" }), &found).map(|p| p.id.as_str()), Some("cat"));
+        // The pet set gone too: none (the page says how to get one).
+        let s = settings(json!({ "pet": "gone" }));
+        assert!(pet_for(&s, &json!({ "id": "c" }), &found).is_none());
+        assert_eq!(defaults()["agentPets"], json!({}));
     }
 
     #[test]

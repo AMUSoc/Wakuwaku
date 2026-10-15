@@ -259,9 +259,9 @@ impl Shared {
             (pet.get(now_ms()), pet.second(), pet.list())
         };
         let settings = self.settings.lock().unwrap().clone();
-        let id = settings.get("pet").and_then(Value::as_str).unwrap_or("");
+        // The session shown drawn as its agent's pet, if it has one.
         let found = data::pets(&self.dir);
-        let sprite = found.iter().find(|p| p.id == id);
+        let sprite = data::pet_for(&settings, &now, &found);
         let (temp, settings_open) = {
             let isl = self.island.lock().unwrap();
             (isl.temp, isl.settings_open)

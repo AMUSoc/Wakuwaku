@@ -118,6 +118,11 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
     match key {
         "lang" => matches!(v.as_str(), Some("auto" | "zh" | "en")),
         "pet" => v.as_str().is_some_and(|id| data::pets(&sh.dir).iter().any(|p| p.id == id)),
+        // An agent's own pet, by its id; one left out is the pet set.
+        "agentPets" => v.as_object().is_some_and(|m| {
+            let found = data::pets(&sh.dir);
+            m.iter().all(|(agent, id)| data::AGENTS.contains(&agent.as_str()) && id.as_str().is_some_and(|id| found.iter().any(|p| p.id == id)))
+        }),
         "scale" => v.as_f64().is_some_and(|s| data::SCALES.iter().any(|(_, x)| (x - s).abs() < 1e-9)),
         "details" | "walk" | "look" | "sound" | "dnd" | "hideInFullscreen" | "onboarded" | "out" | "settingsPin" | "settingsTop" | "oledShift" | "autoUpdateCheck" => is_bool,
         // Where an update is downloaded from first (updates.rs gitee_first).

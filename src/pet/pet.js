@@ -7,7 +7,7 @@
 //
 // Frames are drawn when they change, not on a fixed tick, so a pet at rest
 // costs next to nothing.
-const { CELL_W, CELL_H, CLIPS, MOOD_CLIP, REACTIONS, lookCell } = window.Sprite
+const { CELL_W, CELL_H, CLIPS, MOOD_CLIP, REACTIONS, lookCell, sheetSwitcher, loadSheet } = window.Sprite
 const { t } = window.I18n
 
 const COLOR = {
@@ -303,13 +303,23 @@ function chime(mood) {
 
 // --- From main --------------------------------------------------------------------------
 
+// The session shown drawn as its agent's pet: its sheet put in once loaded
+// (sprite.js sheetSwitcher), the one before drawn meanwhile.
+const askSheet = sheetSwitcher(loadSheet, sheet => {
+  spriteUrl = sheet.url
+  spriteVersion = sheet.version
+  // The look-around rows: only a v2 sheet has them.
+  if (spriteVersion !== 2) looking = null
+  render()
+  kick()
+})
+
 window.pet.onUpdate(data => {
   const wasMood = now.mood
   now = data
   lang = data.lang || lang
   config = data.config || config
-  spriteUrl = data.sprite
-  spriteVersion = data.spriteVersion === 1 ? 1 : 2
+  askSheet({ url: data.sprite || null, version: data.spriteVersion === 1 ? 1 : 2 })
   quiet = data.quiet === true
 
   if (now.mood !== 'idle') {

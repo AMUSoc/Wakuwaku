@@ -36,7 +36,7 @@
 // island shrinks first and the window after.
 ;(function () {
   const { t, render: say, list: nameList } = window.I18n
-  const { CELL_W, CELL_H, CLIPS, MOOD_CLIP } = window.Sprite
+  const { CELL_W, CELL_H, CLIPS, MOOD_CLIP, sheetSwitcher, loadSheet } = window.Sprite
   const Status = window.Status
   const Widgets = window.Widgets
 
@@ -1433,6 +1433,15 @@
     }
   }
 
+  // The session shown drawn as its agent's pet: its sheet put in once
+  // loaded (sprite.js sheetSwitcher), the one before drawn meanwhile, then
+  // the island drawn anew with it.
+  let takingUpdate = false
+  const askSheet = sheetSwitcher(loadSheet, sheet => {
+    spriteUrl = sheet.url
+    if (!takingUpdate && isOn()) update()
+  })
+
   window.pet.onUpdate(data => {
     const before = now.mood
     now = data
@@ -1443,7 +1452,10 @@
       oledShift()
     }
     if (config.out !== true) isComingHome = false
-    spriteUrl = data.sprite
+    // Put in at once when it can be (the first, or none): drawn below.
+    takingUpdate = true
+    askSheet({ url: data.sprite || null })
+    takingUpdate = false
     second = data.second || null
     quiet = data.quiet === true
     takeWidgets(data.widgets)
