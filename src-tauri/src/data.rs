@@ -326,10 +326,7 @@ pub fn agent_key(session: &Value) -> Option<&str> {
     if session.get("id").and_then(Value::as_str).unwrap_or("").is_empty() {
         return None;
     }
-    match session.get("agent").and_then(Value::as_str).unwrap_or("") {
-        "" => Some("claude"),
-        agent => Some(agent),
-    }
+    Some(crate::state::agent_key(session.get("agent").and_then(Value::as_str).unwrap_or("")))
 }
 
 // The pet a session is drawn as: its agent's own (agentPets), else the

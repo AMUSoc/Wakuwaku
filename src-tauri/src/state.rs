@@ -66,6 +66,16 @@ fn priority(mood: &str) -> u8 {
     }
 }
 
+// The agent a session is of, by the name the settings keep it under
+// (data::AGENTS): Claude Code's sessions have none.
+pub fn agent_key(agent: &str) -> &str {
+    if agent.is_empty() {
+        "claude"
+    } else {
+        agent
+    }
+}
+
 fn is_ending(mood: &str) -> bool {
     matches!(mood, "done" | "review" | "error")
 }
@@ -509,7 +519,11 @@ impl Pet {
         }
 
         if let Some(react) = react {
-            out.react = Some(json!({ "react": react, "say": text(msg.get("say"), 80) }));
+            // A session's reaction is its agent's pet's (and the island's);
+            // one of her own (no session) is every pet's.
+            let has_session = !str_field(msg, "session", 200).is_empty();
+            let agent = has_session.then(|| agent_key(&str_field(msg, "agent", 20)).to_string());
+            out.react = Some(json!({ "react": react, "say": text(msg.get("say"), 80), "agent": agent }));
         }
         Some(out)
     }
@@ -517,8 +531,17 @@ impl Pet {
     // You looked: every ending goes back to rest, quiet from now on. True
     // when anything did.
     pub fn seen(&mut self, now: u64, hold: Hold) -> bool {
+        self.seen_where(now, hold, |_| true)
+    }
+
+    // One agent's pet looked at: its agent's endings only.
+    pub fn seen_for(&mut self, agent: &str, now: u64, hold: Hold) -> bool {
+        self.seen_where(now, hold, |s| agent_key(&s.agent) == agent)
+    }
+
+    fn seen_where(&mut self, now: u64, hold: Hold, of: impl Fn(&Session) -> bool) -> bool {
         let mut changed = false;
-        for s in self.sessions.values_mut().filter(|s| is_ending(&s.mood)) {
+        for s in self.sessions.values_mut().filter(|s| is_ending(&s.mood) && of(s)) {
             set(s, "idle", Value::String(String::new()), now, hold);
             s.seen_at = Some(now);
             changed = true;
@@ -574,11 +597,22 @@ impl Pet {
         self.sessions.values().filter(|s| !s.hidden)
     }
 
-    // What the pet shows: the session that most wants you, and the rest in
-    // sight.
+    // What the island shows: the session that most wants you, and the rest
+    // in sight.
     pub fn get(&self, now: u64) -> Value {
+        self.get_where(now, |_| true)
+    }
+
+    // What one agent's pet on the desktop shows: the same, of its agent's
+    // sessions alone (none: at rest).
+    pub fn get_for(&self, agent: &str, now: u64) -> Value {
+        self.get_where(now, |s| agent_key(&s.agent) == agent)
+    }
+
+    fn get_where(&self, now: u64, of: impl Fn(&Session) -> bool) -> Value {
         let top = self
             .shown()
+            .filter(|s| of(s))
             .fold(None::<&Session>, |best, s| match best {
                 Some(b) if priority(&s.mood) < priority(&b.mood) => Some(b),
                 Some(b) if priority(&s.mood) == priority(&b.mood) && s.at < b.at => Some(b),
@@ -591,15 +625,24 @@ impl Pet {
             return empty;
         };
         let mut now = view(top);
-        now["others"] = json!(self.shown().filter(|s| s.id != top.id && s.mood != "idle").count());
-        now["sessions"] = json!(self.shown().count());
+        now["others"] = json!(self.shown().filter(|s| of(s) && s.id != top.id && s.mood != "idle").count());
+        now["sessions"] = json!(self.shown().filter(|s| of(s)).count());
         now
     }
 
     // Every session in sight, the one that most wants you first: the island's
     // open lines, the settings' list.
     pub fn list(&self) -> Value {
-        let mut all: Vec<&Session> = self.shown().filter(|s| !s.id.is_empty() || s.mood != "idle").collect();
+        self.list_where(|_| true)
+    }
+
+    // One agent's sessions so: its pet's bubble names only them.
+    pub fn list_for(&self, agent: &str) -> Value {
+        self.list_where(|s| agent_key(&s.agent) == agent)
+    }
+
+    fn list_where(&self, of: impl Fn(&Session) -> bool) -> Value {
+        let mut all: Vec<&Session> = self.shown().filter(|s| of(s) && (!s.id.is_empty() || s.mood != "idle")).collect();
         all.sort_by(|a, b| priority(&b.mood).cmp(&priority(&a.mood)).then(b.at.cmp(&a.at)));
         Value::Array(all.into_iter().map(view).collect())
     }
@@ -638,6 +681,10 @@ impl Pet {
 
     pub fn mood(&self, now: u64) -> String {
         self.get(now)["mood"].as_str().unwrap_or("idle").to_string()
+    }
+
+    pub fn mood_for(&self, agent: &str, now: u64) -> String {
+        self.get_for(agent, now)["mood"].as_str().unwrap_or("idle").to_string()
     }
 }
 
@@ -760,6 +807,51 @@ mod tests {
         assert!(!pet.tick(8_009, Hold::Secs(8)));
         assert!(pet.tick(8_010, Hold::Secs(8)));
         assert_eq!(pet.get(8_011)["mood"], "idle");
+    }
+
+    #[test]
+    fn each_agent_s_pet_shows_its_own_sessions() {
+        let mut pet = Pet::default();
+        let hold = Hold::Secs(8);
+        // Claude Code working (no agent), Codex waiting, Grok done.
+        pet.apply(&msg(json!({ "session": "c", "project": "a", "mood": "working" })), 1, hold);
+        pet.apply(&msg(json!({ "session": "x", "agent": "codex", "project": "b", "mood": "waiting" })), 2, hold);
+        pet.apply(&msg(json!({ "session": "g", "agent": "grok", "project": "c", "mood": "done" })), 3, hold);
+        // The island: the one that most wants you, of all.
+        assert_eq!((pet.get(4)["id"].as_str(), pet.get(4)["sessions"].as_u64()), (Some("x"), Some(3)));
+        // Each agent's pet: its own, counted among its own.
+        let of = |agent: &str| {
+            let v = pet.get_for(agent, 4);
+            (v["id"].as_str().unwrap_or("").to_string(), v["mood"].as_str().unwrap_or("").to_string(), v["sessions"].as_u64(), v["others"].as_u64())
+        };
+        assert_eq!(of("claude"), ("c".into(), "working".into(), Some(1), Some(0)));
+        assert_eq!(of("codex"), ("x".into(), "waiting".into(), Some(1), Some(0)));
+        assert_eq!(of("grok"), ("g".into(), "done".into(), Some(1), Some(0)));
+        // None of its own: at rest, as the island with none at all.
+        assert_eq!(of("agy"), (String::new(), "idle".into(), Some(0), Some(0)));
+        assert_eq!(pet.mood_for("codex", 4), "waiting");
+        assert_eq!(pet.list_for("grok").as_array().map(Vec::len), Some(1));
+        assert_eq!(pet.list().as_array().map(Vec::len), Some(3));
+
+        // Grok's pet looked at: Grok's ending seen, Codex's waiting untouched.
+        pet.apply(&msg(json!({ "session": "x2", "agent": "codex", "project": "d", "mood": "error" })), 5, hold);
+        assert!(pet.seen_for("grok", 6, hold));
+        assert_eq!(pet.mood_for("grok", 7), "idle");
+        assert_eq!(pet.get_for("codex", 7)["id"], "x");
+        assert!(pet.list_for("codex").as_array().unwrap().iter().any(|s| s["mood"] == "error"));
+        // Nothing of Grok's left to see.
+        assert!(!pet.seen_for("grok", 8, hold));
+    }
+
+    #[test]
+    fn a_session_s_reaction_names_its_agent_and_one_of_her_own_none() {
+        let mut pet = Pet::default();
+        let out = pet.apply(&msg(json!({ "session": "x", "agent": "codex", "mood": "idle", "react": "wave" })), 1, Hold::Seen).unwrap();
+        assert_eq!(out.react.unwrap()["agent"], "codex");
+        let out = pet.apply(&msg(json!({ "session": "c", "mood": "working", "react": "failed" })), 2, Hold::Seen).unwrap();
+        assert_eq!(out.react.unwrap()["agent"], "claude");
+        let out = pet.apply(&msg(json!({ "react": "jump" })), 3, Hold::Seen).unwrap();
+        assert!(out.react.unwrap()["agent"].is_null());
     }
 
     #[test]
