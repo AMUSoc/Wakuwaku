@@ -278,6 +278,13 @@ pub fn reply_for(e: &Value, choice: &Value, lang: &str) -> Option<Value> {
 
 // --- The prompts waiting --------------------------------------------------------------
 
+// The agent a prompt is of, by the name the settings keep it under
+// (data::AGENTS): Claude Code's have no from. (view.agent is another thing:
+// the Claude Code subagent asking.)
+pub fn agent_of(view: &Value) -> &str {
+    crate::state::agent_key(view.get("from").and_then(Value::as_str).unwrap_or(""))
+}
+
 pub struct Ask<R> {
     pub id: u64,
     event: Value,
@@ -395,9 +402,16 @@ impl<R: FnOnce(Option<Value>)> Asks<R> {
     }
 
     pub fn views(&self) -> Value {
+        self.views_where(|_| true)
+    }
+
+    // Those of the agents a page holds the prompts of (main.rs push_asks:
+    // an agent's pet out on the desktop holds its own, the island the rest).
+    pub fn views_where(&self, holds: impl Fn(&str) -> bool) -> Value {
         Value::Array(
             self.list
                 .iter()
+                .filter(|a| holds(agent_of(&a.view)))
                 .map(|a| {
                     let mut v = a.view.clone();
                     v["id"] = json!(a.id);
@@ -512,6 +526,22 @@ mod tests {
 
         let patch = "*** Begin Patch\n*** Add File: note.txt\n+x\n*** Update File: src/a.rs\n@@\n-a\n+b\n*** End Patch";
         assert_eq!(view_of(&codex_permission("apply_patch", patch)).unwrap()["summary"], "Add File: note.txt\nUpdate File: src/a.rs");
+    }
+
+    #[test]
+    fn each_page_holds_its_agents_prompts() {
+        let mut asks: Asks<Box<dyn FnOnce(Option<Value>)>> = Asks::default();
+        let claude = json!({ "hook_event_name": "PermissionRequest", "session_id": "s", "cwd": "D:\\work\\pet", "tool_name": "Bash", "tool_input": { "command": "ls" } });
+        let a = asks.add(claude, Box::new(|_| {}), 0, 1000).ok().unwrap();
+        let x = asks.add(codex_permission("Bash", "cargo test"), Box::new(|_| {}), 0, 1000).ok().unwrap();
+        let ids = |v: Value| v.as_array().unwrap().iter().map(|a| a["id"].as_u64().unwrap()).collect::<Vec<_>>();
+        assert_eq!(agent_of(&view_of(&codex_permission("Bash", "x")).unwrap()), "codex");
+        // Codex's pet out: it holds Codex's, the island Claude's.
+        assert_eq!(ids(asks.views_where(|agent| agent == "codex")), vec![x]);
+        assert_eq!(ids(asks.views_where(|agent| agent != "codex")), vec![a]);
+        // Wherever it is shown, it is answered by its id.
+        assert!(asks.answer(x, &json!({ "action": "allow" }), "en"));
+        assert_eq!(ids(asks.views()), vec![a]);
     }
 
     #[test]
