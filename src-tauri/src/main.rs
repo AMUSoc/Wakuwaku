@@ -1124,14 +1124,17 @@ fn agy_hook(port: u16, name: &str) {
 }
 
 fn main() {
-    // Her exe again, as the taskbar's guard (shell.rs): it waits for her to
-    // end, and gives Windows' taskbar back if she could not; and sees
-    // whether she crashed (crash.rs; her data folder is the file's).
+    // Her exe again, as her guard (crash.rs): it waits for her to end, gives
+    // Windows' taskbar back if she left it put away (shell.rs), and sees
+    // whether she crashed.
     let args: Vec<String> = std::env::args().collect();
-    if let Some((pid, file)) = shell::guard_args(&args) {
-        let data = file.parent().map(PathBuf::from).unwrap_or_default();
+    if let Some((pid, data)) = crash::guard_args(&args) {
         let after = data.clone();
-        shell::guard(pid, file, || drop(icons::hold(&data)), move |code, started| crash::after_exit(&after, pid, code, started));
+        let ended = || {
+            drop(icons::hold(&data));
+            shell::restore(&data.join("taskbar.json"));
+        };
+        crash::guard(pid, ended, move |code, started| crash::after_exit(&after, pid, code, started));
         // Her desktop's icons as they were, should she have left them moved (icons.rs).
         icons::given_back(&data);
         return;
@@ -1184,11 +1187,10 @@ fn main() {
     data::clear_quit(&dir);
 
     // Her crashes caught from here on, and a guard to see her end while
-    // her reports can go and are not off (the taskbar home starts one
-    // anyway): crash.rs.
+    // her reports can go and are not off: crash.rs.
     crash::install(&dir);
     if crash::wants_guard(&dir) {
-        shell::spawn_guard(&dir.join("taskbar.json"));
+        crash::spawn_guard(&dir);
     }
 
     // Tauri's async commands on two threads: its own runtime starts one for

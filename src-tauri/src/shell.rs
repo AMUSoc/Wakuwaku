@@ -10,23 +10,18 @@
 // screen's edge, over her strip (2026-10-10). Its state is written down
 // first, in a small file, so that whoever is left can give it back:
 //   - her, when the taskbar home goes and on quitting (restore)
-//   - a guard: her own exe again, waiting for her process to end (spawn_guard,
-//     guard), as a killed process cannot give it back itself
+//   - her guard: her own exe again, waiting for her process to end
+//     (crash.rs guard), as a killed process cannot give it back itself
 //   - her next start, if both were gone (recover)
 // Explorer shows it again now and then (a restart, the Start menu): the host
 // puts it away again (rehide) when it sees it (visible(), and the message
 // taskbar_created() names, sent when Explorer starts). Windows only.
-use std::path::Path;
-
-// The guard's command line: <exe> --taskbar-guard <pid> <file>.
-pub const GUARD_ARG: &str = "--taskbar-guard";
 
 #[cfg(windows)]
 mod imp {
     use std::ffi::c_void;
-    use std::os::windows::process::CommandExt;
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::Ordering;
 
     use serde_json::{json, Value};
 
@@ -34,13 +29,6 @@ mod imp {
 
     type Hwnd = *mut c_void;
     type Handle = isize;
-
-    #[repr(C)]
-    #[derive(Default)]
-    struct FileTime {
-        low: u32,
-        high: u32,
-    }
 
     #[link(name = "user32")]
     extern "system" {
@@ -80,23 +68,12 @@ mod imp {
     extern "system" {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
         fn CloseHandle(handle: Handle) -> i32;
-        fn WaitForSingleObject(handle: Handle, ms: u32) -> u32;
-        fn GetProcessTimes(process: Handle, created: *mut FileTime, exited: *mut FileTime, kernel: *mut FileTime, user: *mut FileTime) -> i32;
-        fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
         fn QueryFullProcessImageNameW(process: Handle, flags: u32, name: *mut u16, size: *mut u32) -> i32;
     }
 
     const SW_HIDE: i32 = 0;
     const SW_SHOWNA: i32 = 8;
-    const SYNCHRONIZE: u32 = 0x0010_0000;
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
-    const WAIT_TIMEOUT: u32 = 0x102;
-    const INFINITE: u32 = u32::MAX;
-    const DETACHED_PROCESS: u32 = 0x8;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x200;
-    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-
-    static GUARDED: AtomicBool = AtomicBool::new(false);
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -176,23 +153,6 @@ mod imp {
         unsafe { RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()) }
     }
 
-    // When a process started (100 ns since 1601), or None when it is gone.
-    pub fn started(pid: u32) -> Option<u64> {
-        // SAFETY: a handle we close; the times are written into our own structs.
-        unsafe {
-            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid);
-            if process == 0 {
-                return None;
-            }
-            let (mut created, mut exited, mut kernel, mut user) = (FileTime::default(), FileTime::default(), FileTime::default(), FileTime::default());
-            let ok = GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user);
-            // Its handle lets go only when it ends.
-            let running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
-            CloseHandle(process);
-            (ok != 0 && running).then(|| (u64::from(created.high) << 32) | u64::from(created.low))
-        }
-    }
-
     fn read(file: &Path) -> Option<Value> {
         serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()
     }
@@ -201,7 +161,7 @@ mod imp {
         // Put away before (by a process since gone): its state then is the one to give back.
         let original = read(file).and_then(|v| v["state"].as_u64()).map_or_else(appbar::taskbar_state, |s| s as u32);
         let pid = std::process::id();
-        std::fs::write(file, json!({ "pid": pid, "started": started(pid), "state": original }).to_string())?;
+        std::fs::write(file, json!({ "pid": pid, "started": crate::crash::started(pid), "state": original }).to_string())?;
         rehide();
         Ok(())
     }
@@ -320,72 +280,12 @@ mod imp {
     pub fn recover(file: &Path) -> bool {
         let Some(v) = read(file) else { return false };
         let (pid, at) = (v["pid"].as_u64().unwrap_or(0) as u32, v["started"].as_u64());
-        if pid != std::process::id() && at.is_some() && started(pid) == at {
+        if pid != std::process::id() && at.is_some() && crate::crash::started(pid) == at {
             return false;
         }
         restore(file)
     }
 
-    // Once per process: the guard, outside her process tree and her job: as
-    // if opened from Explorer (detach.rs); else broken away from her job,
-    // should it let it; else in it (and gone with her should it end them).
-    pub fn spawn_guard(file: &Path) -> bool {
-        if GUARDED.swap(true, Ordering::SeqCst) {
-            return true;
-        }
-        let Ok(exe) = std::env::current_exe() else { return false };
-        let pid = std::process::id().to_string();
-        if crate::detach::spawn(&exe, &[super::GUARD_ARG, &pid, &file.to_string_lossy()]) {
-            return true;
-        }
-        let spawn = |flags: u32| {
-            std::process::Command::new(&exe)
-                .arg(super::GUARD_ARG)
-                .arg(std::process::id().to_string())
-                .arg(file)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .creation_flags(flags)
-                .spawn()
-        };
-        let flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
-        let ok = spawn(flags | CREATE_BREAKAWAY_FROM_JOB).or_else(|_| spawn(flags)).is_ok();
-        GUARDED.store(ok, Ordering::SeqCst);
-        ok
-    }
-
-    // The guard's whole life: wait for her to end, then `ended` (main.rs:
-    // the desktop's icons where they are, icons.rs), then give the taskbar
-    // back if she did not (trying for a minute, in case Explorer is
-    // restarting), and meanwhile `after` (main.rs: whether she crashed,
-    // crash.rs) with her exit code and when she started (ms since 1970).
-    pub fn guard(pid: u32, file: &Path, ended: impl FnOnce(), after: impl FnOnce(Option<u32>, Option<u64>) + Send + 'static) {
-        // When she started, as ms since 1970.
-        let started = started(pid).map(|t| (t / 10_000).saturating_sub(11_644_473_600_000));
-        let mut code = None;
-        // SAFETY: a handle we close; the code written into our own u32.
-        unsafe {
-            let process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-            if process != 0 {
-                WaitForSingleObject(process, INFINITE);
-                let mut c = 0u32;
-                if GetExitCodeProcess(process, &mut c) != 0 {
-                    code = Some(c);
-                }
-                CloseHandle(process);
-            }
-        }
-        ended();
-        let meanwhile = std::thread::spawn(move || after(code, started));
-        for _ in 0..30 {
-            if !file.exists() || restore(file) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_secs(2));
-        }
-        let _ = meanwhile.join();
-    }
 }
 
 #[cfg(not(windows))]
@@ -394,9 +294,6 @@ mod imp {
 
     pub fn explorer_tray() -> isize {
         0
-    }
-    pub fn started(_pid: u32) -> Option<u64> {
-        None
     }
     pub fn taskbars() -> Vec<isize> {
         Vec::new()
@@ -425,18 +322,6 @@ mod imp {
     pub fn recover(_file: &Path) -> bool {
         false
     }
-    pub fn spawn_guard(_file: &Path) -> bool {
-        false
-    }
-    pub fn guard(_pid: u32, _file: &Path, _ended: impl FnOnce(), _after: impl FnOnce(Option<u32>, Option<u64>) + Send + 'static) {}
 }
 
-pub use imp::{explorer_tray, guard, hide, keep_room, recover, rehide, restore, room, show_bars, shown_room, spawn_guard, started, taskbar_created, taskbars, visible};
-
-// The guard's arguments, when this process is one: its pid and file.
-pub fn guard_args(args: &[String]) -> Option<(u32, &Path)> {
-    match args {
-        [_, flag, pid, file, ..] if flag == GUARD_ARG => Some((pid.parse().ok()?, Path::new(file))),
-        _ => None,
-    }
-}
+pub use imp::{explorer_tray, hide, keep_room, recover, rehide, restore, room, show_bars, shown_room, taskbar_created, taskbars, visible};

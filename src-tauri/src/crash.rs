@@ -660,9 +660,144 @@ pub fn after_exit(data: &Path, pid: u32, code: Option<u32>, started: Option<u64>
     }
 }
 
+// --- The guard -------------------------------------------------------------------------------
+// Her own exe again (GUARD_ARG, her pid, her data folder), outside her
+// process tree and her job: it waits for her to end, and sees whether she
+// crashed (after_exit). Spawned once per process, while her reports want it
+// (wants_guard).
+
+// The guard's command line: <exe> --wakuwaku-guard <pid> <data folder>.
+pub const GUARD_ARG: &str = "--wakuwaku-guard";
+
+// The guard's arguments, when this process is one: her pid and data folder.
+pub fn guard_args(args: &[String]) -> Option<(u32, PathBuf)> {
+    match args {
+        [_, flag, pid, data, ..] if flag == GUARD_ARG => Some((pid.parse().ok()?, PathBuf::from(data))),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+mod guard_os {
+    use std::os::windows::process::CommandExt;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    type Handle = isize;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct FileTime {
+        low: u32,
+        high: u32,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+        fn CloseHandle(handle: Handle) -> i32;
+        fn WaitForSingleObject(handle: Handle, ms: u32) -> u32;
+        fn GetProcessTimes(process: Handle, created: *mut FileTime, exited: *mut FileTime, kernel: *mut FileTime, user: *mut FileTime) -> i32;
+        fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
+    }
+
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const WAIT_TIMEOUT: u32 = 0x102;
+    const INFINITE: u32 = u32::MAX;
+    const DETACHED_PROCESS: u32 = 0x8;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+
+    static GUARDED: AtomicBool = AtomicBool::new(false);
+
+    // When a process started (100 ns since 1601), or None when it is gone.
+    pub fn started(pid: u32) -> Option<u64> {
+        // SAFETY: a handle we close; the times are written into our own structs.
+        unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid);
+            if process == 0 {
+                return None;
+            }
+            let (mut created, mut exited, mut kernel, mut user) = (FileTime::default(), FileTime::default(), FileTime::default(), FileTime::default());
+            let ok = GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user);
+            // Its handle lets go only when it ends.
+            let running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+            CloseHandle(process);
+            (ok != 0 && running).then(|| (u64::from(created.high) << 32) | u64::from(created.low))
+        }
+    }
+
+    // Once per process: the guard, outside her process tree and her job: as
+    // if opened from Explorer (detach.rs); else broken away from her job,
+    // should it let it; else in it (and gone with her should it end them).
+    pub fn spawn_guard(data: &Path) -> bool {
+        if GUARDED.swap(true, Ordering::SeqCst) {
+            return true;
+        }
+        let Ok(exe) = std::env::current_exe() else { return false };
+        let pid = std::process::id().to_string();
+        if crate::detach::spawn(&exe, &[super::GUARD_ARG, &pid, &data.to_string_lossy()]) {
+            return true;
+        }
+        let spawn = |flags: u32| {
+            std::process::Command::new(&exe)
+                .arg(super::GUARD_ARG)
+                .arg(std::process::id().to_string())
+                .arg(data)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .creation_flags(flags)
+                .spawn()
+        };
+        let flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+        let ok = spawn(flags | CREATE_BREAKAWAY_FROM_JOB).or_else(|_| spawn(flags)).is_ok();
+        GUARDED.store(ok, Ordering::SeqCst);
+        ok
+    }
+
+    // The guard's whole life: wait for her to end, then `ended`, then
+    // `after` with her exit code and when she started (ms since 1970).
+    pub fn guard(pid: u32, ended: impl FnOnce(), after: impl FnOnce(Option<u32>, Option<u64>)) {
+        // When she started, as ms since 1970.
+        let started = started(pid).map(|t| (t / 10_000).saturating_sub(11_644_473_600_000));
+        let mut code = None;
+        // SAFETY: a handle we close; the code written into our own u32.
+        unsafe {
+            let process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if process != 0 {
+                WaitForSingleObject(process, INFINITE);
+                let mut c = 0u32;
+                if GetExitCodeProcess(process, &mut c) != 0 {
+                    code = Some(c);
+                }
+                CloseHandle(process);
+            }
+        }
+        ended();
+        after(code, started);
+    }
+}
+
+#[cfg(not(windows))]
+mod guard_os {
+    use std::path::Path;
+
+    pub fn started(_pid: u32) -> Option<u64> {
+        None
+    }
+    pub fn spawn_guard(_data: &Path) -> bool {
+        false
+    }
+    pub fn guard(_pid: u32, _ended: impl FnOnce(), _after: impl FnOnce(Option<u32>, Option<u64>)) {}
+}
+
+pub use guard_os::{guard, spawn_guard, started};
+
 // Whether she wants the guard for her reports: not off, and somewhere to
 // send them (without, a panic's or a native crash's record still becomes a
-// report at her next start; the taskbar home has its guard anyway).
+// report at her next start).
 pub fn wants_guard(data: &Path) -> bool {
     can_send() && mode_of(&crate::data::load(data)) != "off"
 }
@@ -679,7 +814,7 @@ pub fn start(sh: &Arc<Shared>) {
     for entry in fs::read_dir(folder(&data)).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let pid = name.strip_prefix("panic-").or_else(|| name.strip_prefix("native-")).and_then(|r| r.split('.').next()).and_then(|p| p.parse::<u32>().ok());
-        let Some(pid) = pid.filter(|&p| p != me && crate::shell::started(p).is_none()) else { continue };
+        let Some(pid) = pid.filter(|&p| p != me && started(p).is_none()) else { continue };
         if let Some(found) = found_for(&folder(&data), pid, None, None, modified_ms(&entry.path()).unwrap_or_else(crate::now_ms)) {
             let report = report_of(&data, &found, &[]);
             let saved = save(&data, &found, &report);

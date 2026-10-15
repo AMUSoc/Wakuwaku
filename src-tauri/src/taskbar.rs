@@ -505,7 +505,7 @@ mod imp {
             // SAFETY: our own out-parameter.
             unsafe { GetWindowThreadProcessId(at, &mut pid) };
             if pid != 0 && pid != me {
-                return Some((pid, shell::started(pid)));
+                return Some((pid, crate::crash::started(pid)));
             }
         }
     }
@@ -551,7 +551,7 @@ mod imp {
     fn yield_to_elder() {
         let Some((pid, theirs)) = other_holder() else { return };
         let me = std::process::id();
-        if (theirs, pid) >= (shell::started(me), me) {
+        if (theirs, pid) >= (crate::crash::started(me), me) {
             return;
         }
         if let Some(sh) = sh() {
@@ -582,7 +582,7 @@ mod imp {
             return false;
         }
         let hidden = began.elapsed();
-        let guarded = shell::spawn_guard(&file);
+        let guarded = crate::crash::spawn_guard(&sh.dir);
         let guard = began.elapsed() - hidden;
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let thread = crate::spawn_named("taskbar host", move || run(strip, ready_tx));

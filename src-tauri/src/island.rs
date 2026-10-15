@@ -553,7 +553,7 @@ fn create(sh: &Arc<Shared>) {
                 #[cfg(windows)]
                 if let Ok(hwnd) = win.hwnd() {
                     sh.island.lock().unwrap().hwnd = hwnd.0 as isize;
-                    crate::tasks::no_transitions(hwnd.0 as isize);
+                    os::no_transitions(hwnd.0 as isize);
                 }
                 sh.own_window(&win);
                 // Its renderer gone: told, and the page loaded again (crash.rs).
@@ -586,7 +586,7 @@ pub fn look_over_max(sh: &Arc<Shared>) {
     }
     let look = &looks[if light { "light" } else { "dark" }];
     let deepens = look["bg"].is_string() && look["op"].as_u64().is_some_and(|op| op < 90) && (look["blur"].as_u64().unwrap_or(0) == 0 || !crate::backplate::available());
-    let on = deepens && display(sh).is_some_and(crate::tasks::maximized_on);
+    let on = deepens && display(sh).is_some_and(os::maximized_on);
     if OVER_MAX.swap(on, Ordering::SeqCst) != on {
         let _ = sh.app.emit_to("island", "island:over-max", json!({ "on": on }));
     }
@@ -764,7 +764,7 @@ fn handoff_cover(sh: &Arc<Shared>) -> bool {
     let _ = win.show();
     let shown = std::time::Instant::now();
     // Over Windows' own, which is kept on top too.
-    crate::tasks::raise_top(hwnd);
+    os::raise_top(hwnd);
     let pictured = picture.is_some();
     // Its window's size (physical) too: the page lays the picture only once
     // its own size has come to that (a window made bigger reaches the page
@@ -806,7 +806,7 @@ pub fn handoff_out(sh: &Shared) {
     let bare = handoff_wait("bare", 500);
     taskbar::handing_back();
     crate::shell::show_bars();
-    crate::tasks::raise_top(hwnd(sh));
+    os::raise_top(hwnd(sh));
     let done = bare && handoff_wait("done", 1500);
     sh.log(&format!("handoff: out, {}, {}", if bare { "bare" } else { "no answer in 500 ms" }, if done { "done" } else { "not waited for" }));
 }
@@ -1110,8 +1110,8 @@ pub fn keep_on_top(sh: &Arc<Shared>) {
         while watched() {
             let hwnd = hwnd(&sh);
             let own = sh.own.lock().unwrap().clone();
-            if hwnd != 0 && crate::tasks::covered(hwnd, &own) {
-                crate::tasks::raise_top(hwnd);
+            if hwnd != 0 && os::covered(hwnd, &own) {
+                os::raise_top(hwnd);
             }
             std::thread::sleep(std::time::Duration::from_millis(700));
         }
@@ -1139,6 +1139,195 @@ pub fn where_(sh: &Shared) -> Value {
         "settingsOpen": isl.settings_open,
         "bar": isl.bar.map(|b| json!([b.0, b.1, b.2, b.3])),
     })
+}
+
+// --- Her windows among the others (Windows) --------------------------------------------------
+// Kept on top over another program's own "on top" window (keep_on_top), a
+// maximized window on her display (look_over_max), and shown without the
+// system's fade (create).
+
+#[cfg(windows)]
+mod os {
+    use std::ffi::c_void;
+
+    type Hwnd = *mut c_void;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct WinRect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(each: extern "system" fn(Hwnd, isize) -> i32, param: isize) -> i32;
+        fn IsWindowVisible(hwnd: Hwnd) -> i32;
+        fn IsIconic(hwnd: Hwnd) -> i32;
+        fn IsZoomed(hwnd: Hwnd) -> i32;
+        fn GetWindow(hwnd: Hwnd, cmd: u32) -> Hwnd;
+        fn GetWindowLongPtrW(hwnd: Hwnd, index: i32) -> isize;
+        fn GetWindowTextW(hwnd: Hwnd, text: *mut u16, max: i32) -> i32;
+        fn GetWindowThreadProcessId(hwnd: Hwnd, pid: *mut u32) -> u32;
+        fn GetClassNameW(hwnd: Hwnd, name: *mut u16, max: i32) -> i32;
+        fn GetWindowRect(hwnd: Hwnd, rect: *mut WinRect) -> i32;
+        fn SetWindowPos(hwnd: Hwnd, after: isize, x: i32, y: i32, w: i32, h: i32, flags: u32) -> i32;
+    }
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmGetWindowAttribute(hwnd: Hwnd, attr: u32, value: *mut c_void, size: u32) -> i32;
+        fn DwmSetWindowAttribute(hwnd: Hwnd, attr: u32, value: *const c_void, size: u32) -> i32;
+    }
+
+    const GW_OWNER: u32 = 4;
+    const GW_HWNDPREV: u32 = 3;
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_TRANSPARENT: isize = 0x20;
+    const WS_EX_TOOLWINDOW: isize = 0x80;
+    const WS_EX_APPWINDOW: isize = 0x0004_0000;
+    const WS_EX_NOACTIVATE: isize = 0x0800_0000;
+    const DWMWA_CLOAKED: u32 = 14;
+    const HWND_TOPMOST: isize = -1;
+    const SWP_NOSIZE: u32 = 0x1;
+    const SWP_NOMOVE: u32 = 0x2;
+    const SWP_NOACTIVATE: u32 = 0x10;
+    // The desktop and Windows' own taskbars: never a program's window.
+    const NOT_TASKS: [&str; 4] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
+
+    fn class_of(hwnd: Hwnd) -> String {
+        let mut name = [0u16; 128];
+        // SAFETY: our own buffer, its size passed.
+        let n = unsafe { GetClassNameW(hwnd, name.as_mut_ptr(), 128) }.max(0) as usize;
+        String::from_utf16_lossy(&name[..n])
+    }
+
+    fn has_title(hwnd: Hwnd) -> bool {
+        let mut text = [0u16; 2];
+        // SAFETY: as above.
+        unsafe { GetWindowTextW(hwnd, text.as_mut_ptr(), 2) > 0 }
+    }
+
+    fn pid_of(hwnd: Hwnd) -> u32 {
+        let mut pid = 0;
+        // SAFETY: our own out-parameter.
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        pid
+    }
+
+    fn rect_of(hwnd: Hwnd) -> WinRect {
+        let mut r = WinRect::default();
+        // SAFETY: our own struct, of the size the call writes.
+        unsafe { GetWindowRect(hwnd, &mut r) };
+        r
+    }
+
+    // Cloaked: on another virtual desktop, or a store app's window not running.
+    fn is_cloaked(hwnd: Hwnd) -> bool {
+        let mut cloaked = 0u32;
+        // SAFETY: our own u32, of the size passed.
+        let got = unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut c_void, 4) };
+        got == 0 && cloaked != 0
+    }
+
+    // A program's window, as Windows' taskbar would give it a button: shown,
+    // not on another desktop, not owned by another, not a tool window (or
+    // marked to be on the taskbar), with a title; not one of hers.
+    fn is_task(hwnd: Hwnd, me: u32) -> bool {
+        // SAFETY: plain queries about a window being enumerated.
+        unsafe {
+            if IsWindowVisible(hwnd) == 0 || pid_of(hwnd) == me {
+                return false;
+            }
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let app = ex & WS_EX_APPWINDOW != 0;
+            if !app && (!GetWindow(hwnd, GW_OWNER).is_null() || ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) != 0) {
+                return false;
+            }
+        }
+        !is_cloaked(hwnd) && !NOT_TASKS.contains(&class_of(hwnd).as_str()) && has_title(hwnd)
+    }
+
+    extern "system" fn collect(hwnd: Hwnd, param: isize) -> i32 {
+        // SAFETY: param is the Vec maximized_on() passed, alive for the enumeration.
+        let found = unsafe { &mut *(param as *mut Vec<isize>) };
+        found.push(hwnd as isize);
+        1
+    }
+
+    // A program's window maximized (not minimized: one put away keeps its
+    // maximized state) on this display (x, y, w, h): its middle there.
+    pub fn maximized_on(mon: (i32, i32, i32, i32)) -> bool {
+        let mut all: Vec<isize> = Vec::new();
+        // SAFETY: collect() only pushes, while all lives.
+        unsafe { EnumWindows(collect, &mut all as *mut Vec<isize> as isize) };
+        let me = std::process::id();
+        all.into_iter().any(|h| {
+            let hwnd = h as Hwnd;
+            // SAFETY: plain queries.
+            let maximized = unsafe { IsZoomed(hwnd) != 0 && IsIconic(hwnd) == 0 };
+            if !maximized || !is_task(hwnd, me) {
+                return false;
+            }
+            let r = rect_of(hwnd);
+            let (x, y) = ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+            x >= mon.0 && x < mon.0 + mon.2 && y >= mon.1 && y < mon.1 + mon.3
+        })
+    }
+
+    // Another window over this one where it is, in sight (not one of hers,
+    // nor one the pointer passes through): another program's own "on top"
+    // window that came over it, say.
+    pub fn covered(hwnd: isize, own: &[isize]) -> bool {
+        let me = rect_of(hwnd as Hwnd);
+        let mut at = hwnd as Hwnd;
+        for _ in 0..2000 {
+            // SAFETY: plain queries about windows above this one.
+            unsafe {
+                at = GetWindow(at, GW_HWNDPREV);
+                if at.is_null() {
+                    return false;
+                }
+                if own.contains(&(at as isize)) || IsWindowVisible(at) == 0 || GetWindowLongPtrW(at, GWL_EXSTYLE) & WS_EX_TRANSPARENT != 0 || is_cloaked(at) {
+                    continue;
+                }
+            }
+            let r = rect_of(at);
+            if r.right > r.left && r.bottom > r.top && r.left < me.right && me.left < r.right && r.top < me.bottom && me.top < r.bottom {
+                return true;
+            }
+        }
+        false
+    }
+
+    // To the top of the windows kept on top, the keyboard where it is.
+    pub fn raise_top(hwnd: isize) {
+        // SAFETY: a window handle and flags; nothing is pointed to.
+        unsafe { SetWindowPos(hwnd as Hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+    }
+
+    // Shown and hidden at once, without the system's own fade and growing
+    // from the middle (DWMWA_TRANSITIONS_FORCEDISABLED).
+    pub fn no_transitions(hwnd: isize) {
+        const DWMWA_TRANSITIONS_FORCEDISABLED: u32 = 3;
+        let on: i32 = 1;
+        // SAFETY: our own BOOL, its size given.
+        unsafe { DwmSetWindowAttribute(hwnd as Hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &on as *const i32 as *const c_void, 4) };
+    }
+}
+
+#[cfg(not(windows))]
+mod os {
+    pub fn maximized_on(_mon: (i32, i32, i32, i32)) -> bool {
+        false
+    }
+    pub fn covered(_hwnd: isize, _own: &[isize]) -> bool {
+        false
+    }
+    pub fn raise_top(_hwnd: isize) {}
+    pub fn no_transitions(_hwnd: isize) {}
 }
 
 #[cfg(test)]
