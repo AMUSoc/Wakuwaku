@@ -8,7 +8,8 @@
 
 姿勢表：3×3，透明背景，格子之間是透明區域，由左到右、由上到下是
   idle-a、idle-b、wave、jump、failed、waiting、working、review、run-a
---run-b：第二張跑步幀（一張圖，透明背景）；沒有就全部用 run-a。
+--run-b：第二張跑步幀（一張圖，透明背景）；沒有就全部用 run-a。它和姿勢表通常畫得不一樣大，
+  所以用自己的比例：縮放後和 run-a 一樣高；腳底、置中和 run-a 相同。
 
 做的事：
   1. 用透明區域的投影切出 9 格（先切列，再在每一列裡切欄），各自裁掉多餘的透明邊。
@@ -81,9 +82,14 @@ def runs(filled):
     return out
 
 
-def split(filled, n, what):
-    """切成 n 段：有東西的區段多於 n 段時（小碎點），併到最近的大段。"""
+def split(ink, n, what):
+    """切成 n 段。ink 是一條投影上每一行（或欄）的墨量（alpha 的和）。
+    有東西的區段多於 n 段時（小碎點），併到最近的大段；少於 n 段時（相鄰兩格的髮梢、鞋尖
+    淡淡地碰在一起，中間沒有全透明的行），在每條預期的格線附近找墨最少的那一行切開。"""
+    filled = ink > 0
     parts = runs(filled)
+    if len(parts) < n:
+        return split_by_ink(ink, n, what)
     while len(parts) > n:
         # 最小的一段併進相鄰、間隔較近的那段。
         i = min(range(len(parts)), key=lambda k: parts[k][1] - parts[k][0])
@@ -97,14 +103,55 @@ def split(filled, n, what):
     return parts
 
 
+def split_by_ink(ink, n, what):
+    """在 n−1 條預期的格線（等分點）前後各 1/(2n) 的範圍裡，挑墨最少的一行切開。"""
+    size = len(ink)
+    reach = size // (2 * n)
+    cuts = []
+    for k in range(1, n):
+        at = k * size // n
+        lo, hi = max(0, at - reach), min(size, at + reach)
+        cuts.append(lo + int(np.argmin(ink[lo:hi])))
+    print(f'{what}：格子之間沒有全透明的間隔，在墨最少的地方切開：{cuts}（那幾行的墨量 {[int(ink[c]) for c in cuts]}）')
+    edges = [0] + cuts + [size]
+    parts = []
+    for a, b in zip(edges, edges[1:]):
+        on = np.nonzero(ink[a:b] > 0)[0]
+        if not len(on):
+            sys.exit(f'{what}：第 {len(parts) + 1} 段是空的')
+        parts.append((a + int(on[0]), a + int(on[-1]) + 1))
+    return parts
+
+
+def body_box(cell, solid=64):
+    """格子裡人的範圍：alpha ≥ solid 的部分的外框。"""
+    a = np.array(cell.getchannel('A'))
+    ys, xs = np.nonzero(a >= solid)
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
+def drop_strays(cell, solid=64, margin=2):
+    """切開時跨過格線的鄰格淡邊（髮梢、鞋尖）清掉：人的範圍（body_box）外超過 margin 的
+    淡點（alpha < solid）。人自己的反鋸齒邊在範圍外 margin 以內，留著；腳底對齊才不會被
+    鄰格的淡邊帶偏。"""
+    x0, y0, x1, y1 = body_box(cell, solid)
+    a = np.array(cell.getchannel('A'))
+    keep = np.zeros(a.shape, dtype=bool)
+    keep[max(0, y0 - margin):y1 + margin, max(0, x0 - margin):x1 + margin] = True
+    a[~keep & (a < solid)] = 0
+    out = cell.copy()
+    out.putalpha(Image.fromarray(a))
+    return out
+
+
 def cut(sheet, n=3):
-    """n×n 的表切成 n² 格（由左到右、由上到下），各自裁到不透明部分的邊。"""
-    a = np.array(sheet.getchannel('A')) > 0
+    """n×n 的表切成 n² 格（由左到右、由上到下），各自清掉鄰格的淡邊、裁到不透明部分的邊。"""
+    a = np.array(sheet.getchannel('A'), dtype=np.int64)
     cells = []
-    for y0, y1 in split(a.any(axis=1), n, '列'):
+    for y0, y1 in split(a.sum(axis=1), n, '列'):
         band = a[y0:y1]
-        for x0, x1 in split(band.any(axis=0), n, f'第 {len(cells) // n + 1} 列的欄'):
-            cell = sheet.crop((x0, y0, x1, y1))
+        for x0, x1 in split(band.sum(axis=0), n, f'第 {len(cells) // n + 1} 列的欄'):
+            cell = drop_strays(sheet.crop((x0, y0, x1, y1)))
             cells.append(cell.crop(cell.getbbox()))
     return cells
 
@@ -205,17 +252,19 @@ def board_of(size):
     return board
 
 
-def crop_preview(poses, scale, out, names=('jump', 'run-a'), zoom=2):
-    """幾格裁切後的樣子：上面是圖集裡的格子，下面是縮放後的整張，被裁掉的部分蓋上紅色。"""
+def crop_preview(poses, scales, out, names=('jump', 'run-a', 'run-b'), zoom=2):
+    """幾格裁切後的樣子：上面是圖集裡的格子，下面是縮放後的整張，被裁掉的部分蓋上紅色。
+    上面那排的格子之間畫一條 y=204 的腳底線。"""
     gap = 24
     parts = []
     for name in names:
-        cell, cut = place(poses[name], scale, FEET_Y.get(name, FEET_Y_DEFAULT), by_mass=True)
-        small = scaled(poses[name], scale)
+        cell, cut = place(poses[name], scales[name], FEET_Y.get(name, FEET_Y_DEFAULT), by_mass=True)
+        small = scaled(poses[name], scales[name])
         width = max(CELL_W, small.width)
         block = Image.new('RGBA', (width, CELL_H + gap + small.height), (255, 255, 255, 0))
         top = board_of((CELL_W, CELL_H))
         top.alpha_composite(cell)
+        top.paste((60, 140, 235, 255), (0, FEET_Y_DEFAULT, CELL_W, FEET_Y_DEFAULT + 1))
         block.paste(top, ((width - CELL_W) // 2, 0))
         full = board_of(small.size)
         full.alpha_composite(small)
@@ -277,19 +326,23 @@ def main():
     name = args.name or pet_id
     cells = cut(clean(Image.open(args.sheet).convert('RGBA'), args.alpha))
     poses = dict(zip(POSES, cells))
-    if args.run_b:
-        run_b = clean(Image.open(args.run_b).convert('RGBA'), args.alpha)
-        poses['run-b'] = run_b.crop(run_b.getbbox())
-    else:
-        poses['run-b'] = poses['run-a']
-
     if args.height:
         same = args.height / poses['idle-a'].height
     else:
         same = min(scale_of(im) for im in poses.values())
+    scales = {k: scale_of(im) if args.fit == 'each' and not args.height else same for k, im in poses.items()}
+    if args.run_b:
+        run_b = drop_strays(clean(Image.open(args.run_b).convert('RGBA'), args.alpha))
+        poses['run-b'] = run_b.crop(run_b.getbbox())
+        # 另外畫的一張：縮放後和 run-a 一樣高。
+        scales['run-b'] = scales['run-a'] * poses['run-a'].height / poses['run-b'].height
+    else:
+        poses['run-b'] = poses['run-a']
+        scales['run-b'] = scales['run-a']
+
     frames = {}
     for k, im in poses.items():
-        s = scale_of(im) if args.fit == 'each' and not args.height else same
+        s = scales[k]
         frames[k], trimmed = place(im, s, FEET_Y.get(k, FEET_Y_DEFAULT), by_mass=bool(args.height))
         lost = trimmed['left'] + trimmed['right'] + trimmed['top']
         said = f'裁掉 左 {trimmed["left"]}、右 {trimmed["right"]}、上 {trimmed["top"]} px' + ('  ! 超過 40 px' if lost > 40 else '')
@@ -339,7 +392,7 @@ def main():
         preview(pet / 'spritesheet.webp', args.look_preview, rows=2, first=make_sheet.LOOK_ROW)
         print(f'視線預覽：{args.look_preview}')
     if args.crop_preview:
-        crop_preview(poses, same, args.crop_preview)
+        crop_preview(poses, scales, args.crop_preview, names=('jump', 'run-a', 'run-b') if args.run_b else ('jump', 'run-a'))
         print(f'裁切預覽：{args.crop_preview}')
 
 
