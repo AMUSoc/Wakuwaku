@@ -60,6 +60,7 @@ test/                     页面的单元测试（node --test，不需要 npm in
 src-tauri/fixtures/grok/  Grok Build 1.0.52 实际发来的 hook payload（tools/hook_dump.py 抓的），events_grok.rs 和 state.rs 的测试直接用
 tools/hook_dump.py        抓 hook payload：127.0.0.1:47299 收到的每个 POST 原样写进 tools/dumps/（不进仓库），只用标准库
 tools/grok-hooks/         指向 hook_dump.py 的 Grok hooks.json，抓 Grok 的 payload 用
+tools/make_sheet.py       一帧一张的 PNG 排成宠物图集（docs/MAKING_A_PET.md），要 Pillow
 relay/                    崩溃报告中转（Cloudflare Worker → GitHub issue；阿里云函数计算 → Gitee issue），部署步骤在 relay/README.md
 examples/widgets/         岛上插件的示例脚本：waku、CI、番茄钟、截止日期、开发服务器、股票、天气……
 docs/prototypes/          设计原型：island-settings.html 是设置长在岛里的手感原型
@@ -355,6 +356,10 @@ Codex pet v2 图集为 1536×2288，8 列 × 11 行，每格 192×208。v1 是 1
 | 7 | Running | 6 | working |
 | 8 | Review | 6 | review |
 | 9 / 10 | Look around | 8 + 8 | 16 个注视方向：从正上方顺时针，每 22.5° 一档 |
+
+自己画一只：图集的完整规格（每行放什么、角色在格子里的位置、16 个方向、`pet.json`、放哪个文件夹）见 [MAKING_A_PET.md](MAKING_A_PET.md)，一帧一张的 PNG 用 `tools/make_sheet.py` 排成图集。
+
+**每个 agent 一只**（设置 `agentPets`，如 `{ "codex": "owl" }`，键是 `data::AGENTS`：`claude`、`codex`、`agy`、`grok`）：`payload()` 的 `sprite` / `spriteVersion` 是目前显示的会话的 agent 的那只（`data::pet_for`；Claude Code 的会话没有 `agent`，算 `claude`），没设、设的那只不在了、或者没有会话，就是 `pet`。设置的「外观」页里每只宠物下面点 agent 的名字来设。换图集时页面先把新图载入并解码（`sprite.js` 的 `loadSheet`，`Image.decode()`，载过的留着），完成后才换上去，期间一直画旧的；后要的赢，载入失败也照样换上（`sheetSwitcher`）。第一张和「没有宠物」立刻换。
 
 精灵图从数据目录读，经 Tauri 的 asset 协议给页面：`http://asset.localhost/<编码后的绝对路径>`（`data::asset_url`），宠物文件夹在启动时加进 asset 的允许范围。图库的预览用站点的 `posterUrl`（单帧 192×208）；`previewUrl` 是所有帧连成的一长条，缩进格子里只剩一条线。
 

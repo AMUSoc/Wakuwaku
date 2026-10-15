@@ -42,7 +42,7 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 - `state.rs`：狀態機。按會話記 mood、名字、執行中的工具、任務清單、改過的檔案、結果，挑出最需要你的那一個顯示；也負責閒置會話的隱藏（`is_shown`）與遺忘。
 - `events.rs` / `events_codex.rs` / `events_agy.rs` / `events_grok.rs`：把 Claude Code / Codex / Antigravity / Grok Build 的 hook 事件換算成統一的「訊息」；會話名、專案名（git 倉庫名，含 worktree）。`events_grok.rs` 的測試直接用 `src-tauri/fixtures/grok/` 裡 Grok 1.0.52 實際送來的 payload（用 `tools/hook_dump.py` 抓的）。
 - `asks.rs`：確認請求（PermissionRequest）：顯示什麼、每個選擇回給 agent 什麼、排隊與逾時。
-- `data.rs`：資料目錄、設定讀寫、已下載的寵物和 Codex 的寵物、「使用者主動退出」標記。
+- `data.rs`：資料目錄、設定讀寫、已下載的寵物和 Codex 的寵物、「使用者主動退出」標記；`pet_for` 決定一個工作階段用哪隻寵物畫（設定 `agentPets` 裡它的 agent 的那隻，沒有就用 `pet`）。自製寵物的圖集規格見 `docs/MAKING_A_PET.md`，組圖用 `tools/make_sheet.py`。
 - `settings.rs`：設定頁的快照、白名單校驗後的設定補丁、設定相關命令。
 - `connection.rs`：外掛偵測、寫入 `~/.claude/settings.json` 的 hooks、Codex 的 `hooks.json`、Antigravity 的 `hooks.json`、Grok 的 `~/.grok/hooks/wakuwaku.json`（整個檔案是我們的，移除就刪掉；`GROK_HOME`）（安裝 / 移除 / 狀態），開機自啟。
 
@@ -59,7 +59,7 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 
 **頁面（`src/pet/`）**
 - `bridge.js`：`window.pet`，頁面和 Rust 之間的呼叫與事件；所有監聽註冊完才送 `pet_ready`，並把 invoke 排隊依序送出。
-- `pet.js`（動畫、走動、東張西望）、`island.js`（島的各種形狀、她在島裡、拉出來與放回去、外觀）、`settings.js`（長在島裡的設定：通用、外觀、插件三頁）、`panel.js`（確認面板）、`status.js`（把會話說成一句話）、`sprite.js`（圖集與 16 個注視方向）、`widgets.js`（外掛的圖示與文字、監控的讀數格）。
+- `pet.js`（動畫、走動、東張西望）、`island.js`（島的各種形狀、她在島裡、拉出來與放回去、外觀）、`settings.js`（長在島裡的設定：通用、外觀、插件三頁）、`panel.js`（確認面板）、`status.js`（把會話說成一句話）、`sprite.js`（圖集與 16 個注視方向；`sheetSwitcher` 換圖集時等新圖載入解碼完才換，期間留著舊的，不閃爍）、`widgets.js`（外掛的圖示與文字、監控的讀數格）。
 
 ## Hook 事件的流向：hook → server.rs → state.rs → 前端
 
@@ -109,7 +109,7 @@ Grok Build ──HTTP hook（~/.grok/hooks/wakuwaku.json）───────
 ### 4. 到前端
 
 - `Shared::redraw()` = `to_pages("pet:update", payload())` + `tray::refresh` + `push_settings()`。
-- `payload()` 由 `pet.get(now)`（目前顯示的會話）、`second()`（下一個要你處理的會話）、`list()`（所有顯示中的會話）加上設定、語言、精靈圖網址、外掛等組成。她的視窗藏著時不收 `pet:update`，顯示時一次補上整份狀態。
+- `payload()` 的 `sprite` / `spriteVersion` 是目前顯示的會話的 agent 的寵物（`data::pet_for`）；`payload()` 由 `pet.get(now)`（目前顯示的會話）、`second()`（下一個要你處理的會話）、`list()`（所有顯示中的會話）加上設定、語言、精靈圖網址、外掛等組成。她的視窗藏著時不收 `pet:update`，顯示時一次補上整份狀態。
 - 其他事件：`pet:react`（一次性動作）、`pet:asks`（確認請求清單）、`pet:alert`、`pet:widgets`、`settings:changed`（設定開著時，每秒最多 4 次）。
 - `bridge.js` 收到後交給 `pet.js`、`island.js`、`panel.js`、`settings.js` 等；`status.js` 把會話說成一句話。使用者在面板上回答時，頁面呼叫 `pet_answer` 命令 → `asks.answer` → `Responder` 回覆那個掛起的 HTTP 請求。
 
