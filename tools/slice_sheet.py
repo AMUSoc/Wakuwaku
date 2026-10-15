@@ -25,8 +25,13 @@
   --look：4×4 的視線方向表，由左到右、由上到下是 look 的 index 0–15（0 看正上，順時針每
      22.5°），切法同上，依序放進 look/ 的 16 張（沒有就 16 張都是 idle-a）。視線表的人和姿勢表的
      畫得不一樣大，所以它用自己的比例：16 格高度的中位數縮成和 idle-a 一樣高；腳底、置中同上。
-  --breathe：idle 列改成 idle-a 的呼吸：6 幀垂直縮放 1.000、1.008、1.015、1.008、1.000、0.995，
-     以腳底為基準（腳底固定在 y=204），index 3 換成 idle-b 眨眼（沒有就是 A A A B A A）。
+  --breathe：單張圖重複的列都加上程式微動（沒有就是同一張重複；idle 是 A A A B A A），腳底都固定
+     在 y=204：
+       idle      idle-a 呼吸，6 幀垂直縮放 1.000、1.008、1.015、1.008、1.000、0.995，index 3 換成
+                 idle-b 眨眼
+       waiting、review   同一條呼吸曲線
+       running   working 打字時身體微晃：1.000、1.006、1.012、1.006、1.000、0.996
+       failed    左右各 1–2 px 的輕微顫抖交替，8 幀：−1、+1、−2、+2、−1、+1、−2、+2
   3. 排成各列資料夾（<輸出資料夾>/idle/00.png …），running-left 是 running-right 的水平鏡像。
   4. 呼叫 make_sheet.py 產出 data/pets/<id>/spritesheet.webp，並寫 pet.json。
 需要 Pillow 和 NumPy：pip install pillow numpy
@@ -135,9 +140,13 @@ def place(im, scale, feet_y, by_mass=False):
     return canvas, cut
 
 
-# 呼吸：idle 列 6 幀各自的垂直縮放；index 3 是眨眼。
+# 呼吸：idle（和 waiting、review）6 幀各自的垂直縮放；idle 的 index 3 是眨眼。
 BREATH = [1.000, 1.008, 1.015, 1.008, 1.000, 0.995]
 BLINK_AT = 3
+# 打字時身體微晃：running（working）6 幀的垂直縮放。
+TYPING = [1.000, 1.006, 1.012, 1.006, 1.000, 0.996]
+# 顫抖：failed 8 幀各自左右移幾個像素。
+SHAKE = [-1, 1, -2, 2, -1, 1, -2, 2]
 
 
 def stretch(cell, f, feet_y=FEET_Y_DEFAULT):
@@ -145,8 +154,17 @@ def stretch(cell, f, feet_y=FEET_Y_DEFAULT):
     if f == 1:
         return cell
     # 輸出的 y 取自來源的 feet_y + (y − feet_y) / f；預乘 alpha 再取樣。
-    out = cell.convert('RGBa').transform(cell.size, Image.AFFINE, (1, 0, 0, 0, 1 / f, feet_y - feet_y / f), resample=Image.BICUBIC)
-    return out.convert('RGBA')
+    out = cell.convert('RGBa').transform(cell.size, Image.AFFINE, (1, 0, 0, 0, 1 / f, feet_y - feet_y / f), resample=Image.BICUBIC).convert('RGBA')
+    # 腳底以下本來就是空的：取樣滲下去的淡邊清掉，腳底線不變。
+    out.paste((0, 0, 0, 0), (0, feet_y, out.width, out.height))
+    return out
+
+
+def shift(cell, dx):
+    """格子左右移 dx 個像素（腳底不動）；移出格子的部分裁掉。"""
+    out = Image.new('RGBA', cell.size, (0, 0, 0, 0))
+    out.paste(cell, (dx, 0))
+    return out
 
 
 def rows_of(f, look=None, breathe=False):
@@ -155,18 +173,23 @@ def rows_of(f, look=None, breathe=False):
     right = [a, a, b, b, a, a, b, b]
     if breathe:
         idle = [stretch(f['idle-b'] if i == BLINK_AT else f['idle-a'], k) for i, k in enumerate(BREATH)]
+        failed = [shift(f['failed'], dx) for dx in SHAKE]
+        waiting = [stretch(f['waiting'], k) for k in BREATH]
+        running = [stretch(f['working'], k) for k in TYPING]
+        review = [stretch(f['review'], k) for k in BREATH]
     else:
         idle = [f['idle-a']] * 3 + [f['idle-b']] + [f['idle-a']] * 2
+        failed, waiting, running, review = [f['failed']] * 8, [f['waiting']] * 6, [f['working']] * 6, [f['review']] * 6
     return {
         'idle': idle,
         'running-right': right,
         'running-left': [ImageOps.mirror(x) for x in right],
         'waving': [f['wave'], f['idle-a'], f['wave'], f['idle-a']],
         'jumping': [f['idle-a'], f['jump'], f['jump'], f['jump'], f['idle-a']],
-        'failed': [f['failed']] * 8,
-        'waiting': [f['waiting']] * 6,
-        'running': [f['working']] * 6,
-        'review': [f['review']] * 6,
+        'failed': failed,
+        'waiting': waiting,
+        'running': running,
+        'review': review,
         'look': look or [f['idle-a']] * 16,
     }
 
@@ -246,7 +269,7 @@ def main():
     p.add_argument('--preview', help='另存圖集前三列的預覽 PNG')
     p.add_argument('--crop-preview', help='另存 jump 和 run-a 裁切後的樣子')
     p.add_argument('--look', help='4×4 的視線方向表（look 的 index 0–15）')
-    p.add_argument('--breathe', action='store_true', help='idle 列用 idle-a 產生呼吸，index 3 眨眼')
+    p.add_argument('--breathe', action='store_true', help='單張圖重複的列加上微動：idle、waiting、review 呼吸，running 微晃，failed 顫抖')
     p.add_argument('--look-preview', help='另存圖集 look 兩列（第 9、10 列）的預覽 PNG')
     args = p.parse_args()
 
