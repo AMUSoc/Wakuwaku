@@ -1,0 +1,8 @@
+{
+  "id": "grok-chan",
+  "displayName": "Grok小姐",
+  "description": "角色設計參考自 B 站 UP 主「沉默寡言佰佰」的 Grok 4.7 形象，非官方 Q 版二創。",
+  "spritesheetPath": "spritesheet.webp",
+  "spriteVersionNumber": 2,
+  "kind": "person"
+}

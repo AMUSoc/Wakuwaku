@@ -3,7 +3,11 @@ src-tauri/target/
 src-tauri/gen/
 
 # Her settings, pets and logs when run from source (see src-tauri/src/data.rs).
-data/
+data/*
+# Except the pets made here, finished (tools/slice_sheet.py).
+!data/pets/
+data/pets/*
+!data/pets/grok-chan/
 
 # Downloaded pets are their authors' work
 pets/*
@@ -24,9 +28,15 @@ Thumbs.db
 # Only the note about them goes in (see art/README.md).
 art/*
 !art/README.md
+# Except Grok小姐's pose sheet and its preview (art/README.md).
+!art/grok/
 
 # The Thunderbird extension, packed (integrations/thunderbird/build.ps1)
 integrations/thunderbird/*.xpi
 
 # Hook requests written down by tools/hook_dump.py
 tools/dumps/
+
+# tools/slice_sheet.py's frames, made again from the pose sheet; Python's cache
+tools/grok-frames/
+__pycache__/
