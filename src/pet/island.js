@@ -298,8 +298,8 @@
   // press on it opens the settings' welcome, where they are connected.
   const isHinting = () => now.unconnected === true && config.connectHintOff !== true
   // The tools on this computer by name, as one says them (main.rs: with
-  // unconnected): 「Claude Code、Codex 或 Antigravity」.
-  const toolNames = () => nameList(lang, now.tools || ['Claude Code', 'Codex', 'Antigravity'], 'or')
+  // unconnected): 「Claude Code、Codex、Antigravity 或 Grok」.
+  const toolNames = () => nameList(lang, now.tools || ['Claude Code', 'Codex', 'Antigravity', 'Grok'], 'or')
   // The not-connected hint's colour: Windows' default accent, its light
   // shade, as it reads on the island's dark ground.
   const HINT_ACCENT = '#4cc2ff'

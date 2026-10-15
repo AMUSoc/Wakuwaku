@@ -208,7 +208,7 @@
           .map(x => {
             const name = Status.nameOf(x, detailed)
             const what = [
-              x.agent === 'codex' ? 'Codex' : x.agent === 'agy' ? 'Antigravity' : '',
+              { codex: 'Codex', agy: 'Antigravity', grok: 'Grok' }[x.agent] || '',
               Status.status(lang, x, { detailed, withClock: false }),
               detailed && x.name && x.project !== name ? x.project : '',
               detailed && Status.isEnding(x) ? x.reply : '',
@@ -640,9 +640,27 @@
         : ['ok', 'stale', 'off'].includes(agy.hooks)
           ? `<button class="pbtn" data-agy="install">${esc(T(agy.hooks === 'ok' ? 'settings.reinstall' : 'settings.repair'))}</button><button class="pbtn no" data-agy="remove">${esc(T('settings.remove'))}</button>`
           : ''
+    // Grok Build: a hooks file of ours in ~/.grok/hooks, all of it.
+    const grok = snap.grok || {}
+    const grokConn = grokIn() && grok.seen ? 's.grokConnOk' : grokIn() ? 's.grokConnWait' : 's.grokConnNone'
+    const grokColor = grokConn === 's.grokConnOk' ? COLOR.done : grokIn() ? COLOR.waiting : COLOR.idle
+    const grokWord = {
+      ok: 'settings.hooksOk',
+      missing: 'settings.hooksMissing',
+      stale: 'settings.hooksStale',
+      unreadable: 's.grokUnreadable',
+      absent: 's.grokAbsent',
+    }[grok.hooks]
+    const grokButtons =
+      grok.hooks === 'missing'
+        ? `<button class="pbtn" data-grok="install">${esc(T('settings.install'))}</button>`
+        : ['ok', 'stale', 'unreadable'].includes(grok.hooks)
+          ? `<button class="pbtn" data-grok="install">${esc(T(grok.hooks === 'ok' ? 'settings.reinstall' : 'settings.repair'))}</button><button class="pbtn no" data-grok="remove">${esc(T('settings.remove'))}</button>`
+          : ''
     return `${sec(T('s.status'))}<div class="grp"><div class="r"><span class="dot" style="background:${isOk ? COLOR.done : snap.connection === 'both' ? COLOR.waiting : COLOR.idle}"></span><div class="grow">${esc(T(conn))}</div><span class="d">${esc(T('s.sessionsOnline', { n: sessions }))}</span></div>
         <div class="r"><span class="dot" style="background:${codexColor}"></span><div class="grow">${esc(T(codexConn))}</div></div>
-        <div class="r"><span class="dot" style="background:${agyColor}"></span><div class="grow">${esc(T(agyConn))}</div></div></div>
+        <div class="r"><span class="dot" style="background:${agyColor}"></span><div class="grow">${esc(T(agyConn))}</div></div>
+        <div class="r"><span class="dot" style="background:${grokColor}"></span><div class="grow">${esc(T(grokConn))}</div></div></div>
       ${sec(T('home.plugin'))}<div class="grp"><div class="note">${esc(T('home.pluginWhy'))}</div>
         ${snap.pluginCommands.map(c => `<div class="r"><span class="cmd mono">${esc(c)}</span><button class="pbtn" data-copy="${esc(c)}">${esc(T('home.copy'))}</button></div>`).join('')}
       </div>
@@ -660,6 +678,10 @@
       ${sec(T('s.agy'))}<div class="grp">
         <div class="note">${esc(T('s.agyWhy'))}</div>
         <div class="r"><div class="grow"><div>${esc(T('settings.hooks'))}: ${esc(T(agyWord))}</div><div class="d mono ellip">${esc(agy.file || '')}</div></div>${agyButtons}</div>
+      </div>
+      ${sec(T('s.grok'))}<div class="grp">
+        <div class="note">${esc(T('s.grokWhy'))}</div>
+        <div class="r"><div class="grow"><div>${esc(T('settings.hooks'))}: ${esc(T(grokWord))}</div><div class="d mono ellip">${esc(grok.file || '')}</div></div>${grokButtons}</div>
       </div>
       ${sec(T('settings.about'))}<div class="grp">
         <div class="r"><div class="grow">${esc(T('s.version', { version: snap.version }))}</div><span class="link" data-site="repo">${esc(T('home.repo'))} ›</span></div>
@@ -731,7 +753,7 @@
       </div>`
   }
 
-  // --- The welcome: Claude Code, Codex and Antigravity connected, at the top of General ---
+  // --- The welcome: Claude Code, Codex, Antigravity and Grok connected, at the top of General ---
   // While nothing is connected, and on the first open after one is (until
   // she is set up, onboarded): a card with a button for each of the three on
   // this computer, as equals (whichever one uses, or all), in a row: its name,
@@ -748,22 +770,24 @@
   // 不用提醒) and nothing connected: the welcome folded to one row at the
   // page's top; opened again by its 去连接, or by asking for connecting.
   let welcomeOpen = false
-  const TOOL = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity' }
+  const TOOL = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity', grok: 'Grok' }
   // What each one's buttons say they are for (the handlers below).
-  const ACT = { claude: 'data-hooks', codex: 'data-codex', agy: 'data-agy' }
+  const ACT = { claude: 'data-hooks', codex: 'data-codex', agy: 'data-agy', grok: 'data-grok' }
   const codexIn = () => ['ok', 'stale', 'upgradable', 'partial'].includes(snap.codex?.hooks)
   const claudeIn = () => snap.connection !== 'none'
   const agyIn = () => ['ok', 'stale'].includes(snap.agy?.hooks)
-  const anyIn = () => claudeIn() || codexIn() || agyIn()
+  const grokIn = () => ['ok', 'stale'].includes(snap.grok?.hooks)
+  const anyIn = () => claudeIn() || codexIn() || agyIn() || grokIn()
   const welcomeFolded = () => snap.settings.connectHintOff === true && !welcomeOpen && !anyIn()
   const showWelcome = () => !anyIn() || !snap.settings.onboarded
 
   // The ones on this computer, in this order: Claude Code by its folder (or
-  // connected), Codex and Antigravity by theirs. None found: all (it cannot
-  // be told).
+  // connected), Codex, Antigravity and Grok by theirs. None found: all (it
+  // cannot be told).
   function toolsHere() {
-    const here = ['claude', 'codex', 'agy'].filter(tool => (tool === 'claude' ? snap.claudeHere !== false || claudeIn() : snap[tool]?.hooks !== 'absent'))
-    return here.length ? here : ['claude', 'codex', 'agy']
+    const all = ['claude', 'codex', 'agy', 'grok']
+    const here = all.filter(tool => (tool === 'claude' ? snap.claudeHere !== false || claudeIn() : snap[tool]?.hooks !== 'absent'))
+    return here.length ? here : all
   }
 
   // Their names as one says them: 「A、B 或 C」, "A, B and C".
@@ -776,6 +800,7 @@
     if (tool === 'claude' && claudeIn()) return snap.claudeSeen || snap.connection === 'plugin' ? 'seen' : 'set'
     if (tool === 'codex' && codexIn()) return snap.codex?.seen ? 'seen' : 'set'
     if (tool === 'agy' && agyIn()) return snap.agy?.seen ? 'seen' : 'set'
+    if (tool === 'grok' && grokIn()) return snap.grok?.seen ? 'seen' : 'set'
     return failed[tool] ? 'failed' : 'none'
   }
 
@@ -800,18 +825,19 @@
 
   // The file each one's hooks go in, as read (~ for the home folder), and its name.
   const toolFile = tool =>
-    ({ claude: snap.settingsShown || snap.settingsFile, codex: snap.codex?.fileShown || snap.codex?.file, agy: snap.agy?.fileShown || snap.agy?.file })[tool] || ''
+    ({ claude: snap.settingsShown || snap.settingsFile, codex: snap.codex?.fileShown || snap.codex?.file, agy: snap.agy?.fileShown || snap.agy?.file, grok: snap.grok?.fileShown || snap.grok?.file })[tool] || ''
 
-  // Under the buttons: what each still needs (Claude Code and Antigravity
-  // where it was written, and undone), or why it could not be written.
+  // Under the buttons: what each still needs (Claude Code, Antigravity and
+  // Grok where it was written, and undone), or why it could not be written.
   function toolNote(tool) {
     const state = toolState(tool)
     const mono = text => `<span class="mono">${esc(text)}</span>`
     const file = toolFile(tool)
-    if ((tool === 'claude' || tool === 'agy') && state === 'set') {
-      const backed = tool === 'claude' ? snap.settingsBackup : snap.agy?.backup
-      const where = backed ? T('wc.written', { path: mono(file), backup: mono(`${file.split(/[\\/]/).pop()}.wakuwaku.bak`) }) : T('wc.created', { path: mono(file) })
-      return `<div class="wc-tnote"><div>${T(tool === 'claude' ? 'wc.claudeLeft' : 'wc.agyLeft')}</div><div class="wc-where">${where}<span class="link" ${ACT[tool]}="remove">${esc(T('wc.undo'))}</span></div></div>`
+    if (['claude', 'agy', 'grok'].includes(tool) && state === 'set') {
+      // Grok's file is ours alone: made, nothing to back up.
+      const backed = { claude: snap.settingsBackup, agy: snap.agy?.backup }[tool]
+      const where = backed ? T('wc.written', { path: mono(file), backup: mono(`${file.split(/[\\/]/).pop()}.wakuwaku.bak`) }) : T(tool === 'grok' ? 'wc.createdOurs' : 'wc.created', { path: mono(file) })
+      return `<div class="wc-tnote"><div>${T(`wc.${tool}Left`)}</div><div class="wc-where">${where}<span class="link" ${ACT[tool]}="remove">${esc(T('wc.undo'))}</span></div></div>`
     }
     if (tool === 'codex' && state === 'set') return `<div class="wc-tnote warn">${T('wc.codexLeft')}</div>`
     if (state !== 'failed') return ''
@@ -820,7 +846,7 @@
     // written, but where she is (the appearance session's words).
     if (kind === 'path') return `<div class="wc-err"><div><b>${esc(T('wc.errConnect', { name: TOOL[tool] }))}</b></div><div>${esc(T('wc.way.path', { folder: folder || '' }))}</div></div>`
     const way = `${T(`wc.way.${kind}`)}${T(tool === 'claude' ? 'wc.wayPlugin' : 'wc.wayEnd')}`
-    return `<div class="wc-err"><div><b>${esc(T('wc.errLead', { name: TOOL[tool], file: tool === 'claude' ? 'settings.json' : 'hooks.json' }))}</b></div>
+    return `<div class="wc-err"><div><b>${esc(T('wc.errLead', { name: TOOL[tool], file: { claude: 'settings.json', grok: 'wakuwaku.json' }[tool] || 'hooks.json' }))}</b></div>
         <div class="mono">${esc(file)}</div><div>${esc(error)}</div><div>${esc(way)}</div></div>`
   }
 
@@ -846,8 +872,9 @@
     const many = tools.length > 1
     const pet = (snap.pets || []).find(p => p.id === snap.settings.pet)
     const face = pet ? `<span class="wc-face">${thumb(40, pet.url, pet.version)}</span>` : ''
-    // A nudge to approve only where one of them can ask (Antigravity can not).
-    const sub = `${T('wc.sub1')}${tools.some(tool => tool !== 'agy') ? T('wc.subAsk') : ''}${T('wc.sub2')}${many ? T('wc.subMany') : ''}`
+    // A nudge to approve only where one of them can ask on her (Antigravity
+    // and Grok can not: Grok's is answered in Grok).
+    const sub = `${T('wc.sub1')}${tools.some(tool => tool !== 'agy' && tool !== 'grok') ? T('wc.subAsk') : ''}${T('wc.sub2')}${many ? T('wc.subMany') : ''}`
     const safe = [many ? 'wc.safeMany' : `wc.safe.${tools[0]}`, 'wc.safe2', 'wc.safe3'].map(k => `<div><span class="fi">\uE73E</span><span>${T(k)}</span></div>`).join('')
     // Claude Code's plugin, while it is here and not written.
     const commands = snap.pluginCommands || []
@@ -1308,6 +1335,22 @@
         connecting = ''
         snap = got.snapshot
         if (action === 'install' && !got.ok) failed.agy = { error: got.error || '', kind: got.kind || 'other', folder: got.folder || '' }
+        draw()
+        relayout()
+      })
+    }
+    const grokHooks = at('[data-grok]')
+    if (grokHooks) {
+      const action = grokHooks.dataset.grok
+      if (action === 'install') {
+        connecting = 'grok'
+        delete failed.grok
+        draw()
+      }
+      return window.pet.settings.grokHooks(action).then(got => {
+        connecting = ''
+        snap = got.snapshot
+        if (action === 'install' && !got.ok) failed.grok = { error: got.error || '', kind: got.kind || 'other' }
         draw()
         relayout()
       })
