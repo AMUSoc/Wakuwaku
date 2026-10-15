@@ -142,7 +142,7 @@ fn scale(sh: &Shared) -> f64 {
 
 // Up: she is out of her home.
 pub fn is_shown(sh: &Shared, agent: &str) -> bool {
-    sh.is_visible() && agent == "claude" && sh.flag("out")
+    sh.is_visible() && sh.is_out(agent)
 }
 
 // The display her window is on (x, y, w, h).
@@ -200,25 +200,31 @@ fn remember(sh: &Shared, agent: &str) {
         (w.pos.0 + w.size.0 / 2 + w.shift - base.0 / 2, w.pos.1 + w.size.1 - base.1)
     };
     let mut settings = sh.settings.lock().unwrap();
-    settings.insert("x".into(), json!(x));
-    settings.insert("y".into(), json!(y));
+    let spots = settings.entry("spots").or_insert_with(|| json!({}));
+    if let Some(spots) = spots.as_object_mut() {
+        spots.insert(agent.into(), json!([x, y]));
+    }
     crate::data::save(&sh.dir, &settings);
 }
 
-// Bottom right of the primary display.
+// Bottom right of the primary display: each agent's pet a window's width
+// further left than the one before it (data.rs AGENTS), so they do not stand
+// on each other.
 fn home_spot(sh: &Shared, agent: &str) -> (i32, i32) {
     let primary = sh.screens().primary;
+    let nth = crate::data::AGENTS.iter().position(|a| *a == agent).unwrap_or(0) as i32;
     let w = sh.pets.of(agent).lock().unwrap();
     let margin = (24.0 * w.sf()).round() as i32;
     match primary {
-        Some(a) => (a.x + a.w - w.size.0 - margin, a.y + a.h - w.size.1 - margin),
+        Some(a) => (a.x + a.w - w.size.0 - margin - nth * w.size.0, a.y + a.h - w.size.1 - margin),
         None => (0, 0),
     }
 }
 
 // Where she was last left, or home.
 fn saved_spot(sh: &Shared, agent: &str) -> (i32, i32) {
-    let spot = match (sh.setting("x").as_i64(), sh.setting("y").as_i64()) {
+    let saved = sh.setting("spots").get(agent).cloned().unwrap_or(Value::Null);
+    let spot = match (saved.get(0).and_then(Value::as_i64), saved.get(1).and_then(Value::as_i64)) {
         (Some(x), Some(y)) => (x as i32, y as i32),
         _ => home_spot(sh, agent),
     };
@@ -672,7 +678,7 @@ pub fn let_go(sh: &Arc<Shared>, agent: &str) {
     if drag.moved {
         // Not into a notch's out-of-sight home by a drag (notch::in_notch).
         if !crate::notch::in_notch() && island::reach(sh, Some(her), true) == island::Reach::Snap {
-            return crate::absorb(sh, her);
+            return crate::absorb(sh, agent, her);
         }
         island::reach(sh, None, false);
     }
@@ -713,13 +719,13 @@ pub fn let_go(sh: &Arc<Shared>, agent: &str) {
 // A double-click: she flies back into her home (else the settings, grown
 // out of a home risen for them).
 pub fn double_click(sh: &Arc<Shared>, agent: &str) {
-    if sh.flag("out") && crate::notch::in_notch() {
+    if sh.is_out(agent) && crate::notch::in_notch() {
         // Her home in a Mac's notch is out of sight: she stays, and the
         // island drops open from it to show what is going on (island.js peek):
         // open, not toggled, so a second double-click does not shut it again.
         sh.log("pet: double-click; the island drops open from the notch");
         let _ = sh.app.emit_to("island", "island:peek", serde_json::json!({ "open": true }));
-    } else if sh.flag("out") {
+    } else if sh.is_out(agent) {
         fly_home(sh, agent);
     } else {
         island::open_settings(sh, None);
@@ -764,7 +770,7 @@ fn fly_home(sh: &Arc<Shared>, agent: &str) {
         }
         sh.pets.of(&agent).lock().unwrap().flying = false;
         let _ = sh.app.emit_to(label(&agent), "pet:drag-end", ());
-        crate::absorb(&sh, p);
+        crate::absorb(&sh, &agent, p);
     });
 }
 
@@ -791,7 +797,7 @@ pub fn carry(sh: &Arc<Shared>, agent: &str, offset: &Value) {
     sh.log(&format!("pet: carried out of the island at {p:?}"));
     place(sh, agent, p);
     set_ignore(sh, agent, Some(true));
-    sh.change(json!({ "out": true }));
+    crate::set_out_now(sh, agent);
 }
 
 // Gone into the island at once, before the island's animation starts.

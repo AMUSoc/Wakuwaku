@@ -286,7 +286,7 @@
   // This page draws her home in the home's window; her own window draws her.
   const isOn = () => ROLE === 'island'
   // In her seat: there is a pet to show, and she is not out on the desktop.
-  const isHome = () => !!spriteUrl && (config.out !== true || isComingHome)
+  const isHome = () => !!spriteUrl && (now.herOut !== true || isComingHome)
   const isAsking = () => isOn() && !panel.hidden
   // The settings open in the island (settings.js).
   const isSetting = () => isOn() && !!window.Settings?.isOpen()
@@ -1451,7 +1451,7 @@
       oledOn = !!config.oledShift
       oledShift()
     }
-    if (config.out !== true) isComingHome = false
+    if (now.herOut !== true) isComingHome = false
     // Put in at once when it can be (the first, or none): drawn below.
     takingUpdate = true
     askSheet({ url: data.sprite || null })

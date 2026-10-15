@@ -28,6 +28,8 @@ pub fn snapshot(sh: &Shared) -> Value {
     }
     json!({
         "settings": Value::Object(sh.settings.lock().unwrap().clone()),
+        // The pet of the agent the island stands for out on the desktop (the tile).
+        "herOut": sh.is_out(sh.island_agent()),
         "lang": sh.lang(),
         "pets": pets,
         "now": now,
@@ -118,6 +120,8 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
     match key {
         "lang" => matches!(v.as_str(), Some("auto" | "zh" | "zh-TW" | "en")),
         "pet" => v.as_str().is_some_and(|id| data::pets(&sh.dir).iter().any(|p| p.id == id)),
+        // Each agent's pet out on the desktop or not; one left out, as it is.
+        "desktop" => v.as_object().is_some_and(|m| m.iter().all(|(agent, on)| data::AGENTS.contains(&agent.as_str()) && on.is_boolean())),
         // An agent's own pet, by its id; one left out is the pet set.
         "agentPets" => v.as_object().is_some_and(|m| {
             let found = data::pets(&sh.dir);
@@ -162,6 +166,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
 pub fn apply_patch(sh: &Arc<Shared>, patch: &Value) -> Value {
     let mut rest = Map::new();
     let (mut scale, mut display, mut out) = (None, None, None);
+    let mut desktop = Vec::new();
     for (key, value) in patch.as_object().into_iter().flatten() {
         if !is_ok(sh, key, value) {
             continue;
@@ -169,7 +174,10 @@ pub fn apply_patch(sh: &Arc<Shared>, patch: &Value) -> Value {
         match key.as_str() {
             "scale" => scale = value.as_f64(),
             "display" => display = value.as_str().map(str::to_string),
+            // The island's agent's pet out or home (the settings' tile).
             "out" => out = value.as_bool(),
+            // Each agent's, through the windows, so each keeps its spot.
+            "desktop" => desktop.extend(value.as_object().into_iter().flatten().filter_map(|(agent, on)| Some((agent.clone(), on.as_bool()?)))),
             _ => {
                 rest.insert(key.clone(), value.clone());
             }
@@ -181,8 +189,11 @@ pub fn apply_patch(sh: &Arc<Shared>, patch: &Value) -> Value {
     if let Some(display) = display {
         set_display(sh, &display);
     }
+    for (agent, on) in desktop {
+        set_out(sh, &agent, on);
+    }
     if let Some(out) = out {
-        set_out(sh, out);
+        set_out(sh, sh.island_agent(), out);
     }
     if rest.contains_key("dnd") && rest["dnd"] == true && sh.asks.lock().unwrap().dismiss_all() > 0 {
         sh.push_asks();

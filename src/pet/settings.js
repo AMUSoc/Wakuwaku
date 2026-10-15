@@ -222,7 +222,7 @@
       : `<div class="note">${esc(T('home.noSessions', { list: toolNames(toolsHere()) }))}</div>`
     // Her out on the desktop.
     const tiles = [
-      ['show', 'eye', T('s.outTile'), !snap.hidden && s.out === true],
+      ['show', 'eye', T('s.outTile'), !snap.hidden && snap.herOut === true],
       ['dnd', 'moon', T('menu.dnd'), s.dnd],
       ['sound', 'sound', T('settings.sound'), s.sound],
     ]
@@ -1296,7 +1296,10 @@
     if (tile) {
       const key = tile.dataset.tile
       if (key === 'show') {
-        if (!snap.hidden) return patch({ out: s.out !== true })
+        if (!snap.hidden) {
+          snap.herOut = !snap.herOut
+          return patch({ out: snap.herOut })
+        }
         return window.pet.settings.showPet(true).then(got => ((snap = got), draw()))
       }
       return patch({ [key]: !s[key] })

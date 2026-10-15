@@ -382,7 +382,7 @@ fn report_of(data: &Path, f: &Found, theirs: &[String]) -> Value {
         "detail": text(&f.detail),
         "frames": f.frames.iter().take(32).collect::<Vec<_>>(),
         "home": settings.get("display").and_then(Value::as_str).unwrap_or("island"),
-        "out": settings.get("out").and_then(Value::as_bool).unwrap_or(false),
+        "out": settings.get("desktop").cloned().unwrap_or(Value::Null),
         "lang": crate::i18n::lang(settings.get("lang").and_then(Value::as_str).unwrap_or("auto")),
         "uptime": f.uptime,
         "at": iso_minute(f.at),

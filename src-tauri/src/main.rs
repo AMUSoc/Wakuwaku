@@ -136,6 +136,32 @@ impl Shared {
         self.setting(key).as_bool().unwrap_or(false)
     }
 
+    // Whether an agent's pet is out on the desktop (desktop).
+    pub fn is_out(&self, agent: &str) -> bool {
+        self.setting("desktop").get(agent).and_then(Value::as_bool).unwrap_or(false)
+    }
+
+    // The agents whose pets are out.
+    pub fn out_agents(&self) -> Vec<&'static str> {
+        data::AGENTS.into_iter().filter(|agent| self.is_out(agent)).collect()
+    }
+
+    // desktop with one agent's pet out or not.
+    fn desktop_with(&self, agent: &str, out: bool) -> Value {
+        let mut desktop = self.setting("desktop");
+        if let Some(m) = desktop.as_object_mut() {
+            m.insert(agent.into(), json!(out));
+        }
+        desktop
+    }
+
+    // The agent whose pet the island stands for: the session it shows (none:
+    // Claude's). Its pet is let out and called back from the island, the
+    // tray and the settings. Claude's alone so far (multi: step 4).
+    pub fn island_agent(&self) -> &'static str {
+        "claude"
+    }
+
     pub fn lang(&self) -> &'static str {
         i18n::lang(self.setting("lang").as_str().unwrap_or("auto"))
     }
@@ -272,6 +298,9 @@ impl Shared {
         now["lang"] = json!(self.lang());
         now["sprite"] = sprite.map_or(Value::Null, |p| json!(data::asset_url(&p.sheet)));
         now["spriteVersion"] = json!(sprite.map_or(2, |p| p.version));
+        // The pet of the agent the island stands for out on the desktop: the
+        // island shows its portrait, not her (island.js isHome).
+        now["herOut"] = json!(self.is_out(self.island_agent()));
         // The next session that wants something, for the island's second bubble.
         now["second"] = json!(second);
         // Every session, the one shown first: the open island lists the others.
@@ -481,7 +510,7 @@ impl Shared {
 
     pub fn change(self: &Arc<Self>, patch: Value) {
         let Value::Object(patch) = patch else { return };
-        let touches_visibility = ["dnd", "display", "out", "hideInFullscreen"].iter().any(|k| patch.contains_key(*k));
+        let touches_visibility = ["dnd", "display", "desktop", "hideInFullscreen"].iter().any(|k| patch.contains_key(*k));
         let touches_top = ["settingsPin", "settingsTop"].iter().any(|k| patch.contains_key(*k));
         let touches_monitor = ["monitor", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
         {
@@ -627,35 +656,44 @@ impl Shared {
 
 // Her home: the island (she goes into it, back from the desktop).
 pub fn set_display(sh: &Arc<Shared>, display: &str) {
-    if sh.setting("display").as_str() == Some(display) && !sh.flag("out") {
+    let out = sh.out_agents();
+    if sh.setting("display").as_str() == Some(display) && out.is_empty() {
         return;
     }
-    if sh.flag("out") {
-        pet::hide_now(sh, "claude");
+    for agent in &out {
+        pet::hide_now(sh, agent);
     }
-    sh.change(json!({ "display": display, "out": false }));
+    let home: Map<String, Value> = data::AGENTS.iter().map(|agent| (agent.to_string(), json!(false))).collect();
+    sh.change(json!({ "display": display, "desktop": home }));
 }
 
-// Out on the desktop where she was last left, or back home, from the menu.
-pub fn set_out(sh: &Arc<Shared>, out: bool) {
-    if sh.flag("out") == out {
+// An agent's pet out on the desktop where it was last left, or back home,
+// from the menu or the settings.
+pub fn set_out(sh: &Arc<Shared>, agent: &str, out: bool) {
+    if sh.is_out(agent) == out {
         return;
     }
     if out {
-        pet::return_to_spot(sh, "claude");
+        pet::return_to_spot(sh, agent);
     }
-    sh.change(json!({ "out": out }));
+    sh.change(json!({ "desktop": sh.desktop_with(agent, out) }));
 }
 
-// Brought back close to the island: it takes her in from where she is.
-pub fn absorb(sh: &Arc<Shared>, point: (i32, i32)) {
-    sh.log(&format!("absorbed from {point:?}"));
-    pet::hide_now(sh, "claude");
+// Carried out of the island: out where it is (its spot not gone back to).
+pub fn set_out_now(sh: &Arc<Shared>, agent: &str) {
+    sh.change(json!({ "desktop": sh.desktop_with(agent, true) }));
+}
+
+// Brought back close to the island: it takes the pet in from where it is.
+pub fn absorb(sh: &Arc<Shared>, agent: &str, point: (i32, i32)) {
+    sh.log(&format!("absorbed {agent} from {point:?}"));
+    pet::hide_now(sh, agent);
     island::absorb(sh, point);
     let sh = sh.clone();
+    let agent = agent.to_string();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(ABSORB_MS));
-        sh.change(json!({ "out": false }));
+        sh.change(json!({ "desktop": sh.desktop_with(&agent, false) }));
         sh.island.lock().unwrap().absorbing = false;
         sh.apply_visibility();
     });
@@ -664,8 +702,8 @@ pub fn absorb(sh: &Arc<Shared>, point: (i32, i32)) {
 // Started again while running, or "back to the corner": find her.
 pub fn come_home(sh: &Arc<Shared>) {
     sh.hidden.store(false, Ordering::SeqCst);
-    if sh.flag("out") {
-        pet::come_home(sh, "claude");
+    for agent in sh.out_agents() {
+        pet::come_home(sh, agent);
     }
     sh.apply_visibility();
     tray::refresh_menu(sh);
@@ -843,8 +881,9 @@ async fn island_plate(app: AppHandle, rect: Option<Value>, fade: u32) {
 async fn island_release(app: AppHandle, offset: Value) {
     let sh = shared(&app);
     sh.log(&format!("island: release {offset}"));
-    if !sh.flag("out") {
-        pet::carry(&sh, "claude", &offset);
+    let agent = sh.island_agent();
+    if !sh.is_out(agent) {
+        pet::carry(&sh, agent, &offset);
     }
 }
 
@@ -852,7 +891,7 @@ async fn island_release(app: AppHandle, offset: Value) {
 async fn island_drop(app: AppHandle) {
     let sh = shared(&app);
     sh.log("island: drop");
-    pet::let_go(&sh, "claude");
+    pet::let_go(&sh, sh.island_agent());
 }
 
 // A page's answer to /debug/eval.

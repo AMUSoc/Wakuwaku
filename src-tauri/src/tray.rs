@@ -70,7 +70,7 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
         menu.append(&CheckMenuItem::with_id(app, key, t(&format!("menu.{key}")), true, flag(key), None::<&str>)?)?;
     }
     // Let her out onto the desktop, or call her back home.
-    let label = if flag("out") { t("menu.callBack") } else { t("menu.letOut") };
+    let label = if sh.is_out(sh.island_agent()) { t("menu.callBack") } else { t("menu.letOut") };
     menu.append(&MenuItem::with_id(app, "out", label, true, None::<&str>)?)?;
     menu.append(&MenuItem::with_id(app, "corner", t("menu.backToCorner"), true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
@@ -85,7 +85,10 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
     match id {
         "toggle" => sh.set_hidden(sh.is_visible()),
         "walk" | "look" | "dnd" => sh.change(json!({ id: !sh.flag(id) })),
-        "out" => crate::set_out(sh, !sh.flag("out")),
+        "out" => {
+            let agent = sh.island_agent();
+            crate::set_out(sh, agent, !sh.is_out(agent));
+        }
         "corner" => crate::come_home(sh),
         "settings" => crate::island::open_settings(sh, None),
         // Quit by the person: no session's hook starts her again until she
@@ -117,7 +120,7 @@ pub fn create(sh: &Shared) -> tauri::Result<()> {
                 let sh = crate::shared(tray.app_handle());
                 if sh.flag("dnd") {
                     crate::island::open_settings(&sh, None);
-                } else if cfg!(target_os = "macos") && sh.home() == "island" && !sh.flag("out") {
+                } else if cfg!(target_os = "macos") && sh.home() == "island" && sh.out_agents().is_empty() {
                     // On a Mac the notch is another app's to hover (Atoll and
                     // the like): her island stays in it, and this drops it
                     // open, or puts it back (island.js peek).

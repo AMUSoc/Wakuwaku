@@ -72,9 +72,12 @@ fn defaults() -> Map<String, Value> {
         // one not set, or gone, is the pet above (pet_for).
         "agentPets": {},
         "scale": 0.55,
-        // Her home: the island; out, she is on the desktop.
+        // Her home: the island. Each agent's pet may be out on the desktop
+        // as well (desktop), each where it was left (spots: physical px,
+        // written by pet.rs).
         "display": "island",
-        "out": false,
+        "desktop": { "claude": false, "codex": false, "agy": false, "grok": false },
+        "spots": {},
         // The compact island's width: narrow, normal or wide (island.js WIDTHS).
         "islandWidth": "normal",
         // OLED's guard, on unless turned off: the island a screen pixel off
@@ -133,6 +136,7 @@ pub fn load(dir: &Path) -> Map<String, Value> {
         }
         _ => {}
     }
+    adopt_out(&mut settings);
     for gone in GONE {
         settings.remove(*gone);
     }
@@ -140,10 +144,34 @@ pub fn load(dir: &Path) -> Map<String, Value> {
     settings
 }
 
+// She was one pet out on the desktop or not (out), where she was left (x,
+// y): Claude's pet now, of one for each agent (desktop, spots). Each agent
+// on or off whatever was saved of it.
+fn adopt_out(settings: &mut Map<String, Value>) {
+    let mut desktop = Map::new();
+    let saved = settings.get("desktop").cloned().unwrap_or(Value::Null);
+    for agent in AGENTS {
+        desktop.insert(agent.into(), json!(saved.get(agent).and_then(Value::as_bool).unwrap_or(false)));
+    }
+    if settings.get("out").and_then(Value::as_bool) == Some(true) {
+        desktop.insert("claude".into(), json!(true));
+    }
+    settings.insert("desktop".into(), Value::Object(desktop));
+    let mut spots = settings.get("spots").and_then(Value::as_object).cloned().unwrap_or_default();
+    if let (Some(x), Some(y)) = (settings.get("x").and_then(Value::as_i64), settings.get("y").and_then(Value::as_i64)) {
+        spots.entry("claude").or_insert(json!([x, y]));
+    }
+    settings.insert("spots".into(), Value::Object(spots));
+}
+
 // Settings of what she no longer has: the bubble and the corner; the
 // taskbar home, its look, layout, tray and pins, and her island's look on
 // it; the mail; the Windows look and wallpaper pages kept nothing.
 const GONE: &[&str] = &[
+    // One pet out, and where: each agent's now (adopt_out).
+    "out",
+    "x",
+    "y",
     "corner",
     "bubble",
     "taskbarMaterial",
@@ -406,6 +434,28 @@ mod tests {
         fs::write(pet.join("pet.json"), r#"{ "displayName": "Late", "spriteVersionNumber": 2 }"#).unwrap();
         assert!(has("Late"));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_one_pet_out_is_claude_s_now_and_each_agent_has_its_own() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-out-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        // Out, where she was left: Claude's pet out, there.
+        fs::write(dir.join("config.json"), r#"{ "out": true, "x": 100, "y": -20 }"#).unwrap();
+        let s = load(&dir);
+        assert_eq!(s["desktop"], json!({ "claude": true, "codex": false, "agy": false, "grok": false }));
+        assert_eq!(s["spots"], json!({ "claude": [100, -20] }));
+        assert!(!s.contains_key("out") && !s.contains_key("x") && !s.contains_key("y"));
+        // Saved as it is now: kept, an agent missing off.
+        fs::write(dir.join("config.json"), r#"{ "desktop": { "codex": true }, "spots": { "codex": [5, 6] } }"#).unwrap();
+        let s = load(&dir);
+        assert_eq!(s["desktop"], json!({ "claude": false, "codex": true, "agy": false, "grok": false }));
+        assert_eq!(s["spots"], json!({ "codex": [5, 6] }));
+        // Her old home "pet": the island, Claude's pet out.
+        fs::write(dir.join("config.json"), r#"{ "display": "pet" }"#).unwrap();
+        assert_eq!(load(&dir)["desktop"]["claude"], true);
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(defaults()["desktop"]["grok"], false);
     }
 
     #[test]
