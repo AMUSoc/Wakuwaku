@@ -8,6 +8,7 @@
 //   POST /come-home    started again while running: back into sight
 //   POST /debug/eval   { page, code }: run code in her page or the island's (WAKUWAKU_DEBUG=1 only)
 //   POST /debug/walk   { dx, ms }: take a walk now (WAKUWAKU_DEBUG=1 only)
+//   GET  /mobile/…     the phone's page and its data (mobile.rs): all that may be asked for from elsewhere
 //   POST /quit         quit, as the menu does (a new build replacing her; killing her
 //                      would leave the top bar's strip taken)
 use std::io::Read;
@@ -17,7 +18,7 @@ use serde_json::{json, Value};
 use tauri::Manager;
 use tiny_http::{Header, Request, Response, Server};
 
-use crate::{events, events_agy, events_codex, events_grok, island, jump, now_ms, pet, Responder, Shared};
+use crate::{events, events_agy, events_codex, events_grok, island, jump, mobile, now_ms, pet, Responder, Shared};
 
 // Hook events carry whole files (an Edit's PostToolUse has the file before
 // the edit), so this is generous.
@@ -91,9 +92,18 @@ fn chain_for(sh: &Shared, req: &Request, event: &Value, brings_own: bool) -> Opt
     (!chain.is_empty()).then_some(chain)
 }
 
-fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
+pub fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
     let path = req.url().split('?').next().unwrap_or("").to_string();
     let method = req.method().as_str().to_string();
+    // The phone's page (mobile.rs); from anywhere but this computer, that
+    // page alone: the hooks and the rest are this computer's.
+    let is_local = mobile::is_local(&req);
+    if path == "/mobile" || path.starts_with("/mobile/") {
+        return mobile::handle(sh, req, is_local);
+    }
+    if !is_local {
+        return reply(req, 404, json!({ "error": "not found" }));
+    }
     match (method.as_str(), path.as_str()) {
         ("POST", "/hook") => {
             let Some(mut event) = read_json(&mut req) else { return reply(req, 200, json!({})) };

@@ -49,6 +49,7 @@ mod jump;
 mod launch;
 mod lcu;
 mod lol;
+mod mobile;
 mod notch;
 mod notify;
 mod pet;
@@ -437,6 +438,22 @@ impl Shared {
         });
     }
 
+    // A prompt answered on her or on the phone (mobile.rs): the hook held
+    // for it answered.
+    pub fn answer(&self, id: u64, choice: &Value) -> bool {
+        let lang = self.lang();
+        let ok = self.asks.lock().unwrap().answer(id, choice, lang);
+        self.log(&format!("answer {id}: {choice} -> {ok}"));
+        if ok {
+            self.push_asks();
+            // An approval given on her, for today's count.
+            if matches!(choice["action"].as_str(), Some("allow" | "always")) {
+                self.count_today(|t| t.approvals += 1);
+            }
+        }
+        ok
+    }
+
     // A message from the hooks (or a reaction of our own).
     pub fn apply(&self, msg: &Value) -> bool {
         let out = self.pet.lock().unwrap().apply(msg, now_ms(), self.hold());
@@ -465,8 +482,11 @@ impl Shared {
             }
         }
         if !self.flag("dnd") {
+            // On the phone as well (ntfy), by its agent and how it is alone.
+            let agent = state::agent_key(msg["agent"].as_str().unwrap_or(""));
             for (mood, project) in out.alerts {
                 self.alert(&mood, &project);
+                mobile::push(&shared(&self.app), agent, &mood);
             }
         }
         true
@@ -577,6 +597,7 @@ impl Shared {
         let touches_top = ["settingsPin", "settingsTop"].iter().any(|k| patch.contains_key(*k));
         let touches_monitor = ["monitor", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
         let touches_desktop = patch.contains_key("desktop");
+        let touches_mobile = ["mobile", "mobileBind"].iter().any(|k| patch.contains_key(*k));
         {
             let mut settings = self.settings.lock().unwrap();
             settings.extend(patch);
@@ -596,6 +617,10 @@ impl Shared {
         }
         if touches_top {
             island::keep_on_top(self);
+        }
+        // Phone access on, off, or at another address: listened for there.
+        if touches_mobile {
+            mobile::refresh(self);
         }
     }
 
@@ -877,18 +902,7 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
 
 #[tauri::command]
 async fn pet_answer(app: AppHandle, id: u64, choice: Value) -> bool {
-    let sh = shared(&app);
-    let lang = sh.lang();
-    let ok = sh.asks.lock().unwrap().answer(id, &choice, lang);
-    sh.log(&format!("answer {id}: {choice} -> {ok}"));
-    if ok {
-        sh.push_asks();
-        // An approval given on her, for today's count.
-        if matches!(choice["action"].as_str(), Some("allow" | "always")) {
-            sh.count_today(|t| t.approvals += 1);
-        }
-    }
-    ok
+    shared(&app).answer(id, &choice)
 }
 
 #[tauri::command]
@@ -1305,6 +1319,7 @@ fn main() {
             settings::settings_open_site,
             settings::settings_update,
             settings::settings_crash,
+            settings::settings_mobile,
         ])
         .on_menu_event(|app, event| tray::on_menu(&shared(app), event.id().as_ref()))
         .setup(move |app| {
@@ -1313,6 +1328,10 @@ fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let mut settings = data::load(&dir);
+            // The phone page's token and the ntfy topic: her own, made once.
+            if mobile::fill_secrets(&mut settings) {
+                data::save(&dir, &settings);
+            }
             // Her pet gone: the first one there is.
             let found = data::pets(&dir);
             let id = settings.get("pet").and_then(Value::as_str).unwrap_or("").to_string();
@@ -1373,6 +1392,8 @@ fn main() {
             island::apply_visibility(&sh);
             tray::create(&sh)?;
             server::serve(sh.clone(), listener);
+            // Phone access: the page listened for on Tailscale's address too (mobile.rs).
+            mobile::start(&sh);
             // Her updates looked for (a downloaded exe only).
             updates::start(&sh);
             // Crashes since: their reports made, sent or asked about.

@@ -21,6 +21,8 @@ ureq = { version = "3.4.2", features = ["json"] }
 sha2 = "0.10"
 # Tauri's async runtime made with fewer threads (main.rs); already in the tree, under Tauri.
 tokio = { version = "1", features = ["rt-multi-thread"] }
+# The phone page's token and the ntfy topic (mobile.rs); already in the tree, under Tauri.
+getrandom = "0.3"
 
 [features]
 default = ["custom-protocol"]

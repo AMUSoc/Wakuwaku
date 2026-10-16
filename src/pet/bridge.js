@@ -120,6 +120,8 @@
       update: what => invoke('settings_update', { what }),
       // Her crash reports: 'yes', 'no' (her asking answered), 'send', 'open' (the last one's issue; crash.rs).
       crash: what => invoke('settings_crash', { what }),
+      // The phone page: 'token' and 'topic' made anew, 'test' a push to try ntfy (mobile.rs).
+      mobile: what => invoke('settings_mobile', { what }),
     },
   }
 

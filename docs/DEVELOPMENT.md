@@ -185,6 +185,7 @@ hook 事件在 `events.rs`（Codex 的在 `events_codex.rs`）换算成消息，
 | `POST /quit` | 像菜单里的「退出」一样退出；换新版本时用，别直接杀进程 |
 | `POST /debug/eval` | `{ page: "island" \| "pet-<agent>", code }`：在页面里运行一段表达式，返回结果（可以是 Promise）；`"pet"` 是 Claude 的桌宠 |
 | `POST /debug/walk` | `{ dx, ms }`：立刻走一段 |
+| `GET /mobile/…` | 手机页和它的数据（见"手机页"）；从别处来的请求只能到这里 |
 
 ## 在宠物上确认
 
@@ -444,6 +445,33 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 - **全屏例外**：对局中，`fullscreen.rs` 不把 `league of legends.exe` 当全屏，桌宠不躲；游戏要用无边框模式（README）。
 - **设置**：「通用」页「英雄联盟对局助手」开关（`lol`）、「Riot API 金钥」（`riotApiKey`，只送 Riot API，不进日志和崩溃报告）。
 - **测试**：`tools/lol_fake.py` 假装 Live Client、LCU 和 Riot API（`WAKUWAKU_LOL_URL`、`WAKUWAKU_LCU_URL`、`WAKUWAKU_RIOT_API_URL`），可以加事件、改时间、换装备、换 phase；`src-tauri/fixtures/lol/events.json` 是 Riot 官方的事件样本（时间都是 0，测试里另给时间）。2026-10-16 第一场真实对局（日文客户端）测出：维尔戈附身被当成买装、`position` 为 `NONE` 时显示出键名、技能名是客户端的日文，都已改；台服用语（预示者、巴龙、长老龙，在 zh-TW 里）。
+
+## 手机页（mobile.rs、src/mobile/）
+
+`/mobile/` 是给手机看的单页：四个 agent 各一张卡（宠物的图集照 mood 播 `sprite.js` 的 `MOOD_CLIP` 那一行，半尺寸；`status.js` 说会话在做什么；做完／改好／出错时显示 `reply`），有确认在等时最上面是面板，按钮走和宠物一样的 `Shared::answer`（原来 `pet_answer` 的内容）。页面每 2 秒问 `api/state` 和 `api/asks`，页面藏着时不问。`i18n.js`、`status.js`、`sprite.js` 和页面自己的文件都用 `include_str!` 编进 exe，由 `mobile.rs` 直接回（不经 Tauri）。
+
+| 请求 | 说明 |
+| --- | --- |
+| `GET /mobile/` | 页面；`?t=<token>` 时把 token 存成 cookie（`wk`，`Path=/mobile`、HttpOnly、SameSite=Lax，经 https 代理时加 Secure）再 302 回 `/mobile/`，网址里就不留 token |
+| `GET /mobile/<文件>` | `app.js`、`style.css`、`i18n.js`、`status.js`、`sprite.js`、`manifest.webmanifest`、`sw.js`、两个图标：不用 token |
+| `GET /mobile/api/state` | `{ lang, details, at, agents: [{ agent, now, list, sheet, version, pet, color }] }`；`details` 关着时 `reply`、`error` 清空 |
+| `GET /mobile/api/asks` | `{ asks }`：所有确认（不分岛和桌宠） |
+| `POST /mobile/api/answer` | `{ id, choice }`，回 `{ ok }`；要带 `x-wakuwaku` 头 |
+| `GET /mobile/sheet/<agent>` | 那个 agent 的宠物的 `spritesheet.webp`（网址带宠物 id 和修改时间，换宠物就换网址） |
+
+**谁算本机**（`mobile::is_local`）：对端是 loopback、没有 `X-Forwarded-For` / `Forwarded` / `Tailscale-*` 头、`Host` 是 `127.0.0.1` / `localhost` / `[::1]`（或者没有）。三条都满足才是本机；不是本机的请求只能到 `/mobile…`（其余一律 404，包括 `/hook`、`/health`、`/quit`），而且「手机访问」关着时连 `/mobile` 也 404；`api/` 和 `sheet/` 要 token（cookie、`?t=`、或 `x-wakuwaku-token` 头，定时比较）。这样 `tailscale serve`（从 127.0.0.1 转进来，但带 `Tailscale-*` 和 `X-Forwarded-For`，`Host` 是 ts.net 的名字）也算外面，DNS rebinding（`Host` 是别人的网域）也挡掉。本机的网页可以不带 token 打开 `/mobile/`，但别的网站的页面想替你按「允许」：`answer` 要 `x-wakuwaku` 头，跨源请求得先 preflight，这个端口从不回 CORS，所以送不出来。
+
+**在哪听**：`mobileBind` 是 `tailscale`（默认）、`0.0.0.0` 或一个 IP。Tailscale 的地址用一个 UDP socket `connect` 到 `100.100.100.100:53`（Tailscale 自己的 DNS，不真的发包）看本机从哪个地址出去，在 100.64.0.0/10 里就是它。`mobile::refresh` 在启动、改设置（`mobile`、`mobileBind`）、以及每 15 秒时对一次：要的地址和正在听的不同就 `unblock` 旧的、在新地址上开第二个 `tiny_http::Server`（同一个端口；Windows 上 127.0.0.1 和 0.0.0.0 的同一个端口可以同时听，实测过），请求交给同一个 `server::handle`。放掉 0.0.0.0 时要从本机另一个地址敲一下那个端口（`mobile::knock`）：tiny_http 收掉监听时靠自己连自己叫醒卡在 accept 的线程，Windows 上连不到 0.0.0.0，端口就一直被占着（2026-10-17 实测，`netstat` 看到切回 Tailscale 后 0.0.0.0 还在 LISTENING）。设置页显示在哪听、没听成的原因（`noTailscale`、`badAddress`、`bind: …`）、手机上次来是多久前。
+
+**token 和主题**：第一次启动时（`mobile::fill_secrets`）用系统的随机源（`getrandom`）做 `mobileToken`（16 字节 hex）和 ntfy 的 `topic`（`wakuwaku-` + 10 字节 hex），存进 config.json。设置页的「换一个 token」「换一个主题」是 `settings_mobile` 命令（`token` / `topic`）；token 不在 `settings.rs` 的白名单里，页面改不了。日志里从不写 token。
+
+**QR code**：`src/shared/qr.js`，自己写的（byte 模式、纠错 M、版本 1–10，最多 213 字节），设置页画成 SVG。2026-10-17 对过：每种遮罩、版本 1 到 10 都和 segno 逐格一样（segno 在刚好对齐字节时多补一个 0x00 码字，对照时照它补），OpenCV 也都读得出来；`test/qr.test.js` 留了一个网址的指纹。
+
+**推送**：`Shared::apply` 发提示音和通知的地方（勿扰时不发）同时 `mobile::push(agent, mood)`：`POST <server>/<topic>`，正文只有「<agent> 做完了」这类（Rust 端的 `push.*` 字串），`Title: Wakuwaku`、`Tags`、`Priority`（等你确认是 high）、`Click`（手机页的网址，不带 token）。「推一则试试」是 `settings_mobile("test")`，同步等结果，回 `{ pushed: { ok, error } }`。2026-10-17 用本机假 ntfy 实测：做完、等你、出错、试推四则的路径、标头、正文都对，项目名和回复都没送出去。
+
+**PWA**：`manifest.webmanifest`（`start_url` / `scope` 都是 `/mobile/`，192 和 512 的图标从 `src-tauri/icons/icon.png` 放大）和 `sw.js`（页面和脚本网络优先、留一份；`api/`、`sheet/` 不进缓存）。浏览器只在 https 或 localhost 下注册 service worker，所以要装成 App 得经 `tailscale serve`；http 的 Tailscale 地址照样能用，只是没有离线外壳。
+
+实测（2026-10-17，Windows 11，Tailscale 100.90.183.86，另开一份在 47299 端口）：外部无 token 时页面 200、`api/*` 401、`/hook` `/health` `/quit` `/state` 404；`?t=` 后 302 并设 cookie；带 `X-Forwarded-For`、`Tailscale-User-Login`、`Host: evil.example` 的本机请求都当外部；没有 `x-wakuwaku` 头的回答 404；Chrome 里从 Tailscale 地址打开、按「允许」，挂着的 hook 收到 `{"behavior":"allow"}`。0.0.0.0 → Tailscale、Tailscale → 0.0.0.0、0.0.0.0 → 关掉，`netstat` 上旧地址都马上放掉。
 
 ## 踩过的坑
 

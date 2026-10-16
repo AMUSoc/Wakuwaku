@@ -197,6 +197,31 @@ While you play League of Legends, each pet out on the desktop (turn on "On the d
 - **The full-screen exception**: with "Hide while an app is full screen" on, League of Legends in a game does not count as full screen, so the pets stay; other full-screen apps hide them as before.
 - Not wanted: turn off "League of Legends game helper" on the General page.
 
+### Her on your phone (Tailscale)
+
+See what the four agents are doing and answer their prompts away from the computer: turn on "Phone access" on the General page and scan the QR code there with your phone. The phone's page shows each agent's pet (playing its mood), what its sessions are doing, and what it said as it finished; a prompt waiting is at the top, with the same buttons as on the pet (Allow, Always allow, Deny, answering a question). The page asks her every 2 seconds.
+
+**From outside your network: use [Tailscale](https://tailscale.com).** No port opened on the router, nothing of hers on the internet:
+
+1. Install Tailscale on the computer and the phone, signed in to the same account (the same tailnet).
+2. Turn on General → "Phone access", with "Listen at" on **Tailscale** (the default). She finds this computer's Tailscale address (`100.x.y.z`) herself and listens on the same port there as well; Tailscale coming up after her is fine, she looks again every 15 seconds.
+3. Scan the QR code with the phone. The address holds the token; once open, the token is kept as a cookie and taken out of the address. From then on the phone opens it from anywhere while Tailscale is on (mobile data too).
+4. To add it to the home screen as an app: browsers install a page as an app (a service worker) over https only. On the computer, run
+
+   ```
+   tailscale serve --bg 47213
+   ```
+
+   Tailscale gives you an address `https://<computer>.<tailnet>.ts.net` that goes to port 47213 here. Put `https://<computer>.<tailnet>.ts.net` in "Address for the phone": the QR code and the pushes use it. Over the plain http Tailscale address, "Add to home screen" works too, without the offline shell.
+
+As for safety:
+
+- A request not from this computer (through the Tailscale address, `0.0.0.0`, or a reverse proxy such as `tailscale serve`) may ask for `/mobile/` alone, and gets its data or answers a prompt only with the token; the hooks, `/state`, `/quit` and the rest are this computer's alone.
+- "Every interface (0.0.0.0)" lets anyone on the same network reach the port, kept out by the token alone, over plain HTTP: meant for when there is no Tailscale.
+- The token got out: press "New token"; the old one stops working at once, and the phone scans again.
+
+**Pushes (ntfy)**: turn on "Pushes to the phone", subscribe in the [ntfy](https://ntfy.sh) app to the topic in the settings, and a session done, changed, failed or waiting for you sends a push; tapping it opens the phone's page. A push names the agent and how it is alone ("Codex is done"): no project, command or file. The topic is random (anyone who guesses a topic's name on ntfy.sh can subscribe); a server of your own can be put in instead. None while Do not disturb is on.
+
 ### Updates
 
 The downloaded exe looks at the latest release on GitHub and on Gitee as it starts (GitHub's `https://api.github.com/repos/zhoupengjie/Wakuwaku/releases/latest`; on Gitee, the repo's tags and the `.sha256` file in a release; with no account of yours), then once a day. Drafts and prereleases don't count. A new version is told on the island once; click it for Updates on the General page of the settings, where you can read its notes. Nothing is downloaded until you click Update.

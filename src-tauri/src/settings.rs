@@ -94,6 +94,9 @@ pub fn snapshot(sh: &Shared) -> Value {
         "plugins": scripts::view(sh),
         "waku": scripts::waku_path(sh).to_string_lossy(),
         "port": sh.port,
+        // The phone's page: where it is listened for, its address with the
+        // token (the QR code), when the phone last asked (mobile.rs).
+        "mobile": crate::mobile::view(sh),
     })
 }
 
@@ -158,6 +161,20 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
             })
         }),
         "widgetNudge" => is_bool,
+        // Phone access (mobile.rs): on or off; at Tailscale's address, 0.0.0.0
+        // or an address; the page's address through a proxy, or blank. The
+        // token is made, never set (settings_mobile).
+        "mobile" => is_bool,
+        "mobileBind" => v.as_str().is_some_and(|b| b == "tailscale" || b.parse::<std::net::IpAddr>().is_ok()),
+        "mobileUrl" => v.as_str().is_some_and(|u| u.is_empty() || crate::mobile::is_server(u)),
+        "ntfy" => v.as_object().is_some_and(|m| {
+            m.iter().all(|(k, v)| match k.as_str() {
+                "on" => v.is_boolean(),
+                "server" => v.as_str().is_some_and(|s| s.is_empty() || crate::mobile::is_server(s)),
+                "topic" => v.as_str().is_some_and(crate::mobile::is_topic),
+                _ => false,
+            })
+        }),
         // Not to be reminded that nothing is connected (island.js isHinting).
         "connectHintOff" => is_bool,
         // Her island's look, by Windows' mode (island.js lookNow): none, or
@@ -382,6 +399,38 @@ pub async fn settings_crash(app: AppHandle, what: String) -> Value {
         _ => {}
     }
     snapshot(&sh)
+}
+
+// The phone page's token, or the ntfy topic, made anew (the old one no
+// longer works); a push to try ntfy, and what came of it ({ pushed }).
+#[tauri::command]
+pub async fn settings_mobile(app: AppHandle, what: String) -> Value {
+    let sh = shared(&app);
+    let pushed = match what.as_str() {
+        "token" => {
+            sh.change(json!({ "mobileToken": crate::mobile::new_token() }));
+            None
+        }
+        "topic" => {
+            let mut ntfy = sh.setting("ntfy");
+            ntfy["topic"] = json!(crate::mobile::new_topic());
+            sh.change(json!({ "ntfy": ntfy }));
+            None
+        }
+        "test" => {
+            let sh = sh.clone();
+            Some(tauri::async_runtime::spawn_blocking(move || crate::mobile::push_test(&sh)).await.unwrap_or_else(|e| Err(e.to_string())))
+        }
+        _ => None,
+    };
+    let mut snap = snapshot(&sh);
+    if let Some(pushed) = pushed {
+        snap["pushed"] = match pushed {
+            Ok(()) => json!({ "ok": true }),
+            Err(err) => json!({ "ok": false, "error": err }),
+        };
+    }
+    snap
 }
 
 // Only these places, whatever the page asks: the project or codex-pets.net.

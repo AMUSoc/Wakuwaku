@@ -1575,3 +1575,28 @@
 .isl-light #island-settings .wc-err b {
   color: #c42b1c;
 }
+
+/* Phone access: the QR code of the page's address (settings.js pageMobile). */
+#island-settings .qr-row {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+#island-settings .qr {
+  flex: none;
+  width: 132px;
+  height: 132px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+#island-settings .qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#island-settings .bad {
+  color: #ff5c6c;
+}

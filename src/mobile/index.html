@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'"
+    />
+    <meta name="theme-color" content="#111214" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Wakuwaku" />
+    <title>Wakuwaku</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header id="top">
+      <span class="brand">Wakuwaku</span>
+      <span class="grow"></span>
+      <span id="link" class="link"></span>
+    </header>
+    <div id="notice" hidden></div>
+    <section id="asks" hidden></section>
+    <main id="agents"></main>
+    <script src="i18n.js"></script>
+    <script src="sprite.js"></script>
+    <script src="status.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

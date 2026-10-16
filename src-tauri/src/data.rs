@@ -121,6 +121,18 @@ fn defaults() -> Map<String, Value> {
         // Riot API key, for her rank and her party's in champion select (lcu.rs).
         "lol": true,
         "riotApiKey": "",
+        // The phone's page from elsewhere (mobile.rs): off, or listened for
+        // at Tailscale's address ("tailscale"), at 0.0.0.0, or at one set;
+        // asked for with this token (made as she first starts). Its address
+        // as the phone reaches it, if a proxy is in front (tailscale serve):
+        // for the QR code and a push's tap.
+        "mobile": false,
+        "mobileBind": "tailscale",
+        "mobileToken": "",
+        "mobileUrl": "",
+        // Pushes to the phone through ntfy: a server of your own or ntfy.sh,
+        // a topic of her own (made as she first starts).
+        "ntfy": { "on": false, "server": crate::mobile::NTFY_SERVER, "topic": "" },
         "onboarded": false,
     }) else {
         unreachable!()

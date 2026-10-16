@@ -85,6 +85,10 @@
   // The colour picker is open: the focus it takes does not close the
   // settings.
   let picking = false
+  // Phone access at an address of one's own being typed (none set yet), and
+  // how the last ntfy push to try it went.
+  let mobileCustom = false
+  let pushNote = null
 
   const T = (key, vars) => t(lang, key, vars)
   const esc = value =>
@@ -938,12 +942,64 @@
       </div>`
   }
 
+  // Phone access (mobile.rs): on or off, where it is listened for, the QR
+  // code of the page's address with its token; ntfy's pushes.
+  function pageMobile() {
+    const s = snap.settings
+    const m = snap.mobile || {}
+    const bind = s.mobileBind || 'tailscale'
+    const isCustom = mobileCustom || (bind !== 'tailscale' && bind !== '0.0.0.0')
+    const ntfy = s.ntfy || {}
+    const problem = !s.mobile
+      ? ''
+      : m.problem === 'noTailscale'
+        ? T('s.mobileNoTailscale')
+        : m.problem === 'badAddress'
+          ? T('s.mobileBadAddress')
+          : m.problem
+            ? T('s.mobileBindFailed', { why: m.problem.replace(/^bind: /, '') })
+            : ''
+    const where = s.mobile && m.listening ? T('s.mobileListening', { at: `${m.listening}:${snap.port}` }) : ''
+    const seen = m.seenAgo == null ? T('s.mobileNeverSeen') : m.seenAgo < 60000 ? T('s.mobileSeenNow') : T('s.mobileSeenAgo', { time: clock(m.seenAgo) })
+    let qr = ''
+    if (s.mobile && m.url) {
+      try {
+        qr = `<div class="qr">${window.QR.svg(m.url)}</div>`
+      } catch {
+        qr = ''
+      }
+    }
+    const tried = pushNote ? `<div class="d ${pushNote.ok ? '' : 'bad'}">${esc(pushNote.ok ? T('s.ntfySent') : T('s.ntfyFailed', { why: pushNote.error || '' }))}</div>` : ''
+    return `${sec(T('s.mobile'))}<div class="grp">
+        ${row(esc(T('s.mobileOn')), esc(T('s.mobileOnNote')), sw('mobile', s.mobile))}
+        ${
+          s.mobile
+            ? `${row(esc(T('s.mobileBind')), esc(T('s.mobileBindNote')), seg('mobileBind', [['tailscale', 'Tailscale'], ['0.0.0.0', T('s.mobileAll')], ['custom', T('s.mobileCustom')]], isCustom ? 'custom' : bind))}
+        ${isCustom ? row(esc(T('s.mobileAddress')), '', `<input class="in" id="s-mobile-ip" spellcheck="false" autocomplete="off" placeholder="192.168.1.20" value="${esc(isCustom && bind !== 'tailscale' && bind !== '0.0.0.0' ? bind : '')}">`) : ''}
+        <div class="r"><div class="grow"><div class="${problem ? 'bad' : ''}">${esc(problem || where)}</div><div class="d">${esc(seen)}</div></div></div>
+        ${
+          qr
+            ? `<div class="r qr-row">${qr}<div class="grow"><div class="d">${esc(T('s.mobileScan'))}</div><div class="r"><span class="cmd mono">${esc(m.url)}</span></div><div class="r"><button class="pbtn sm" data-copy="${esc(m.url)}">${esc(T('home.copy'))}</button><button class="pbtn sm no" data-mobile="token">${esc(T('s.mobileNewToken'))}</button></div></div></div>`
+            : ''
+        }
+        ${row(esc(T('s.mobileUrl')), esc(T('s.mobileUrlNote')), `<input class="in" id="s-mobile-url" spellcheck="false" autocomplete="off" placeholder="https://pc.tailnet.ts.net" value="${esc(s.mobileUrl || '')}">`)}`
+            : ''
+        }
+      </div>
+      ${sec(T('s.ntfy'))}<div class="grp">
+        ${row(esc(T('s.ntfyOn')), esc(T('s.ntfyNote')), sw('ntfy.on', ntfy.on))}
+        ${row(esc(T('s.ntfyServer')), esc(T('s.ntfyServerNote')), `<input class="in" id="s-ntfy-server" spellcheck="false" autocomplete="off" placeholder="https://ntfy.sh" value="${esc(ntfy.server || '')}">`)}
+        <div class="r"><div class="grow"><div>${esc(T('s.ntfyTopic'))}</div><div class="d">${esc(T('s.ntfyTopicNote'))}</div><div class="r"><span class="cmd mono">${esc(ntfy.topic || '')}</span></div><div class="r"><button class="pbtn sm" data-copy="${esc(ntfy.topic || '')}">${esc(T('home.copy'))}</button><button class="pbtn sm" data-mobile="topic">${esc(T('s.ntfyNewTopic'))}</button><button class="pbtn sm al" data-mobile="test">${esc(T('s.ntfyTest'))}</button></div>${tried}</div></div>
+      </div>`
+  }
+
   // General: the welcome (nothing connected yet), the sessions and the
   // quick switches, the alerts, startup and the language, her updates, her
   // crash reports, connecting (the plugin, the hooks) and what this is.
   function pageGeneral() {
     return `${showWelcome() ? part('welcome', welcomeBlock()) : ''}${pageNow()}
       ${part('alerts', pageAlerts())}
+      ${part('mobile', pageMobile())}
       ${sec(T('s.startLang'))}<div class="grp">
         ${row(esc(T('settings.startAtLogin')), esc(T('home.pluginStart')), sw('login', snap.loginAtStart))}
         ${row(esc(T('home.language')), '', seg('lang', [['auto', T('settings.languageAuto')], ['zh-TW', '繁體中文'], ['zh', '简体中文'], ['en', 'EN']], snap.settings.lang))}
@@ -1237,6 +1293,7 @@
       // Crash reports: sent by themselves, or never (not asked again).
       if (key === 'crashReports') return patch({ crashReports: snap.crash?.mode === 'auto' ? 'off' : 'auto' })
       if (key.startsWith('notify.')) return patch({ notify: { ...s.notify, [key.slice(7)]: !s.notify?.[key.slice(7)] } })
+      if (key === 'ntfy.on') return patch({ ntfy: { ...s.ntfy, on: !s.ntfy?.on } })
       // A widget on or off.
       if (key.startsWith('w:')) {
         const id = key.slice(2)
@@ -1291,6 +1348,11 @@
         return draw()
       }
       if (key === 'ilookEdge') return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), edge: raw })
+      // An address of one's own: kept once typed (the box below).
+      if (key === 'mobileBind') {
+        mobileCustom = raw === 'custom'
+        return mobileCustom ? draw() : patch({ mobileBind: raw })
+      }
       if (key === 'gallery') {
         if (gallery.sort === raw) return
         gallery.sort = raw
@@ -1335,6 +1397,20 @@
     if (at('[data-crash-show]')) return ((crashShown = !crashShown), draw())
     const crashButton = at('[data-crash]')
     if (crashButton && !crashButton.disabled) return window.pet.settings.crash(crashButton.dataset.crash).then(got => ((snap = got), draw()))
+    // The phone page's token or the ntfy topic made anew; a push to try it.
+    const mobileButton = at('[data-mobile]')
+    if (mobileButton && !mobileButton.disabled) {
+      const what = mobileButton.dataset.mobile
+      if (what === 'test') {
+        mobileButton.disabled = true
+        pushNote = null
+      }
+      return window.pet.settings.mobile(what).then(got => {
+        snap = got
+        if (got.pushed) pushNote = got.pushed
+        draw()
+      })
+    }
     const use = at('[data-use]')
     if (use) return patch({ pet: use.dataset.use })
     // An agent's pet out on the desktop, or home.
@@ -1488,6 +1564,16 @@
       else delete dirs[e.target.dataset.agentDir]
       return patch({ agentDirs: dirs })
     }
+    // Phone access: an address of one's own, the page's address through a
+    // proxy, ntfy's server; kept once typed, one that is none not kept.
+    if (e.target.id === 's-mobile-ip') {
+      const ip = e.target.value.trim()
+      if (!ip) return
+      mobileCustom = false
+      return patch({ mobileBind: ip })
+    }
+    if (e.target.id === 's-mobile-url') return patch({ mobileUrl: e.target.value.trim().replace(/\/+$/, '') })
+    if (e.target.id === 's-ntfy-server') return patch({ ntfy: { ...snap.settings.ntfy, server: e.target.value.trim().replace(/\/+$/, '') } })
     // Her Riot API key, kept once typed (lcu.rs); one not as Riot gives them is not kept.
     if (e.target.id === 's-riot-key') return patch({ riotApiKey: e.target.value.trim() })
     const key = e.target.dataset.field

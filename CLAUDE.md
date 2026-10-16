@@ -25,6 +25,8 @@ cd .. && node --test "test/*.test.js"   # 頁面的單元測試（i18n、注視�
 
 ```
 src/pet/           頁面：她的視窗（?role=pet）和島（?role=island）共用 index.html
+src/mobile/        手機頁（mobile.rs 用 include_str! 編進 exe）：app.js、style.css、manifest、service worker
+src/shared/qr.js   設定頁的 QR code（byte 模式、糾錯 M、版本 1–10）
 src/shared/i18n.js 簡中（zh）、繁中（zh-TW，預設語言）、英文字串（Rust 端少數字串在 src-tauri/src/i18n.rs）；新字串照 docs/zh-TW-glossary.md 翻
 src-tauri/src/     Rust 主程式（下表）
 src-tauri/capabilities/  頁面可用的 Tauri 權限：新視窗一定要列進去（桌寵視窗是 pet-*）
@@ -38,7 +40,8 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 
 **入口與共用狀態**
 - `main.rs`：入口。依參數分流成 `--wakuwaku-ensure-running`（Claude Code 的 SessionStart）、`--wakuwaku-codex-hook`、`--wakuwaku-agy-hook <事件>`、`--wakuwaku-guard`（當機報告的守護程序）；否則以「誰佔著連接埠誰就是寵物」做單實例，建立 `Shared`（所有部分共用的狀態，**任何時候都不同時持有兩把鎖**），註冊頁面可呼叫的 Tauri 命令，並啟動 pointer、widgets、monitor、fullscreen、ticker 等背景執行緒。
-- `server.rs`：127.0.0.1:47213 的 HTTP 介面（`/hook`、`/state`、`/widget`、`/health`、`/come-home`、`/quit`、`/debug/*`）。
+- `server.rs`：127.0.0.1:47213 的 HTTP 介面（`/hook`、`/state`、`/widget`、`/health`、`/come-home`、`/quit`、`/debug/*`、`/mobile/…`）。不是本機來的請求（`mobile::is_local`）只能到 `/mobile/…`。
+- `mobile.rs`：手機頁（`src/mobile/`）：設定 `mobile` 打開時在 Tailscale 位址（或 `mobileBind` 指定的）上也聽同一個連接埠；外來請求要 token（`mobileToken`）；ntfy 推播（只寫 agent 和狀態）。細節見 `docs/DEVELOPMENT.md` 的「手机页」。
 - `state.rs`：狀態機。按會話記 mood、名字、執行中的工具、任務清單、改過的檔案、結果，挑出最需要你的那一個顯示；也負責閒置會話的隱藏（`is_shown`）與遺忘。
 - `events.rs` / `events_codex.rs` / `events_agy.rs` / `events_grok.rs`：把 Claude Code / Codex / Antigravity / Grok Build 的 hook 事件換算成統一的「訊息」；會話名、專案名（git 倉庫名，含 worktree）。`events_grok.rs` 的測試直接用 `src-tauri/fixtures/grok/` 裡 Grok 1.0.52 實際送來的 payload（用 `tools/hook_dump.py` 抓的）。
 - `asks.rs`：確認請求（PermissionRequest）：顯示什麼、每個選擇回給 agent 什麼、排隊與逾時。

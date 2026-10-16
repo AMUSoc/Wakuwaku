@@ -58,6 +58,12 @@ pub fn t(lang: &str, key: &str) -> String {
         "update.tap" => ("点一下去更新", "點一下去更新", "Tap to update"),
         "crash.out" => ("她上次意外退出了，要发崩溃报告吗？", "她上次意外結束了，要傳送當機報告嗎？", "She quit unexpectedly. Send a crash report?"),
         "crash.tap" => ("点一下看看", "點一下看看", "Tap to see"),
+        // A push to the phone (mobile.rs): the agent and how it is, alone.
+        "push.waiting" => ("{agent} 在等你", "{agent} 在等你", "{agent} is waiting for you"),
+        "push.done" => ("{agent} 做完了", "{agent} 做完了", "{agent} is done"),
+        "push.review" => ("{agent} 改好了，来看看", "{agent} 改好了，來看看", "{agent} made changes for you to see"),
+        "push.error" => ("{agent} 出错了", "{agent} 出錯了", "{agent} ran into an error"),
+        "push.test" => ("Wakuwaku 的推送到了", "Wakuwaku 的推播到了", "Wakuwaku's pushes reach you"),
         "crash.box" => (
             "Wakuwaku 最近连续崩溃了 {n} 次。\n\n要从现在起自动发送崩溃报告吗？报告会公开发到 GitHub 或 Gitee 的 issue 里，用户名、路径、其他程序的名字和窗口标题、邮箱这类内容会先去掉。\n\n以后可以在 设置 → 通用 → 崩溃报告 里关掉。",
             "Wakuwaku 最近連續當機了 {n} 次。\n\n要從現在起自動傳送當機報告嗎？報告會公開發到 GitHub 或 Gitee 的 issue 裡，使用者名稱、路徑、其他程式的名稱和視窗標題、電子郵件這類內容會先去掉。\n\n以後可以在 設定 → 一般 → 當機報告 裡關掉。",
