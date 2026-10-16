@@ -250,8 +250,10 @@ function mmss(s) {
 }
 
 // Her part, drawn anew each second while a game is on: Claude's pet the
-// clock; Grok's the objectives' respawns (soonest first, four at most) and
-// her own team's summoner spells. Neutral: what is, never what to do.
+// clock, and an objective a minute or less from spawning; Grok's the
+// objectives' respawns (soonest first, four at most) and her own team's
+// summoner spells; Codex's the other team's key items, each 30 game seconds.
+// Neutral: what is, never what to do.
 function fillGame() {
   clearTimeout(gameTimer)
   const g = now.game
@@ -265,7 +267,16 @@ function fillGame() {
   const line = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text })
   const at = gameNow(g)
   const lines = []
-  if (g.role === 'clock') lines.push(line('clock', t(lang, 'lol.clock', { time: mmss(at) })))
+  if (g.role === 'clock') {
+    lines.push(line('clock', t(lang, 'lol.clock', { time: mmss(at) })))
+    for (const o of g.objectives || []) {
+      const left = o.at - at
+      if (left > 0 && left <= 60) lines.push(line('timer soon', t(lang, 'lol.soon', { what: t(lang, `lol.${o.what}`), time: mmss(left) })))
+    }
+  }
+  if (g.role === 'intel') {
+    for (const n of (g.news || []).filter(n => at - n.at <= 30).slice(-4)) lines.push(line('news', t(lang, 'lol.item', { champion: n.champion, item: n.item })))
+  }
   if (g.role === 'objectives') {
     const rows = (g.objectives || [])
       .map(o => ({ ...o, left: o.at - at }))

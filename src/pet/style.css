@@ -272,6 +272,10 @@ body {
   font-weight: 600;
 }
 
+#game .news {
+  white-space: normal;
+}
+
 .below #game {
   margin: 8px 0 0;
 }
