@@ -55,28 +55,75 @@ body {
    fixed size text whatever her scale, as the prompt panel; the pointer on
    it has seen it. */
 #bubble.summary {
+  position: relative;
   flex: none;
   width: 240px;
   max-width: none;
-  margin-bottom: 8px;
+  overflow: visible;
+  margin-bottom: 10px;
   padding: 8px 10px;
   border-radius: 12px;
+  border-color: var(--pet-color, var(--accent));
+  background: #fff;
   font-size: 13px;
   text-align: left;
   white-space: normal;
   pointer-events: auto;
 }
 
+/* Its point at her, in her colour (an edge, and white within), where she
+   stands in the window (--shift). Below her, it points up. */
+#bubble.summary::before,
+#bubble.summary::after {
+  content: '';
+  position: absolute;
+  left: calc(50% + var(--shift, 0px));
+  transform: translateX(-50%);
+  border: solid transparent;
+}
+
+#bubble.summary::before {
+  top: 100%;
+  border-width: 9px 8px 0;
+  border-top-color: var(--pet-color, var(--accent));
+}
+
+#bubble.summary::after {
+  top: calc(100% - 1px);
+  border-width: 6px 5px 0;
+  border-top-color: #fff;
+}
+
+.below #bubble.summary::before {
+  top: auto;
+  bottom: 100%;
+  border-width: 0 8px 9px;
+  border-bottom-color: var(--pet-color, var(--accent));
+}
+
+.below #bubble.summary::after {
+  top: auto;
+  bottom: calc(100% - 1px);
+  border-width: 0 5px 6px;
+  border-bottom-color: #fff;
+}
+
 #bubble.summary.hidden {
   display: none;
 }
 
+/* The mood's colour (waiting, done, failed...) on its first line. */
 #bubble.summary .title {
   display: block;
   overflow: hidden;
+  color: var(--accent);
   font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+#bubble.summary .title + .status {
+  color: #4a5160;
 }
 
 #bubble.summary .status {
@@ -158,7 +205,8 @@ body {
   margin-bottom: 8px;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 2px solid var(--accent);
+  /* Out on the desktop, the pet's colour (pet.js --pet-color); in the island, the mood's. */
+  border: 2px solid var(--pet-color, var(--accent));
   background: rgba(255, 255, 255, 0.97);
   color: #1f2430;
   font-size: 13px;
@@ -187,7 +235,7 @@ body {
 }
 
 .below #bubble.summary {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
 }
 
 #panel .head {
@@ -260,9 +308,10 @@ body {
   cursor: default;
 }
 
+/* Allow (approve, confirm): the pet's colour out on the desktop. */
 #panel .btn.primary {
-  border-color: #17a058;
-  background: #17c964;
+  border-color: var(--pet-color, #17a058);
+  background: var(--pet-color, #17c964);
   color: #fff;
 }
 

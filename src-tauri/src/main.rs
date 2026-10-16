@@ -354,6 +354,8 @@ impl Shared {
         let sprite = island["config"].as_object().and_then(|settings| data::pet_of(settings, Some(agent), &found));
         now["sprite"] = sprite.map_or(Value::Null, |p| json!(data::asset_url(&p.sheet)));
         now["spriteVersion"] = json!(sprite.map_or(2, |p| p.version));
+        // Its bubble's and prompt panel's edge: the pet's own colour, or its agent's.
+        now["petColor"] = json!(sprite.and_then(|p| p.color.clone()).unwrap_or_else(|| data::agent_color(agent).to_string()));
         now["list"] = list;
         now["agent"] = json!(agent);
         now

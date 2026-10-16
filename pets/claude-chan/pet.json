@@ -6,5 +6,6 @@
   "source": "https://codex-pets.net/#/pets/claude-chan",
   "spritesheetPath": "spritesheet.webp",
   "spriteVersionNumber": 2,
-  "kind": "person"
+  "kind": "person",
+  "color": "#E8732A"
 }

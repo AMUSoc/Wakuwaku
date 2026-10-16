@@ -2,7 +2,8 @@
 
 用法：
   python tools/slice_sheet.py <姿勢表.png> <輸出資料夾> [--run-a 檔案] [--run-b 檔案] [--id 寵物id]
-                              [--name 顯示名] [--description 說明] [--match-eyes] [--eyes-preview 對照.png]
+                              [--name 顯示名] [--description 說明] [--color #rrggbb] [--match-eyes]
+                              [--eyes-preview 對照.png]
                               [--fit same|each | --height N] [--preview 預覽.png]
                               [--crop-preview 裁切預覽.png] [--look 視線表.png] [--breathe]
                               [--look-preview 視線預覽.png]
@@ -14,6 +15,8 @@
 --run-a：用另外畫的一張取代姿勢表第 9 格的跑步幀。這時 run-a 和 run-b 用同一個比例（兩張是一起
   畫的）：run-a 縮放後和姿勢表第 9 格一樣高，run-b 照同一比例。
 --description：寫進 pet.json 的說明；不給就沿用已有 pet.json 的說明。
+--color：寫進 pet.json 的角色色（#rrggbb：桌面上的泡泡、確認面板的外框）；不給就沿用已有的，
+  沒有就不寫（用它 agent 的預設色）。
 --match-eyes：run-a、run-b 的眼睛顏色對齊到 idle-a（另外畫的跑步幀常和姿勢表的眼睛深淺不一）。
   眼睛的找法：人的上面 45% 裡，色相在紫色附近（225–290°）、有點飽和的連通區塊中，正上方深色
   睫毛最多的那塊（idle-a 正面，取兩塊）。目標色是 idle-a 虹膜的飽和度、亮度中位數；跑步幀眼睛
@@ -49,6 +52,7 @@
 """
 import argparse
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -434,6 +438,7 @@ def main():
     p.add_argument('--run-a', help='另外畫的跑步幀，取代姿勢表第 9 格')
     p.add_argument('--run-b')
     p.add_argument('--description', help='pet.json 的說明（不給就沿用已有的）')
+    p.add_argument('--color', help='pet.json 的角色色 #rrggbb（不給就沿用已有的）')
     p.add_argument('--match-eyes', action='store_true', help='run-a、run-b 的眼睛顏色對齊到 idle-a')
     p.add_argument('--eyes-preview', help='另存 --match-eyes 前後的眼睛局部放大對照')
     p.add_argument('--id')
@@ -448,6 +453,9 @@ def main():
     p.add_argument('--look-preview', help='另存圖集 look 兩列（第 9、10 列）的預覽 PNG')
     args = p.parse_args()
 
+    # Before anything is written.
+    if args.color is not None and not re.fullmatch(r'#[0-9A-Fa-f]{6}', args.color):
+        sys.exit(f'--color 要是 #rrggbb：{args.color}')
     pet_id = args.id or Path(args.sheet).stem
     name = args.name or pet_id
     cells = cut(clean(Image.open(args.sheet).convert('RGBA'), args.alpha))
@@ -527,12 +535,12 @@ def main():
     pet = ROOT / 'data' / 'pets' / pet_id
     pet.mkdir(parents=True, exist_ok=True)
     make_sheet.main(out, pet / 'spritesheet.webp')
-    description = args.description
-    if description is None:
-        try:
-            description = json.loads((pet / 'pet.json').read_text(encoding='utf-8')).get('description', '')
-        except (OSError, ValueError):
-            description = ''
+    try:
+        before = json.loads((pet / 'pet.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        before = {}
+    description = args.description if args.description is not None else before.get('description', '')
+    color = args.color if args.color is not None else before.get('color')
     meta = {
         'id': pet_id,
         'displayName': name,
@@ -541,6 +549,8 @@ def main():
         'spriteVersionNumber': 2,
         'kind': 'person',
     }
+    if color:
+        meta['color'] = color
     (pet / 'pet.json').write_text(json.dumps(meta, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f'{pet / "pet.json"}')
     if args.preview:

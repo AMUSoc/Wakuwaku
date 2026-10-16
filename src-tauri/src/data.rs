@@ -242,6 +242,25 @@ pub struct PetInfo {
     pub version: u8,
     // One of the pets Codex has (its desktop app keeps them in the same format).
     pub from_codex: bool,
+    // Its own colour (pet.json color, #rrggbb): the edge of its bubble and
+    // prompt panel out on the desktop. None: its agent's (agent_color).
+    pub color: Option<String>,
+}
+
+// A colour as pet.json gives it: #rrggbb, nothing else.
+fn color_of(v: &Value) -> Option<String> {
+    let s = v.as_str()?;
+    (s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())).then(|| s.to_string())
+}
+
+// Each agent's colour, for a pet with none of its own.
+pub fn agent_color(agent: &str) -> &'static str {
+    match agent {
+        "codex" => "#8B7CD8",
+        "grok" => "#D9A441",
+        "agy" => "#4A8FE7",
+        _ => "#E8732A",
+    }
 }
 
 // The pets Codex has: only read, never written.
@@ -335,6 +354,7 @@ fn scan_pets(dir: &Path) -> Vec<PetInfo> {
                 name: meta.get("displayName").and_then(Value::as_str).unwrap_or(&id).to_string(),
                 author: meta.get("author").and_then(Value::as_str).unwrap_or("").to_string(),
                 version: if meta.get("spriteVersionNumber").and_then(Value::as_u64) == Some(2) { 2 } else { 1 },
+                color: meta.get("color").and_then(color_of),
                 id,
                 sheet,
                 from_codex: root == codex,
@@ -397,7 +417,7 @@ mod tests {
     }
 
     fn pet(id: &str, version: u8) -> PetInfo {
-        PetInfo { id: id.into(), name: id.into(), author: String::new(), sheet: PathBuf::from(format!("{id}/spritesheet.webp")), version, from_codex: false }
+        PetInfo { id: id.into(), name: id.into(), author: String::new(), sheet: PathBuf::from(format!("{id}/spritesheet.webp")), version, from_codex: false, color: None }
     }
 
     #[test]
@@ -461,6 +481,24 @@ mod tests {
         assert_eq!(load(&dir)["desktop"]["claude"], true);
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(defaults()["desktop"]["grok"], false);
+    }
+
+    #[test]
+    fn a_pet_s_own_colour_or_its_agent_s() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-color-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        for (id, meta) in [("tinted", r##"{ "color": "#12ab9F" }"##), ("plain", "{}"), ("odd", r#"{ "color": "red" }"#)] {
+            fs::create_dir_all(dir.join("pets").join(id)).unwrap();
+            fs::write(dir.join("pets").join(id).join("spritesheet.webp"), b"RIFF0000WEBP").unwrap();
+            fs::write(dir.join("pets").join(id).join("pet.json"), meta).unwrap();
+        }
+        let found = pets(&dir);
+        let color = |id: &str| found.iter().find(|p| p.id == id && p.sheet.starts_with(&dir)).and_then(|p| p.color.clone());
+        assert_eq!(color("tinted").as_deref(), Some("#12ab9F"));
+        assert_eq!(color("plain"), None);
+        assert_eq!(color("odd"), None);
+        assert_eq!((agent_color("claude"), agent_color("codex"), agent_color("grok"), agent_color("agy")), ("#E8732A", "#8B7CD8", "#D9A441", "#4A8FE7"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

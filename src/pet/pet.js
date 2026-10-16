@@ -209,6 +209,9 @@ function render() {
   drawn = ''
 
   if (isIsland()) return
+  // Her own colour (pet.json color, or her agent's): her bubble's and her
+  // prompt panel's edge (style.css); the mood's stays the title's.
+  root.setProperty('--pet-color', now.petColor || 'var(--accent)')
 
   // No sprite yet: say how to get one, and keep a box to right-click.
   if (!spriteUrl) {

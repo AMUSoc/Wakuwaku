@@ -14,7 +14,7 @@ const REPO: &str = "https://github.com/zhoupengjie/wakuwaku";
 pub fn snapshot(sh: &Shared) -> Value {
     let pets: Vec<Value> = data::pets(&sh.dir)
         .iter()
-        .map(|p| json!({ "id": p.id, "name": p.name, "author": p.author, "url": data::asset_url(&p.sheet), "version": p.version, "codex": p.from_codex }))
+        .map(|p| json!({ "id": p.id, "name": p.name, "author": p.author, "url": data::asset_url(&p.sheet), "version": p.version, "codex": p.from_codex, "color": p.color }))
         .collect();
     let (now, sessions) = {
         let pet = sh.pet.lock().unwrap();
