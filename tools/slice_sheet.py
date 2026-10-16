@@ -3,7 +3,7 @@
 用法：
   python tools/slice_sheet.py <姿勢表.png> <輸出資料夾> [--run-a 檔案] [--run-b 檔案] [--id 寵物id]
                               [--name 顯示名] [--description 說明] [--color #rrggbb] [--match-eyes]
-                              [--eyes-preview 對照.png]
+                              [--eye-hue lo-hi] [--eye-sat S] [--mirror-eye lo-hi] [--eyes-preview 對照.png]
                               [--fit same|each | --height N] [--preview 預覽.png]
                               [--crop-preview 裁切預覽.png] [--look 視線表.png] [--breathe]
                               [--look-preview 視線預覽.png]
@@ -23,6 +23,11 @@
   範圍裡的紫色像素（不含白色反光和黑色睫毛），飽和度、亮度按比例縮放到中位數和目標一樣，深淺
   層次留著，色相不動，其他像素不碰。找到的範圍和前後的數值會印出來；--eyes-preview 另存前後的
   眼睛局部放大對照。
+--eye-hue：眼睛的色相範圍（度，lo-hi；lo > hi 跨過 0°，紅色是 340-15），預設紫色 225-290；
+  --eye-sat：找眼睛時虹膜至少多飽和（預設 0.2；紅、黃眼睛用 0.45，膚色、髮飾才不算進去）。
+--mirror-eye lo-hi：異色瞳。跑步幀看得到的是一隻眼（--eye-hue 的那隻），鏡像成往左跑時露出的
+  該是另一隻：idle-a 裡這個色相範圍的那隻眼的顏色，換到鏡像的跑步幀那隻眼上（色相轉到它的中位數，
+  深淺照舊；飽和度、亮度縮放到它的中位數），running-left 用這些。
 
 做的事：
   1. 用透明區域的投影切出 9 格（先切列，再在每一列裡切欄），各自裁掉多餘的透明邊。
@@ -165,12 +170,30 @@ def cut(sheet, n=3):
         band = a[y0:y1]
         for x0, x1 in split(band.sum(axis=0), n, f'第 {len(cells) // n + 1} 列的欄'):
             cell = drop_strays(sheet.crop((x0, y0, x1, y1)))
-            cells.append(cell.crop(cell.getbbox()))
+            box = cell.getbbox()
+            cell = cell.crop(box)
+            # 碰到整張表的下緣：腳被畫到圖外了（生成的圖有時這樣）。
+            cell.info['cut_bottom'] = y0 + box[3] >= sheet.height - 2
+            cells.append(cell)
     return cells
 
 
 # 眼睛：紫色的色相範圍（度）、算虹膜的飽和度下限、上面幾成算頭。
 EYE_HUE = (225, 290)
+# How saturated an iris is at least (to find one), and its pixels to change.
+EYE_SAT = (0.2, 0.1)
+
+
+def in_hue(hue, span):
+    """色相（度）在 span 裡；lo > hi 時跨過 0°（紅色：345-15）。"""
+    lo, hi = span
+    return (hue > lo) | (hue < hi) if lo > hi else (hue > lo) & (hue < hi)
+
+
+def hue_span(text):
+    """「lo-hi」：色相範圍（度）。"""
+    lo, hi = (float(x) for x in text.split('-'))
+    return (lo, hi)
 EYE_HEAD = 0.45
 
 
@@ -201,12 +224,13 @@ def components(mask):
     return lab, n
 
 
-def find_eyes(im, count):
+def find_eyes(im, count, span=None, sat_min=None):
     """人的上面 EYE_HEAD 裡，紫色、有點飽和的區塊中，正上方睫毛（很暗的點）最多的 count 塊的範圍。"""
     hue, sat, val = hsv_of(im)
     a = np.array(im.getchannel('A'))
     top = int(a.shape[0] * EYE_HEAD)
-    iris = (a > 200) & (hue > EYE_HUE[0]) & (hue < EYE_HUE[1]) & (sat >= 0.2) & (val > 0.35) & (val < 0.97)
+    span, sat_min = span or EYE_HUE, EYE_SAT[0] if sat_min is None else sat_min
+    iris = (a > 200) & in_hue(hue, span) & (sat >= sat_min) & (val > 0.35) & (val < 0.97)
     iris[top:] = False
     lash = (a > 200) & (val < 0.18)
     lab, n = components(iris)
@@ -226,20 +250,24 @@ def find_eyes(im, count):
     return [box for score, box in found[:count] if score >= best / 2]
 
 
-def eye_pixels(im, boxes, margin=3):
+def eye_pixels(im, boxes, margin=3, span=None):
     """眼睛範圍（各往外 margin）裡要調的像素：紫色、不是白色反光（S < 0.1）也不是睫毛（V < 0.15）。"""
     hue, sat, val = hsv_of(im)
     a = np.array(im.getchannel('A'))
     inside = np.zeros(a.shape, dtype=bool)
     for x0, y0, x1, y1 in boxes:
         inside[max(0, y0 - margin):y1 + margin, max(0, x0 - margin):x1 + margin] = True
-    return inside & (a > 0) & (hue > EYE_HUE[0]) & (hue < EYE_HUE[1]) & (sat >= 0.1) & (val >= 0.15) & (val < 0.97)
+    return inside & (a > 0) & in_hue(hue, span or EYE_HUE) & (sat >= EYE_SAT[1]) & (val >= 0.15) & (val < 0.97)
 
 
-def eye_color(im, boxes):
-    """眼睛範圍裡要調的像素的飽和度、亮度、色相中位數。"""
+def eye_color(im, boxes, span=None):
+    """眼睛範圍裡要調的像素的飽和度、亮度、色相中位數（色相按圓周算，跨 0° 也對）。"""
     hue, sat, val = hsv_of(im)
-    m = eye_pixels(im, boxes)
+    m = eye_pixels(im, boxes, span=span)
+    if span and span[0] > span[1]:
+        # 跨 0°：先轉到 180° 一帶再取中位數。
+        h = (np.median((hue[m] + 180) % 360) - 180) % 360
+        return float(np.median(sat[m])), float(np.median(val[m])), float(h)
     return float(np.median(sat[m])), float(np.median(val[m])), float(np.median(hue[m]))
 
 
@@ -254,6 +282,37 @@ def match_eyes(im, boxes, target):
     out = np.array(im)
     out[..., :3][m] = rgb[m]
     return Image.fromarray(out, 'RGBA'), int(m.sum())
+
+
+def swap_eye(im, boxes, target, span=None):
+    """這隻眼的像素換成另一隻眼的顏色：色相轉到 target 的（相對深淺照舊），飽和度、亮度縮放到
+    target 的中位數；其他像素原樣。"""
+    s_now, v_now, h_now = eye_color(im, boxes, span=span)
+    # 換色的像素：比找眼睛時寬一點的色相（左右各 10°），亮的反光也算（但不是近白的：飽和度
+    # 至少 0.25）；不然虹膜下半那片亮紅留著原色。
+    lo, hi = span or EYE_HUE
+    wide = ((lo - 10) % 360, (hi + 10) % 360)
+    hue, sat, val = hsv_of(im)
+    a = np.array(im.getchannel('A'))
+    inside = np.zeros(a.shape, dtype=bool)
+    for x0, y0, x1, y1 in boxes:
+        inside[max(0, y0 - 3):y1 + 3, max(0, x0 - 3):x1 + 3] = True
+    m = inside & (a > 0) & in_hue(hue, wide) & (sat >= 0.25) & (val >= 0.15)
+    hsv = np.array(im.convert('RGB').convert('HSV'), dtype=float)
+    # PIL 的色相 0–255 一圈。
+    turn = (target[2] - h_now) / 360 * 256
+    hsv[..., 0][m] = (hsv[..., 0][m] + turn) % 256
+    hsv[..., 1][m] = np.clip(hsv[..., 1][m] * target[0] / s_now, 0, 255)
+    hsv[..., 2][m] = np.clip(hsv[..., 2][m] * target[1] / v_now, 0, 255)
+    rgb = np.array(Image.fromarray(hsv.round().astype(np.uint8), 'HSV').convert('RGB'))
+    out = np.array(im)
+    out[..., :3][m] = rgb[m]
+    return Image.fromarray(out, 'RGBA'), int(m.sum())
+
+
+def mirror_boxes(boxes, width):
+    """水平鏡像後的範圍。"""
+    return [(width - x1, y0, width - x0, y1) for x0, y0, x1, y1 in boxes]
 
 
 def eyes_preview(rows, out, height=150):
@@ -344,6 +403,8 @@ def rows_of(f, look=None, breathe=False):
     """各列的幀，照 docs/MAKING_A_PET.md 的列與幀數。"""
     a, b = f['run-a'], f['run-b']
     right = [a, a, b, b, a, a, b, b]
+    # 異色瞳：往左跑露出另一隻眼（--mirror-eye），鏡像換過眼睛顏色的那幾張。
+    left = [f.get('run-a-left', a), f.get('run-a-left', a), f.get('run-b-left', b), f.get('run-b-left', b)] * 2
     if breathe:
         idle = [stretch(f['idle-b'] if i == BLINK_AT else f['idle-a'], k) for i, k in enumerate(BREATH)]
         failed = [shift(f['failed'], dx) for dx in SHAKE]
@@ -356,7 +417,7 @@ def rows_of(f, look=None, breathe=False):
     return {
         'idle': idle,
         'running-right': right,
-        'running-left': [ImageOps.mirror(x) for x in right],
+        'running-left': [ImageOps.mirror(x) for x in left],
         'waving': [f['wave'], f['idle-a'], f['wave'], f['idle-a']],
         'jumping': [f['idle-a'], f['jump'], f['jump'], f['jump'], f['idle-a']],
         'failed': failed,
@@ -440,6 +501,9 @@ def main():
     p.add_argument('--description', help='pet.json 的說明（不給就沿用已有的）')
     p.add_argument('--color', help='pet.json 的角色色 #rrggbb（不給就沿用已有的）')
     p.add_argument('--match-eyes', action='store_true', help='run-a、run-b 的眼睛顏色對齊到 idle-a')
+    p.add_argument('--eye-hue', help='眼睛的色相範圍 lo-hi（度；預設紫色 225-290，紅色 340-15）')
+    p.add_argument('--eye-sat', type=float, help='找眼睛時虹膜至少多飽和（預設 0.2）')
+    p.add_argument('--mirror-eye', help='異色瞳：往左跑時露出的那隻眼的色相範圍 lo-hi（例如黃色 28-65）')
     p.add_argument('--eyes-preview', help='另存 --match-eyes 前後的眼睛局部放大對照')
     p.add_argument('--id')
     p.add_argument('--name')
@@ -453,6 +517,12 @@ def main():
     p.add_argument('--look-preview', help='另存圖集 look 兩列（第 9、10 列）的預覽 PNG')
     args = p.parse_args()
 
+    # The eyes' colour (and how saturated, to be found), for --match-eyes and --mirror-eye.
+    global EYE_HUE, EYE_SAT
+    if args.eye_hue:
+        EYE_HUE = hue_span(args.eye_hue)
+    if args.eye_sat is not None:
+        EYE_SAT = (args.eye_sat, EYE_SAT[1])
     # Before anything is written.
     if args.color is not None and not re.fullmatch(r'#[0-9A-Fa-f]{6}', args.color):
         sys.exit(f'--color 要是 #rrggbb：{args.color}')
@@ -496,6 +566,24 @@ def main():
             after = eye_color(poses[k], eyes)
             print(f'{k} 眼睛 {eyes}：{changed} px，S {before[0]:.2f} → {after[0]:.2f}、V {before[1]:.2f} → {after[1]:.2f}、H {before[2]:.0f}° → {after[2]:.0f}°')
             rows.append([(was, eyes), (poses[k], eyes)])
+        if args.eyes_preview and not args.mirror_eye:
+            eyes_preview(rows, args.eyes_preview)
+            print(f'眼睛對照：{args.eyes_preview}')
+
+    if args.mirror_eye:
+        other = hue_span(args.mirror_eye)
+        other_eyes = find_eyes(poses['idle-a'], 2, other)
+        target = eye_color(poses['idle-a'], other_eyes, span=other)
+        print(f'另一隻眼（idle-a {other_eyes}）：S {target[0]:.2f}、V {target[1]:.2f}、H {target[2]:.0f}°')
+        if not args.match_eyes:
+            rows = [[(poses['idle-a'], find_eyes(poses['idle-a'], 2) + other_eyes)]]
+        for k in ['run-a', 'run-b'] if args.run_b else ['run-a']:
+            eyes = find_eyes(poses[k], 1)
+            poses[f'{k}-left'], changed = swap_eye(poses[k], eyes, target)
+            scales[f'{k}-left'] = scales[k]
+            after = eye_color(poses[f'{k}-left'], eyes, span=other)
+            print(f'{k} 往左跑：{eyes} 的 {changed} px 換成另一隻眼的顏色（H {after[2]:.0f}°、S {after[0]:.2f}、V {after[1]:.2f}）')
+            rows.append([(ImageOps.mirror(poses[k]), mirror_boxes(eyes, poses[k].width)), (ImageOps.mirror(poses[f'{k}-left']), mirror_boxes(eyes, poses[k].width))])
         if args.eyes_preview:
             eyes_preview(rows, args.eyes_preview)
             print(f'眼睛對照：{args.eyes_preview}')
@@ -517,7 +605,12 @@ def main():
         print(f'look：16 格高 {min(im.height for im in cells)}–{max(im.height for im in cells)}，中位數 {middle:g} → {tall:.0f}（×{s:.3f}）')
         look = []
         for i, im in enumerate(cells):
-            cell, trimmed = place(im, s, FEET_Y_DEFAULT, by_mass=bool(args.height))
+            # 腳被畫到圖外的：頭頂對齊到和其他格一樣高（中位數的高度），不拿缺了腳的下緣去對腳底線。
+            feet = FEET_Y_DEFAULT
+            if im.info.get('cut_bottom') and im.height < middle:
+                feet = round(FEET_Y_DEFAULT - (middle - im.height) * s)
+                print(f'look {i:2}  腳在表外（高 {im.height}），頭頂對齊：下緣在 y={feet}')
+            cell, trimmed = place(im, s, feet, by_mass=bool(args.height))
             look.append(cell)
             lost = trimmed['left'] + trimmed['right'] + trimmed['top']
             if lost:

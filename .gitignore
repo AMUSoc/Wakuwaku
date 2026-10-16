@@ -9,6 +9,7 @@ data/*
 data/pets/*
 !data/pets/grok-chan/
 !data/pets/gpt-astra/
+!data/pets/gemini-argon/
 # A test copy's data folder (WAKUWAKU_USER_DATA=data2)
 data2/
 
@@ -34,6 +35,7 @@ art/*
 # Except the sheets and previews of the pets made here (art/README.md).
 !art/grok/
 !art/astra/
+!art/gemini/
 
 # The Thunderbird extension, packed (integrations/thunderbird/build.ps1)
 integrations/thunderbird/*.xpi
