@@ -161,10 +161,6 @@ struct Session {
     // The processes it runs in, for going to its window.
     chain: jump::Chain,
     transcript: String,
-    // Its agent closed it as it ended (a non-interactive run, the phone's):
-    // in sight until its ending is seen or held long enough, then out of
-    // sight, kept (its whole reply asked for later) until forgotten.
-    closed: bool,
     // The turn under way, the last few that ended (Codex), and the last few
     // seen to start (Grok: an end of one of those, not the one under way, is late).
     turn: String,
@@ -202,7 +198,6 @@ impl Session {
             agent: String::new(),
             chain: Vec::new(),
             transcript: String::new(),
-            closed: false,
             turn: String::new(),
             ended_turns: Vec::new(),
             begun_turns: Vec::new(),
@@ -385,16 +380,14 @@ impl Pet {
                 return Some(out);
             }
             if event == "session-end" {
-                // Closed as it ended: its ending is still to be seen.
-                match self.sessions.get_mut(&id) {
-                    Some(s) if is_ending(&s.mood) => s.closed = true,
-                    _ => {
-                        self.sessions.remove(&id);
-                    }
+                // Closed as it ended (a non-interactive run: claude -p,
+                // codex exec): kept, its ending still to be seen and its
+                // whole reply asked for, at rest after as any other is.
+                if !self.sessions.get(&id).is_some_and(|s| is_ending(&s.mood)) {
+                    self.sessions.remove(&id);
                 }
             } else {
                 let s = self.sessions.entry(id.clone()).or_insert_with(|| Session::new(id, now));
-                s.closed = false;
                 if !project.is_empty() {
                     s.project = project;
                 }
@@ -565,15 +558,7 @@ impl Pet {
             s.seen_at = Some(now);
             changed = true;
         }
-        self.forget_closed();
         changed
-    }
-
-    // Closed sessions whose ending is over: out of sight.
-    fn forget_closed(&mut self) {
-        for s in self.sessions.values_mut().filter(|s| s.closed && !is_ending(&s.mood)) {
-            s.hidden = true;
-        }
     }
 
     // Endings held for a number of seconds go back to rest when it is up:
@@ -587,7 +572,6 @@ impl Pet {
                 changed = true;
             }
         }
-        self.forget_closed();
         changed
     }
 
@@ -597,7 +581,7 @@ impl Pet {
     pub fn hide_quiet(&mut self, now: u64, hide_ms: u64) -> bool {
         let mut changed = false;
         for s in self.sessions.values_mut() {
-            let hidden = (s.closed && !is_ending(&s.mood)) || !is_shown(&s.mood, s.event_at, s.seen_at, now, hide_ms);
+            let hidden = !is_shown(&s.mood, s.event_at, s.seen_at, now, hide_ms);
             if s.hidden != hidden {
                 s.hidden = hidden;
                 changed = true;
@@ -617,7 +601,6 @@ impl Pet {
                 changed = true;
             }
         }
-        self.forget_closed();
         changed
     }
 
@@ -913,9 +896,9 @@ mod tests {
     }
 
     // A non-interactive run ends its session as it finishes (claude -p,
-    // codex exec): its ending stays until seen or held long enough.
+    // codex exec): kept, its ending seen, then at rest as any other.
     #[test]
-    fn a_session_closed_as_it_ended_stays_until_its_ending_is_over() {
+    fn a_session_closed_as_it_ended_is_kept() {
         let mut pet = Pet::default();
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start" })), 0, Hold::Secs(8));
         pet.apply(&msg(json!({ "session": "a", "mood": "done", "event": "turn-end", "reply": "PONG" })), 10, Hold::Secs(8));
@@ -923,21 +906,14 @@ mod tests {
         assert_eq!((pet.get(12)["mood"].as_str(), pet.get(12)["reply"].as_str()), (Some("done"), Some("PONG")));
         assert!(pet.transcript_of("a").is_some());
         assert!(pet.tick(10 + 8000, Hold::Secs(8)));
-        assert_eq!(pet.get(10 + 8001)["sessions"], 0);
-        // Out of sight, its reply still there to be asked for.
-        assert!(!pet.hide_quiet(10 + 9000, 0));
-        assert_eq!(pet.get(10 + 9001)["sessions"], 0);
+        assert_eq!((pet.get(10 + 8001)["mood"].as_str(), pet.get(10 + 8001)["sessions"].as_u64()), (Some("idle"), Some(1)));
+        // Its whole reply still there to be asked for.
         assert!(pet.transcript_of("a").is_some_and(|(_, _, reply)| reply == "PONG"));
-        // Seen first: gone then.
-        pet.apply(&msg(json!({ "session": "b", "mood": "error", "event": "turn-end" })), 20, Hold::Seen);
-        pet.apply(&msg(json!({ "session": "b", "mood": "idle", "event": "session-end" })), 21, Hold::Seen);
-        assert_eq!(pet.get(22)["sessions"], 1);
-        pet.seen(23, Hold::Seen);
-        assert_eq!(pet.get(24)["sessions"], 0);
         // Closed at work or at rest: gone at once, as before.
         pet.apply(&msg(json!({ "session": "c", "mood": "working" })), 30, Hold::Seen);
         pet.apply(&msg(json!({ "session": "c", "mood": "idle", "event": "session-end" })), 31, Hold::Seen);
-        assert_eq!(pet.get(32)["sessions"], 0);
+        assert!(pet.transcript_of("c").is_none());
+        assert_eq!(pet.get(32)["sessions"], 1);
     }
 
     #[test]

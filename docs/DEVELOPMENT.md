@@ -469,7 +469,7 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 
 各家非交互模式遇到要批准的工具（2026-10-17 实测，README 有表）：Claude Code `-p` 会触发 PermissionRequest hook，能在手机上回答，没人回答就当拒绝（`--permission-prompts` 默认 `host`，没有 host 时拒绝）；Codex `exec` 不问任何人（`-c approval_policy="on-request"` 也不问），默认只读沙盒；Grok 无头模式拒绝（但用户的 `config.toml` 若是 `always-approve` 就全部自动批准，所以手机交的一律加 `--permission-mode default`）；agy 无头模式拒绝。试法：暂存文件夹里请它执行 `echo … > probe.txt`，Claude Code 用 `--setting-sources project --settings` 把 hook 指到测试用的 47299，Codex 和 agy 的命令 hook 带着 `WAKUWAKU_PORT=47299`。
 
-**结束时关掉的会话**：非交互模式做完会马上送 `SessionEnd`（`claude -p`、`codex exec` 都是），原来一收到就删掉会话，手机上连「做完了」都看不到。现在会话在结束状态（做完、改好了、出错）时收到 `session-end`，只标 `closed`：结束状态照常停留到被看到或时间到，之后不显示但留着（还能读完整回复），跟其他闲置会话一样 2 小时后遗忘。不在结束状态时照旧立刻删掉。
+**结束时关掉的会话**：非交互模式做完会马上送 `SessionEnd`（`claude -p`、`codex exec` 都是），原来一收到就删掉会话，手机上连「做完了」都看不到，更点不到它的完整回复。现在会话在结束状态（做完、改好了、出错）时收到 `session-end` 就留着：结束状态照常停留，之后像其他会话一样闲置（`idleHideMin` 后不显示、2 小时后遗忘），这段时间都能读它的完整回复。不在结束状态时照旧立刻删掉。（先试过停留完就把它藏起来：Codex 跑 9 秒、停留 8 秒，手机还没看到就没了，2026-10-17 在模拟器上看到的。）
 
 实测（2026-10-17，另开一份在 47299）：没 token、手机访问关着、没 `x-wakuwaku` 头、没设文件夹的 agent、`cwd` 是 `C:\Windows` 或 `..`、空任务都被挡；同一 agent 第二个任务 409；四家各从 `/run` 跑一次都成功（Claude Code 的任务里有 `"`、`&`、`|`、`%PATH%`，原样到了它手上）；Codex 的会话结束后留着，`/reply` 读到它带 Markdown 的完整回复；Chrome 里点会话打开完整回复、从输入框交任务给 Codex。
 
