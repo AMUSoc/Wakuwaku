@@ -24,6 +24,11 @@ use crate::{island, now_ms, Shared};
 const BASE_W: f64 = 360.0;
 const BASE_H: f64 = 320.0;
 const CELL_H: f64 = 208.0;
+const CELL_W: f64 = 192.0;
+// Between two pets' feet on one screen: her width and this much more (logical px).
+const ROOM_GAP: f64 = 20.0;
+// A pet pushed aside walks there this fast (ms a logical px; her own walks, 18).
+const PUSH_MS_PER_PX: f64 = 6.0;
 // The cursor further than this (logical px) from her face does not catch her eye.
 const LOOK_FAR: f64 = 900.0;
 // Two clicks on her this close together are a double-click.
@@ -59,6 +64,9 @@ pub struct Win {
     drag: Option<Drag>,
     walk_gen: u64,
     walking: bool,
+    // Where her feet are headed on a walk (x, physical px): the others make
+    // room for her there, not where she is on the way.
+    heading: Option<i32>,
     flying: bool,
     last_click: Option<Instant>,
     // The session she was showing when the pointer came over her (seeing it
@@ -249,6 +257,122 @@ fn saved_spot(sh: &Shared, agent: &str) -> (i32, i32) {
     sh.screens().clamp(spot, size)
 }
 
+// --- Room between them ----------------------------------------------------------------
+
+// Where her feet are on the screen (their middle, physical px), the screen
+// they are on, and whether she may be moved (not with a panel or a bubble up).
+struct Feet {
+    x: i32,
+    mon: (i32, i32, i32, i32),
+    sf: f64,
+    fixed: bool,
+}
+
+// Where she is now, or (planning: headed) where she will be.
+fn feet(sh: &Shared, agent: &str, screens: &crate::screen::Screens, headed: bool) -> Option<Feet> {
+    let scale = scale(sh);
+    let (x, y, fixed) = {
+        let w = sh.pets.of(agent).lock().unwrap();
+        if !w.shown {
+            return None;
+        }
+        let (x, y) = (w.pos.0 + w.size.0 / 2 + w.shift, w.bottom(scale));
+        let x = if headed { w.heading.unwrap_or(x) } else { x };
+        (x, y, w.panel.is_some())
+    };
+    let a = screens.near(x, y - 1)?;
+    Some(Feet { x, mon: a.mon, sf: a.sf, fixed })
+}
+
+// The other pets' feet on the same screen as hers (each taken on its own:
+// no two locks held).
+fn others_by(sh: &Shared, agent: &str, me: &Feet, screens: &crate::screen::Screens, headed: bool) -> Vec<(&'static str, i32)> {
+    crate::data::AGENTS
+        .into_iter()
+        .filter(|a| *a != agent)
+        .filter_map(|a| feet(sh, a, screens, headed).filter(|f| f.mon == me.mon).map(|f| (a, f.x)))
+        .collect()
+}
+
+fn xs(others: &[(&str, i32)]) -> Vec<i32> {
+    others.iter().map(|(_, x)| *x).collect()
+}
+
+// How far apart two pets' feet stay: her width and a gap, in her screen's px.
+fn room(scale: f64, sf: f64) -> i32 {
+    ((CELL_W * scale + ROOM_GAP) * sf).round() as i32
+}
+
+// Walking from one spot to another (her feet's x): the farthest she gets
+// without coming nearer than room to another in her way. Walking away from
+// one already too near is free; walking into it, she stays.
+pub fn clip_walk(from: i32, to: i32, others: &[i32], room: i32) -> i32 {
+    let mut to = to;
+    for &o in others {
+        if to > from && o > from {
+            to = to.min((o - room).max(from));
+        } else if to < from && o < from {
+            to = to.max((o + room).min(from));
+        }
+    }
+    to
+}
+
+// Set down too near another: the nearest spot room away from every other,
+// within lo..=hi (her feet's x on her screen), reached without passing one
+// clear of her (one she is on she gets off of either way). To the left if
+// there is room there, else to the right; None: nowhere.
+pub fn free_spot(x: i32, others: &[i32], room: i32, (lo, hi): (i32, i32)) -> Option<i32> {
+    let fits = |at: i32| (lo..=hi).contains(&at) && others.iter().all(|&o| (at - o).abs() >= room);
+    if fits(x) {
+        return Some(x);
+    }
+    let passes = |at: i32| others.iter().any(|&o| (o - x).abs() >= room && o > at.min(x) && o < at.max(x));
+    let spots = || others.iter().flat_map(|&o| [o - room, o + room]).filter(|&at| fits(at) && !passes(at));
+    let left = spots().filter(|&at| at < x).max();
+    let right = spots().filter(|&at| at > x).min();
+    left.or(right)
+}
+
+// Set down (let go, carried out, back as she starts): too near another on
+// her screen, she walks aside to a free spot, leftwards if she can. Not
+// with a panel or a bubble up: then the others keep away from her.
+pub fn make_room(sh: &Arc<Shared>, agent: &str) {
+    make_room_again(sh, agent, 3);
+}
+
+// Set down at the same moment as another (as they start), each may have
+// planned before the other went: once there, looked at again, so often.
+fn make_room_again(sh: &Arc<Shared>, agent: &str, tries: u32) {
+    let screens = sh.screens();
+    let Some(me) = feet(sh, agent, &screens, false) else { return };
+    if me.fixed || tries == 0 {
+        return;
+    }
+    // Room among the others where they are headed.
+    let others = xs(&others_by(sh, agent, &me, &screens, true));
+    let scale = scale(sh);
+    let room = room(scale, me.sf);
+    let Some(a) = screens.near(me.x, sh.pets.of(agent).lock().unwrap().bottom(scale) - 1) else { return };
+    let half = (CELL_W * scale * me.sf / 2.0).round() as i32;
+    let Some(spot) = free_spot(me.x, &others, room, (a.x + half, a.x + a.w - half)) else { return };
+    if spot == me.x {
+        return;
+    }
+    sh.log(&format!("pet: {agent} set down too near another, walks {} px aside", spot - me.x));
+    let dx = (spot - me.x) as f64 / me.sf;
+    // Headed there from now: the others plan around it.
+    sh.pets.of(agent).lock().unwrap().heading = Some(spot);
+    let sh = sh.clone();
+    let agent = agent.to_string();
+    std::thread::spawn(move || {
+        walk_as(&sh, &agent, dx, dx.abs() * PUSH_MS_PER_PX, true);
+        // Headed nowhere now, whether she got there or never set off.
+        sh.pets.of(&agent).lock().unwrap().heading = None;
+        make_room_again(&sh, &agent, tries - 1);
+    });
+}
+
 // --- The window ---------------------------------------------------------------------
 
 pub fn create(sh: &Shared, agent: &str) -> tauri::Result<()> {
@@ -331,7 +455,7 @@ pub fn open_or_close(sh: &Arc<Shared>, agent: &str) {
 }
 
 // Her page has its listeners up: draw and show (her home says hello).
-pub fn ready(sh: &Shared, agent: &str) {
+pub fn ready(sh: &Arc<Shared>, agent: &str) {
     sh.log("pet: page ready");
     sh.pets.of(agent).lock().unwrap().ready = true;
     sh.redraw();
@@ -343,6 +467,8 @@ pub fn ready(sh: &Shared, agent: &str) {
         }
     }
     apply_visibility(sh, agent);
+    // Back where she was left: not on another.
+    make_room(sh, agent);
 }
 
 pub fn apply_visibility(sh: &Shared, agent: &str) {
@@ -755,6 +881,10 @@ pub fn let_go(sh: &Arc<Shared>, agent: &str) {
     if is_double {
         return double_click(sh, agent);
     }
+    // Set down on another: aside.
+    if drag.moved || drag.carried {
+        make_room(sh, agent);
+    }
     // A click: a jump. Carried out of the island: she lands with one.
     if !drag.moved || drag.carried {
         let _ = sh.app.emit_to(label(agent), "pet:react", json!({ "react": "jump" }));
@@ -897,36 +1027,66 @@ pub fn hide_now(sh: &Shared, agent: &str) {
 // A short walk: move the window by dx (logical) over ms, stopping at the
 // screen edge. True when it got there, false when stopped on the way.
 pub fn walk(sh: &Shared, agent: &str, dx: f64, ms: f64) -> bool {
+    walk_as(sh, agent, dx, ms, false)
+}
+
+// A walk; pushed aside (make_room), her page shown her running (pet:drag,
+// as she flies home), her own walks being her page's.
+fn walk_as(sh: &Shared, agent: &str, dx: f64, ms: f64, shown_running: bool) -> bool {
     if !is_shown(sh, agent) {
         return false;
     }
     let screens = sh.screens();
+    let scale = scale(sh);
+    let Some(me) = feet(sh, agent, &screens, false) else { return false };
+    let room = room(scale, me.sf);
+    // Where she would get to: on the screen, and short of the others in her
+    // way. Pushed aside, not those she is on: she is getting off of them.
+    let on: Vec<&str> = if shown_running { others_by(sh, agent, &me, &screens, false).into_iter().filter(|(_, x)| (x - me.x).abs() < room).map(|(a, _)| a).collect() } else { Vec::new() };
+    let in_way = |sh: &Shared| xs(&others_by(sh, agent, &me, &screens, false).into_iter().filter(|(a, _)| !on.contains(a)).collect::<Vec<_>>());
+    let others = in_way(sh);
     let (gen, x0, y0, target) = {
         let mut w = sh.pets.of(agent).lock().unwrap();
         if !w.shown || w.drag.is_some() || w.flying || w.panel.is_some() {
             return false;
         }
-        w.walk_gen += 1;
-        w.walking = true;
         let (x0, y0) = w.pos;
         let target = screens.clamp((x0 + (dx * w.sf()).round() as i32, y0), w.size).0;
+        let target = x0 + clip_walk(me.x, me.x + (target - x0), &others, room) - me.x;
+        if target == x0 {
+            w.heading = None;
+            return false;
+        }
+        w.walk_gen += 1;
+        w.walking = true;
+        w.heading = Some(me.x + (target - x0));
         (w.walk_gen, x0, y0, target)
     };
+    let dir = (target - x0).signum();
     let started = Instant::now();
     let ms = ms.max(1.0);
     let arrived = loop {
         std::thread::sleep(Duration::from_millis(16));
         let t = (started.elapsed().as_secs_f64() * 1000.0 / ms).min(1.0);
+        // The others as they are now (they walk too): one in her way, she stops.
+        let others = in_way(sh);
         let p = {
             let mut w = sh.pets.of(agent).lock().unwrap();
             if w.walk_gen != gen || w.drag.is_some() || w.flying {
                 break false;
             }
             let p = screens.clamp((x0 + ((target - x0) as f64 * t).round() as i32, y0), w.size);
+            let (from, to) = (w.pos.0 + w.size.0 / 2 + w.shift, p.0 + w.size.0 / 2 + w.shift);
+            if clip_walk(from, to, &others, room) != to {
+                break false;
+            }
             w.pos = p;
             p
         };
         place(sh, agent, p);
+        if shown_running {
+            let _ = sh.app.emit_to(label(agent), "pet:drag", dir);
+        }
         if t >= 1.0 {
             break true;
         }
@@ -935,10 +1095,57 @@ pub fn walk(sh: &Shared, agent: &str, dx: f64, ms: f64) -> bool {
         let mut w = sh.pets.of(agent).lock().unwrap();
         if w.walk_gen == gen {
             w.walking = false;
+            w.heading = None;
         }
+    }
+    if shown_running {
+        let _ = sh.app.emit_to(label(agent), "pet:drag-end", ());
     }
     remember(sh, agent);
     arrived
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_walk_stops_short_of_another_in_her_way() {
+        // Room 126 (her width at 0.55, 20 apart). Another at 1000.
+        assert_eq!(room(0.55, 1.0), 126);
+        // Walking right towards it: as far as 874.
+        assert_eq!(clip_walk(700, 950, &[1000], 126), 874);
+        // Not that far: all the way.
+        assert_eq!(clip_walk(700, 800, &[1000], 126), 800);
+        // Leftwards, one behind her (to the right) is no matter.
+        assert_eq!(clip_walk(700, 500, &[1000], 126), 500);
+        // Already too near: walking into it, she stays; away, free.
+        assert_eq!(clip_walk(950, 990, &[1000], 126), 950);
+        assert_eq!(clip_walk(950, 800, &[1000], 126), 800);
+        // Two in the way: the nearer stops her.
+        assert_eq!(clip_walk(500, 1500, &[1300, 900], 126), 774);
+        assert_eq!(clip_walk(1500, 0, &[1300, 900], 126), 1426);
+    }
+
+    #[test]
+    fn set_down_on_another_she_goes_aside_leftwards_first() {
+        let bounds = (60, 2500);
+        // Clear: where she is.
+        assert_eq!(free_spot(500, &[1000], 126, bounds), Some(500));
+        // On one, either side of it: leftwards, room away from it.
+        assert_eq!(free_spot(950, &[1000], 126, bounds), Some(874));
+        assert_eq!(free_spot(1050, &[1000], 126, bounds), Some(874));
+        // No room left of it (the screen's edge): to the right.
+        assert_eq!(free_spot(100, &[120], 126, bounds), Some(246));
+        // On two at once: left of both.
+        assert_eq!(free_spot(1050, &[1100, 980], 126, bounds), Some(854));
+        assert_eq!(free_spot(1020, &[1100, 1060], 126, bounds), Some(934));
+        // On one, and another clear of her to the left, too near it for her
+        // between them: not past that one, so to the right.
+        assert_eq!(free_spot(500, &[550, 300], 126, bounds), Some(676));
+        // Nowhere on the screen.
+        assert_eq!(free_spot(100, &[80, 200], 126, (60, 210)), None);
+    }
 }
 
 pub fn stop_walking(sh: &Shared, agent: &str) {
