@@ -9,12 +9,15 @@
 // and what is said is neutral ("Dragon respawns in 1:00", never "ward now").
 //
 // Each agent's pet a part (data.rs AGENTS):
-//   claude  the game's clock, and an objective about to spawn (a minute before)
-//   grok    the objectives' respawn countdowns, and her own team's summoner spells
+//   claude  the next objective to spawn, one line (warned from a minute before)
+//   grok    the objectives' respawn countdowns, and her own team's summoner
+//           spells, by fixed short names (spell_short), whatever the client's language
 //   codex   the other team's key items as they get them; and as she buys
 //           something or dies, her own CS a minute, KDA and gold (her own
 //           numbers only: Riot's approved "showing (self) player stats");
 //           in champion select, out of a game, her rank and her party's (lcu.rs)
+//   agy     every 5 minutes the two teams' kills, Dragons and towers so far
+//           (the events, tally); while she is dead, the time to her respawn
 //
 // Looked for every 5 s (the game's process, by name: League of Legends.exe),
 // read once a second in a game; done, all as it was. The Live Client's
@@ -63,6 +66,10 @@ pub struct Game {
     pub news: Vec<Value>,
     // Her own numbers as she last bought something or died (coach_of).
     pub coach: Option<Value>,
+    // The two teams' kills, Dragons and towers so far (tally); when she
+    // respawns (game seconds), while dead.
+    pub tally: Value,
+    pub respawn: Option<f64>,
 }
 
 static GAME: Mutex<Option<Game>> = Mutex::new(None);
@@ -82,6 +89,7 @@ pub fn view(agent: &str) -> Value {
         "claude" => json!({ "role": "clock", "clock": clock, "objectives": g.objectives }),
         "grok" => json!({ "role": "objectives", "clock": clock, "objectives": g.objectives, "allies": g.allies }),
         "codex" => json!({ "role": "intel", "clock": clock, "news": g.news, "coach": g.coach }),
+        "agy" => json!({ "role": "summary", "clock": clock, "tally": g.tally, "respawn": g.respawn }),
         _ => Value::Null,
     }
 }
@@ -129,15 +137,37 @@ pub fn allies(players: &[Value], me: &str) -> Vec<Value> {
         .iter()
         .filter(|p| p["team"] == team)
         .map(|p| {
-            let spell = |key: &str| p["summonerSpells"][key]["displayName"].as_str().unwrap_or("").to_string();
+            let spell = |key: &str| spell_short(&p["summonerSpells"][key]);
+            // No role (ARAM, a practice game): "NONE" or none at all.
+            let position = p["position"].as_str().filter(|r| !r.is_empty() && *r != "NONE").unwrap_or("");
             json!({
-                "position": p["position"].as_str().unwrap_or(""),
+                "position": position,
                 "champion": p["championName"].as_str().unwrap_or(""),
                 "spells": [spell("summonerSpellOne"), spell("summonerSpellTwo")],
                 "me": is_me(p, me),
             })
         })
         .collect()
+}
+
+// A summoner spell by a short name of its own, whatever the client's
+// language (its displayName is in it: Japanese on a Japanese client): by its
+// rawDescription, which names it as the game does (GeneratedTip_SummonerSpell_
+// SummonerFlash_Description). One not known: as the client names it.
+pub fn spell_short(spell: &Value) -> String {
+    const SHORT: [(&str, &str); 9] = [
+        ("SummonerFlash", "閃"),
+        ("SummonerTeleport", "傳"),
+        ("SummonerDot", "點"),
+        ("Smite", "懲"),
+        ("SummonerHeal", "治"),
+        ("SummonerBarrier", "盾"),
+        ("SummonerExhaust", "弱"),
+        ("SummonerBoost", "淨"),
+        ("SummonerHaste", "疾"),
+    ];
+    let raw = spell["rawDescription"].as_str().unwrap_or("");
+    SHORT.iter().find(|(key, _)| raw.contains(key)).map_or_else(|| spell["displayName"].as_str().unwrap_or("").to_string(), |(_, short)| short.to_string())
 }
 
 // The other team's key items new since the last look (seen: each player's
@@ -160,16 +190,63 @@ pub fn item_news(seen: &mut HashMap<String, HashSet<u64>>, players: &[Value], me
     news
 }
 
-// Whether to show her own numbers now: something new in her items (bought),
-// or she just died. Her items not known before (the first look): no.
-pub fn coach_moment(before: Option<&HashSet<u64>>, items: &HashSet<u64>, was_dead: bool, dead: bool) -> Option<&'static str> {
+// Whether to show her own numbers now: she bought something (more of an
+// item, or a new one, and her gold down with it), or she just died. Her items
+// all changed with her gold as it was is no buying: a champion who takes
+// another's form and items (Viego) or turns into another. Her items not
+// known before (the first look): no.
+pub fn coach_moment(before: Option<(&HashMap<u64, usize>, f64)>, items: &HashMap<u64, usize>, gold: f64, was_dead: bool, dead: bool) -> Option<&'static str> {
     if dead && !was_dead {
-        Some("dead")
-    } else if before.is_some_and(|b| items.iter().any(|i| !b.contains(i))) {
-        Some("bought")
-    } else {
-        None
+        return Some("dead");
     }
+    let (had, gold_before) = before?;
+    let more = items.iter().any(|(id, n)| *n > had.get(id).copied().unwrap_or(0));
+    (more && gold < gold_before - 0.5).then_some("bought")
+}
+
+// Her items, each by how many she has.
+fn counted(player: &Value) -> HashMap<u64, usize> {
+    let mut items = HashMap::new();
+    for id in player["items"].as_array().into_iter().flatten().filter_map(|i| i["itemID"].as_u64()) {
+        *items.entry(id).or_insert(0) += 1;
+    }
+    items
+}
+
+// The two teams' kills, Dragons and towers from the events so far, hers
+// ("us") and the other ("them"). A kill counted by whose champion died; a
+// Dragon by whose player took it; a tower by whose it was (Turret_T1_...:
+// the blue side's, ORDER's).
+pub fn tally(events: &[Value], players: &[Value], me: &str) -> Value {
+    let team_of = |name: &str| {
+        players
+            .iter()
+            .find(|p| ["riotId", "summonerName", "riotIdGameName"].iter().any(|k| p[*k] == name))
+            .and_then(|p| p["team"].as_str())
+            .map(str::to_string)
+    };
+    let mine = players.iter().find(|p| is_me(p, me)).and_then(|p| p["team"].as_str()).unwrap_or("ORDER").to_string();
+    let (mut us, mut them) = ([0u64; 3], [0u64; 3]);
+    let mut count = |team: Option<String>, against: bool, i: usize| {
+        if let Some(team) = team {
+            let ours = (team == mine) != against;
+            if ours { us[i] += 1 } else { them[i] += 1 }
+        }
+    };
+    for e in events {
+        let s = |k: &str| e[k].as_str().unwrap_or("").to_string();
+        match e["EventName"].as_str().unwrap_or("") {
+            "ChampionKill" => count(team_of(&s("VictimName")), true, 0),
+            "DragonKill" => count(team_of(&s("KillerName")), false, 1),
+            "TurretKilled" => {
+                let t = s("TurretKilled");
+                let owner = if t.contains("_T1_") { Some("ORDER".to_string()) } else if t.contains("_T2_") { Some("CHAOS".to_string()) } else { None };
+                count(owner, true, 2);
+            }
+            _ => {}
+        }
+    }
+    json!({ "us": { "kills": us[0], "dragons": us[1], "towers": us[2] }, "them": { "kills": them[0], "dragons": them[1], "towers": them[2] } })
 }
 
 // Her own numbers: CS and CS a minute, kills, deaths, assists, gold.
@@ -214,11 +291,13 @@ struct Reading {
     nth: u64,
     seen: HashMap<String, HashSet<u64>>,
     news: Vec<Value>,
-    // Her own: gold, items and whether dead as last read, her numbers shown last.
+    // Her own: gold, items (each by how many) and whether dead as last read,
+    // her numbers shown last, when she respawns while dead.
     gold: f64,
-    items: Option<HashSet<u64>>,
+    items: Option<(HashMap<u64, usize>, f64)>,
     dead: bool,
     coach: Option<Value>,
+    respawn: Option<f64>,
 }
 
 fn read(agent: &ureq::Agent, base: &str, r: &mut Reading) -> Option<Game> {
@@ -237,7 +316,7 @@ fn read(agent: &ureq::Agent, base: &str, r: &mut Reading) -> Option<Game> {
     }
     let events = events["Events"].as_array().cloned().unwrap_or_default();
     let time = stats["gameTime"].as_f64().unwrap_or(0.0);
-    let (objectives, allies) = (objectives(&events), allies(&r.players, &r.me));
+    let (objectives, allies, tally) = (objectives(&events), allies(&r.players, &r.me), tally(&events, &r.players, &r.me));
     if nth % 5 == 0 {
         let fresh = item_news(&mut r.seen, &r.players, &r.me);
         for mut n in fresh {
@@ -248,16 +327,18 @@ fn read(agent: &ureq::Agent, base: &str, r: &mut Reading) -> Option<Game> {
         r.news.drain(..over);
         // Her own numbers, as she buys something or dies.
         if let Some(mine) = r.players.iter().find(|p| is_me(p, &r.me)).cloned() {
-            let items: HashSet<u64> = mine["items"].as_array().into_iter().flatten().filter_map(|i| i["itemID"].as_u64()).collect();
+            let items = counted(&mine);
             let dead = mine["isDead"].as_bool().unwrap_or(false);
-            if let Some(why) = coach_moment(r.items.as_ref(), &items, r.dead, dead) {
+            if let Some(why) = coach_moment(r.items.as_ref().map(|(i, g)| (i, *g)), &items, r.gold, r.dead, dead) {
                 r.coach = Some(coach_of(&mine, r.gold, time, why));
             }
-            r.items = Some(items);
+            // While dead: when she is back (her respawn timer as read, on from now).
+            r.respawn = dead.then(|| time + mine["respawnTimer"].as_f64().unwrap_or(0.0));
+            r.items = Some((items, r.gold));
             r.dead = dead;
         }
     }
-    Some(Game { time, at: now_ms(), objectives, allies, news: r.news.clone(), coach: r.coach.clone() })
+    Some(Game { time, at: now_ms(), objectives, allies, news: r.news.clone(), coach: r.coach.clone(), tally, respawn: r.respawn })
 }
 
 // Whether a program of this name runs (a snapshot of the processes: a few ms).
@@ -321,7 +402,7 @@ fn set(sh: &Shared, game: Option<Game>) {
         let mut kept = GAME.lock().unwrap_or_else(|e| e.into_inner());
         // The clock alone moving on: the pages run it themselves.
         let same = match (&*kept, &game) {
-            (Some(a), Some(b)) => a.objectives == b.objectives && a.allies == b.allies && a.news == b.news && a.coach == b.coach && (b.time - a.time).abs() < 30.0,
+            (Some(a), Some(b)) => a.objectives == b.objectives && a.allies == b.allies && a.news == b.news && a.coach == b.coach && a.tally == b.tally && a.respawn == b.respawn && (b.time - a.time).abs() < 30.0,
             (None, None) => true,
             _ => false,
         };
@@ -454,16 +535,26 @@ mod tests {
 
     #[test]
     fn her_own_numbers_as_she_buys_or_dies() {
-        let set = |ids: &[u64]| ids.iter().copied().collect::<HashSet<u64>>();
+        let set = |ids: &[u64]| {
+            let mut m = HashMap::new();
+            for id in ids {
+                *m.entry(*id).or_insert(0usize) += 1;
+            }
+            m
+        };
         // The first look: nothing to compare with.
-        assert_eq!(coach_moment(None, &set(&[1055]), false, false), None);
-        // Something new: bought. The same, or one sold: no.
-        assert_eq!(coach_moment(Some(&set(&[1055])), &set(&[1055, 1001]), false, false), Some("bought"));
-        assert_eq!(coach_moment(Some(&set(&[1055, 1001])), &set(&[1055, 1001]), false, false), None);
-        assert_eq!(coach_moment(Some(&set(&[1055, 1001])), &set(&[1055]), false, false), None);
+        assert_eq!(coach_moment(None, &set(&[1055]), 500.0, false, false), None);
+        // Something new and her gold down: bought. Two of one where there was one: bought.
+        assert_eq!(coach_moment(Some((&set(&[1055]), 900.0)), &set(&[1055, 1001]), 600.0, false, false), Some("bought"));
+        assert_eq!(coach_moment(Some((&set(&[1036]), 900.0)), &set(&[1036, 1036]), 550.0, false, false), Some("bought"));
+        // The same, or one sold (gold up): no.
+        assert_eq!(coach_moment(Some((&set(&[1055, 1001]), 600.0)), &set(&[1055, 1001]), 620.0, false, false), None);
+        assert_eq!(coach_moment(Some((&set(&[1055, 1001]), 600.0)), &set(&[1055]), 840.0, false, false), None);
+        // Viego takes another's form: all his items another's, his gold as it was (on with the clock): no.
+        assert_eq!(coach_moment(Some((&set(&[1055, 3006]), 700.0)), &set(&[3031, 3094, 3006]), 712.0, false, false), None);
         // Just died: dead; still dead, no more.
-        assert_eq!(coach_moment(Some(&set(&[1055])), &set(&[1055]), false, true), Some("dead"));
-        assert_eq!(coach_moment(Some(&set(&[1055])), &set(&[1055]), true, true), None);
+        assert_eq!(coach_moment(Some((&set(&[1055]), 600.0)), &set(&[1055]), 600.0, false, true), Some("dead"));
+        assert_eq!(coach_moment(Some((&set(&[1055]), 600.0)), &set(&[1055]), 600.0, true, true), None);
         let me = json!({ "scores": { "creepScore": 87, "kills": 3, "deaths": 1, "assists": 4 } });
         // 87 CS at 12:00: 7.3 a minute.
         assert_eq!(coach_of(&me, 1234.6, 720.0, "bought"), json!({ "why": "bought", "at": 720.0, "cs": 87, "perMin": 7.3, "k": 3, "d": 1, "a": 4, "gold": 1235 }));
@@ -482,8 +573,47 @@ mod tests {
         ];
         let got = allies(&players, "Me#TW1");
         assert_eq!(got.len(), 2);
+        // No rawDescription: as the client names them.
         assert_eq!(got[0], json!({ "position": "MIDDLE", "champion": "Ahri", "spells": ["Flash", "Ignite"], "me": true }));
         assert_eq!(got[1]["spells"], json!(["Flash", "Teleport"]));
         assert!(!got.iter().any(|p| p["champion"] == "Zed"));
+    }
+
+    #[test]
+    fn spells_by_short_names_whatever_the_client_s_language_and_no_none_role() {
+        // A Japanese client: its names in Japanese, its rawDescription as the game names them.
+        let jp = |name: &str, key: &str| json!({ "displayName": name, "rawDescription": format!("GeneratedTip_SummonerSpell_{key}_Description") });
+        assert_eq!(spell_short(&jp("フラッシュ", "SummonerFlash")), "閃");
+        assert_eq!(spell_short(&jp("テレポート", "S12_SummonerTeleportUpgrade")), "傳");
+        assert_eq!(spell_short(&jp("スマイト", "S5_SummonerSmitePlayerGanker")), "懲");
+        assert_eq!(spell_short(&jp("クレンズ", "SummonerBoost")), "淨");
+        assert_eq!(spell_short(&jp("ゴースト", "SummonerHaste")), "疾");
+        assert_eq!(spell_short(&jp("イグナイト", "SummonerDot")), "點");
+        assert_eq!(spell_short(&jp("マーク", "SummonerSnowball")), "マーク");
+        // No role (ARAM): none shown.
+        let aram = json!([{ "riotId": "Me#JP1", "team": "ORDER", "position": "NONE", "championName": "Viego",
+                            "summonerSpells": { "summonerSpellOne": jp("フラッシュ", "SummonerFlash"), "summonerSpellTwo": jp("マーク", "SummonerSnowball") } },
+                          { "riotId": "Mate#JP1", "team": "ORDER", "position": "", "championName": "Lux",
+                            "summonerSpells": { "summonerSpellOne": jp("フラッシュ", "SummonerFlash"), "summonerSpellTwo": jp("バリア", "SummonerBarrier") } }]);
+        let got = allies(aram.as_array().unwrap(), "Me#JP1");
+        assert_eq!((got[0]["position"].as_str(), got[1]["position"].as_str()), (Some(""), Some("")));
+        assert_eq!(got[1]["spells"], json!(["閃", "盾"]));
+    }
+
+    #[test]
+    fn the_two_teams_kills_dragons_and_towers() {
+        let p = |id: &str, name: &str, team: &str| json!({ "riotId": id, "riotIdGameName": name, "summonerName": name, "team": team });
+        let players = vec![p("Me#TW1", "Me", "ORDER"), p("Mate#TW1", "Mate", "ORDER"), p("Foe#KR1", "Foe", "CHAOS")];
+        let kill = |victim: &str| { let mut e = at("ChampionKill", 100.0); e["VictimName"] = json!(victim); e };
+        let mut ours = at("DragonKill", 400.0);
+        ours["KillerName"] = json!("Mate");
+        let mut tower = at("TurretKilled", 600.0);
+        tower["TurretKilled"] = json!("Turret_T2_L_03_A");
+        let mut lost = at("TurretKilled", 700.0);
+        lost["TurretKilled"] = json!("Turret_T1_C_05_A");
+        let events = vec![kill("Foe"), kill("Foe"), kill("Me"), ours, tower, lost.clone(), lost];
+        assert_eq!(tally(&events, &players, "Me#TW1"), json!({ "us": { "kills": 2, "dragons": 1, "towers": 1 }, "them": { "kills": 1, "dragons": 0, "towers": 2 } }));
+        // Seen from the other side: the other way round.
+        assert_eq!(tally(&events, &players, "Foe#KR1")["us"], json!({ "kills": 1, "dragons": 0, "towers": 2 }));
     }
 }

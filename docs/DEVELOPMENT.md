@@ -436,12 +436,13 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 只用 Riot 官方的接口：对局中读游戏自己开在本机的 Live Client Data API（`https://127.0.0.1:2999/liveclientdata/…`：`gamestats`、`eventdata`、`playerlist`、`activeplayer`），选英雄时读客户端的 LCU（`LeagueClientUx.exe` 旁边的 `lockfile` 给端口和密码，Basic auth `riot:<密码>`）和 Riot API（`league-v4 entries/by-puuid`，用户自己的个人金钥，设置 `riotApiKey`）。不读游戏内存、不注入、不替玩家操作、不截图识别。两个本机接口用 Riot 自己的证书，TLS 库对不上 127.0.0.1，不验证（流量不离开本机）；Riot API 照常验证。
 
 - **Riot 的政策**（developer.riotgames.com/docs/lol 的 Game Integrity）：不能提供游戏里看不到、有优势的信息，不能替玩家做决定，不能找出游戏刻意隐藏的玩家。所以不做敌方召唤师技能、大招计时；说的都是中性的事实（「小龙 0:42 后刷新」，不说「去插眼」）；选英雄只查自己和组队的队友（Solo/Duo 里别的队友被隐藏，`lcu::to_look_up` 只认自己和 lobby 成员的 PUUID）。Overwolf 的 Riot 合规指南更严，明确禁止敌方召唤师技能计时和指挥玩家行动的通知。
-- **分工**（`lol::view`，放进每只桌宠的 `pet:update` 的 `game`）：claude 游戏时间、一分钟内要刷新的目标；grok 小龙 / 男爵 / 先锋的刷新倒数（按剩余时间排，最多四行）、我方五人带的召唤师技能（Live Client 没有任何人的冷却，只有带了哪两个）；codex 对方新出的关键装备（`KEY_ITEMS`，名字用游戏给的、跟客户端语言）、出装或阵亡时自己的 CS / 每分钟、KDA、金钱（Live Client 没有地图坐标，「回泉水」只能用「出了新装」代替），选英雄时自己和组队队友的段位。页面自己用 `gameTime` + 读到时的时间往下走钟，只有内容变了（或 30 秒）才重画。
+- **分工**（`lol::view`，放进每只桌宠的 `pet:update` 的 `game`）：claude 最近一个要刷新的目标一行（一分钟内警示色，没有要刷新的就收起）；grok 小龙 / 男爵 / 先锋的刷新倒数（按剩余时间排，最多三行）、我方五人一人一行「英雄 闪／传」（Live Client 没有任何人的冷却，只有带了哪两个；技能名按 `rawDescription` 里游戏自己的名字对成固定的简称 `spell_short`，客户端是日文也一样；英雄名照客户端给的；`position` 是 `NONE` 或空的不显示），泡泡宽 300px；codex 对方新出的关键装备（`KEY_ITEMS`，名字用游戏给的、跟客户端语言）、出装或阵亡时自己的 CS / 每分钟、KDA、金钱，选英雄时自己和组队队友的段位；agy 每 5 分钟显示 15 秒双方的击杀（按死的是谁的英雄算）、小龙、塔（`Turret_T1_…` 是蓝方 ORDER 的塔）（`lol::tally`，从 eventdata 累计），阵亡时复活倒数（playerlist 的 `respawnTimer`）。
+- **买装的判断**（`coach_moment`）：自己的装备数量变多或多了新的 ID，**而且** `currentGold` 同时减少，才算买了。维尔戈的被动附身会把整套装备换成对方的、金钱不变，变身换装的英雄也一样，都不算（第一场真实对局测出来的，2026-10-16）。Live Client 没有地图坐标，「回泉水」只能用「买了东西」代替。页面自己用 `gameTime` + 读到时的时间往下走钟，只有内容变了（或 30 秒）才重画。
 - **目标的时间**（2026 赛季：小龙 5:00 首刷、之后每次被杀 5:00 后，远古龙 6:00 后；男爵 20:00 首刷、6:00 后；先锋 14:00 一次）是 `lol.rs` 的常量，没从游戏读到，换赛季要对一下。
 - **侦测**：每 5 秒用进程快照找 `League of Legends.exe`（几毫秒）；对局中每秒读一次（玩家列表每 5 次读一次）。连不上三次或进程没了就当对局结束，全部恢复。没有对局时，看 `LeagueClientUx.exe` 的 gameflow phase，选英雄（`ChampSelect`）时才读 session、查段位（每个 PUUID 查一次）。
 - **全屏例外**：对局中，`fullscreen.rs` 不把 `league of legends.exe` 当全屏，桌宠不躲；游戏要用无边框模式（README）。
 - **设置**：「通用」页「英雄联盟对局助手」开关（`lol`）、「Riot API 金钥」（`riotApiKey`，只送 Riot API，不进日志和崩溃报告）。
-- **测试**：`tools/lol_fake.py` 假装 Live Client、LCU 和 Riot API（`WAKUWAKU_LOL_URL`、`WAKUWAKU_LCU_URL`、`WAKUWAKU_RIOT_API_URL`），可以加事件、改时间、换装备、换 phase；`src-tauri/fixtures/lol/events.json` 是 Riot 官方的事件样本（时间都是 0，测试里另给时间）。还没在真的对局里测过。
+- **测试**：`tools/lol_fake.py` 假装 Live Client、LCU 和 Riot API（`WAKUWAKU_LOL_URL`、`WAKUWAKU_LCU_URL`、`WAKUWAKU_RIOT_API_URL`），可以加事件、改时间、换装备、换 phase；`src-tauri/fixtures/lol/events.json` 是 Riot 官方的事件样本（时间都是 0，测试里另给时间）。2026-10-16 第一场真实对局（日文客户端）测出：维尔戈附身被当成买装、`position` 为 `NONE` 时显示出键名、技能名是客户端的日文，都已改；台服用语（预示者、巴龙、长老龙，在 zh-TW 里）。
 
 ## 踩过的坑
 

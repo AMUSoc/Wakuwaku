@@ -241,6 +241,10 @@ body {
   display: none;
 }
 
+#game.wide {
+  width: 300px;
+}
+
 #game > span {
   display: block;
   overflow: hidden;

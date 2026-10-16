@@ -269,11 +269,20 @@ function fillGame() {
   const line = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text })
   const at = g.clock ? gameNow(g) : 0
   const lines = []
+  // Claude's: the next objective to spawn, one line, warned from a minute
+  // before; none to come, no strip.
   if (g.role === 'clock') {
-    lines.push(line('clock', t(lang, 'lol.clock', { time: mmss(at) })))
-    for (const o of g.objectives || []) {
-      const left = o.at - at
-      if (left > 0 && left <= 60) lines.push(line('timer soon', t(lang, 'lol.soon', { what: t(lang, `lol.${o.what}`), time: mmss(left) })))
+    const next = (g.objectives || []).map(o => ({ ...o, left: o.at - at })).filter(o => o.left > 0).sort((a, b) => a.left - b.left)[0]
+    if (next) lines.push(line(`timer${next.left <= 60 ? ' soon' : ''}`, t(lang, 'lol.soon', { what: t(lang, `lol.${next.what}`), time: mmss(next.left) })))
+  }
+  // Antigravity's: every 5 minutes, for 15 s, the two teams so far; while
+  // she is dead, the time to her respawn.
+  if (g.role === 'summary') {
+    if (g.respawn && g.respawn > at) lines.push(line('timer soon', t(lang, 'lol.respawn', { time: mmss(g.respawn - at) })))
+    if (at >= 300 && at % 300 < 15 && g.tally) {
+      lines.push(line('head', t(lang, 'lol.summary', { time: mmss(Math.floor(at / 300) * 300) })))
+      lines.push(line('coach', t(lang, 'lol.us', g.tally.us)))
+      lines.push(line('coach', t(lang, 'lol.them', g.tally.them)))
     }
   }
   // In champion select (lcu.rs): her rank and her party's.
@@ -300,21 +309,18 @@ function fillGame() {
     const rows = (g.objectives || [])
       .map(o => ({ ...o, left: o.at - at }))
       .sort((a, b) => a.left - b.left)
-      .slice(0, 4)
+      .slice(0, 3)
     for (const o of rows) {
       const what = t(lang, `lol.${o.what}`)
       const row = line(`timer${o.left <= 30 ? ' soon' : ''}`, o.left > 0 ? t(lang, 'lol.in', { what, time: mmss(o.left) }) : t(lang, 'lol.up', { what }))
       lines.push(row)
     }
-    if ((g.allies || []).length) {
-      lines.push(line('head', t(lang, 'lol.allies')))
-      for (const a of g.allies) {
-        const pos = a.position ? t(lang, `lol.pos.${a.position}`) : ''
-        lines.push(line(`ally${a.me ? ' me' : ''}`, `${[pos, a.champion].filter(Boolean).join(' · ')}：${a.spells.filter(Boolean).join(' / ')}`))
-      }
-    }
+    // Her team, one line each: the champion and the two spells by their short names.
+    for (const a of g.allies || []) lines.push(line(`ally${a.me ? ' me' : ''}`, `${a.champion} ${a.spells.filter(Boolean).join('／')}`))
   }
   const wasHidden = gameStrip.hidden
+  // Grok's, with her team's spells: wider.
+  gameStrip.classList.toggle('wide', g.role === 'objectives')
   gameStrip.replaceChildren(...lines)
   gameStrip.hidden = !lines.length
   if (wasHidden !== gameStrip.hidden) window.Panel?.report()

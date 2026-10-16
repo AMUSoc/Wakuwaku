@@ -14,6 +14,8 @@ Game Client API), the events in the shape of Riot's sample
   POST /fake/items  {"riotId": "...", "items": [{"itemID": 3140, "displayName": "..."}]}
   POST /fake/me     {"isDead": true} etc.: the one playing's own fields
   POST /fake/phase  {"phase": "ChampSelect"}: the client's (LCU) gameflow phase
+  POST /fake/player {"riotId": "...", "position": "NONE", ...}: any of a player's fields
+  POST /fake/gold   {"currentGold": 820}: the one playing's gold
 
 It stands for the League client's own API too (WAKUWAKU_LCU_URL: gameflow
 phase, current summoner, region, lobby, champion select: a duo in ranked
@@ -31,12 +33,27 @@ LOCK = threading.Lock()
 STATE = {'start': time.time(), 'at': 0.0, 'events': [], 'next_id': 0}
 
 
+# Summoner spells as a Japanese client names them, with the game's own key
+# (rawDescription) the names are found by whatever the language.
+SPELLS = {
+    'Flash': ('フラッシュ', 'SummonerFlash'), 'Teleport': ('テレポート', 'S12_SummonerTeleportUpgrade'),
+    'Ignite': ('イグナイト', 'SummonerDot'), 'Smite': ('スマイト', 'SummonerSmite'), 'Heal': ('ヒール', 'SummonerHeal'),
+    'Barrier': ('バリア', 'SummonerBarrier'), 'Exhaust': ('イグゾースト', 'SummonerExhaust'),
+    'Cleanse': ('クレンズ', 'SummonerBoost'), 'Ghost': ('ゴースト', 'SummonerHaste'),
+}
+
+
+def spell(name):
+    jp, key = SPELLS[name]
+    return {'displayName': jp, 'rawDescription': f'GeneratedTip_SummonerSpell_{key}_Description', 'rawDisplayName': f'GeneratedTip_SummonerSpell_{key}_DisplayName'}
+
+
 def player(riot_id, team, position, champion, one, two, items=()):
     return {
         'riotId': riot_id, 'riotIdGameName': riot_id.split('#')[0], 'riotIdTagLine': riot_id.split('#')[1],
         'summonerName': riot_id, 'team': team, 'position': position, 'championName': champion, 'isBot': False,
         'isDead': False, 'respawnTimer': 0.0, 'level': 6, 'skinID': 0,
-        'summonerSpells': {'summonerSpellOne': {'displayName': one}, 'summonerSpellTwo': {'displayName': two}},
+        'summonerSpells': {'summonerSpellOne': spell(one), 'summonerSpellTwo': spell(two)},
         'items': [dict(i) for i in items],
         'scores': {'kills': 0, 'deaths': 0, 'assists': 0, 'creepScore': 0, 'wardScore': 0.0},
     }
@@ -131,6 +148,14 @@ class Handler(BaseHTTPRequestHandler):
                     if p['riotId'] == body['riotId']:
                         p['items'] = body['items']
                 return self.send({'ok': True})
+            if self.path == '/fake/player':
+                for p in PLAYERS:
+                    if p['riotId'] == body['riotId']:
+                        p.update({k: v for k, v in body.items() if k != 'riotId'})
+                return self.send({'ok': True})
+            if self.path == '/fake/gold':
+                ME['currentGold'] = float(body['currentGold'])
+                return self.send(ME)
             if self.path == '/fake/phase':
                 CLIENT['phase'] = body['phase']
                 return self.send(CLIENT)
