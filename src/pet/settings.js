@@ -508,6 +508,7 @@
         ${row(esc(T('menu.dnd')), esc(T('s.dndNote')), sw('dnd', s.dnd))}
         ${row(esc(T('settings.hideInFullscreen')), '', sw('hideInFullscreen', s.hideInFullscreen, snap.fullscreenAvailable ? '' : 'disabled'))}
         ${row(esc(T('s.lol')), esc(T('s.lolNote')), sw('lol', s.lol !== false))}
+        ${row(esc(T('s.riotKey')), esc(T('s.riotKeyNote')), `<input class="in" id="s-riot-key" type="password" spellcheck="false" autocomplete="off" placeholder="RGAPI-…" value="${esc(s.riotApiKey || '')}">`)}
       </div>`
   }
 
@@ -1476,6 +1477,8 @@
   // number that is none goes back to what it was.
   layer.addEventListener('change', e => {
     if (e.target.dataset.ilook) return ilookInput(e.target, true)
+    // Her Riot API key, kept once typed (lcu.rs); one not as Riot gives them is not kept.
+    if (e.target.id === 's-riot-key') return patch({ riotApiKey: e.target.value.trim() })
     const key = e.target.dataset.field
     if (!key || !(key in drafts)) return
     const value = drafts[key].trim()

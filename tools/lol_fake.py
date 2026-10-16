@@ -13,6 +13,12 @@ Game Client API), the events in the shape of Riot's sample
   POST /fake/time   {"at": 600}: the clock to there
   POST /fake/items  {"riotId": "...", "items": [{"itemID": 3140, "displayName": "..."}]}
   POST /fake/me     {"isDead": true} etc.: the one playing's own fields
+  POST /fake/phase  {"phase": "ChampSelect"}: the client's (LCU) gameflow phase
+
+It stands for the League client's own API too (WAKUWAKU_LCU_URL: gameflow
+phase, current summoner, region, lobby, champion select: a duo in ranked
+Solo/Duo, the other three hidden) and Riot's (WAKUWAKU_RIOT_API_URL:
+league-v4 entries by PUUID, the key checked).
 Standard library only.
 """
 import argparse
@@ -49,6 +55,17 @@ PLAYERS = [
     player('Foe5#KR1', 'CHAOS', 'UTILITY', 'Thresh', 'Flash', 'Ignite'),
 ]
 ME = {'riotId': 'Me#TW1', 'summonerName': 'Me#TW1', 'currentGold': 1250.0, 'level': 6}
+CLIENT = {'phase': 'None'}
+LOBBY = {'members': [{'puuid': 'puuid-me', 'gameName': 'Me', 'gameTag': 'TW1'}, {'puuid': 'puuid-duo', 'gameName': 'Duo', 'gameTag': 'TW1'}]}
+SESSION = {'myTeam': [
+    {'puuid': 'puuid-me', 'assignedPosition': 'middle'}, {'puuid': 'puuid-duo', 'assignedPosition': 'utility'},
+    {'puuid': '', 'assignedPosition': 'top'}, {'puuid': '', 'assignedPosition': 'jungle'}, {'puuid': '', 'assignedPosition': 'bottom'},
+]}
+RANKS = {
+    'puuid-me': [{'queueType': 'RANKED_SOLO_5x5', 'tier': 'GOLD', 'rank': 'II', 'leaguePoints': 45, 'wins': 12, 'losses': 10}],
+    'puuid-duo': [{'queueType': 'RANKED_FLEX_SR', 'tier': 'SILVER', 'rank': 'I', 'leaguePoints': 3, 'wins': 2, 'losses': 1}],
+}
+LOOKED_UP = []
 
 
 def clock():
@@ -75,6 +92,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(PLAYERS)
             if path == '/liveclientdata/activeplayer':
                 return self.send(ME)
+            if path.startswith('/lol-') or path.startswith('/riotclient'):
+                if self.headers.get('Authorization') != 'Basic cmlvdDp0ZXN0':
+                    return self.send({'error': 'unauthorized'}, 401)
+                if path == '/lol-gameflow/v1/gameflow-phase':
+                    return self.send(CLIENT['phase'])
+                if path == '/lol-summoner/v1/current-summoner':
+                    return self.send({'puuid': 'puuid-me', 'gameName': 'Me', 'tagLine': 'TW1'})
+                if path == '/riotclient/region-locale':
+                    return self.send({'region': 'TW', 'locale': 'zh_TW'})
+                if path == '/lol-lobby/v2/lobby':
+                    return self.send(LOBBY)
+                if path == '/lol-champ-select/v1/session' and CLIENT['phase'] == 'ChampSelect':
+                    return self.send(SESSION)
+            if path.startswith('/lol/league/v4/entries/by-puuid/'):
+                if self.headers.get('X-Riot-Token') != 'RGAPI-test-key':
+                    return self.send({'status': {'status_code': 403}}, 403)
+                puuid = path.rsplit('/', 1)[1]
+                LOOKED_UP.append(puuid)
+                return self.send(RANKS.get(puuid, []))
+            if path == '/fake/looked-up':
+                return self.send(LOOKED_UP)
         self.send({'error': 'not found'}, 404)
 
     def do_POST(self):
@@ -93,6 +131,9 @@ class Handler(BaseHTTPRequestHandler):
                     if p['riotId'] == body['riotId']:
                         p['items'] = body['items']
                 return self.send({'ok': True})
+            if self.path == '/fake/phase':
+                CLIENT['phase'] = body['phase']
+                return self.send(CLIENT)
             if self.path == '/fake/me':
                 ME.update({k: v for k, v in body.items() if k in ME or k == 'currentGold'})
                 for p in PLAYERS:

@@ -431,6 +431,18 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 
 实测（2026-10-16，测试副本，两块屏：主屏 100%、左边那块 150%）：Codex 的确认只出现在 Codex 的桌宠头顶，允许 / 拒绝 / 交给终端都回到对的 hook；Claude 和 Codex 同时问，各在各的；Codex 的桌宠收回去，它的确认搬到岛上。桌宠在主屏最上面：面板在下面，她的位置一个像素都没动；在 150% 那块屏的左上角：面板在下面、往右推回屏幕里，她也没动。做完的泡泡：会话名、「改好了 · 2 個檔案 · 花了 0:00」、回复；8 秒后收起，窗口回原大小；指针移上去立刻收起；「显示具体内容」关掉只剩怎么结束的。「把焦点还给原来的窗口」在测试环境里看不到前台窗口，没量到。
 
+## 英雄联盟对局助手（lol.rs、lcu.rs）
+
+只用 Riot 官方的接口：对局中读游戏自己开在本机的 Live Client Data API（`https://127.0.0.1:2999/liveclientdata/…`：`gamestats`、`eventdata`、`playerlist`、`activeplayer`），选英雄时读客户端的 LCU（`LeagueClientUx.exe` 旁边的 `lockfile` 给端口和密码，Basic auth `riot:<密码>`）和 Riot API（`league-v4 entries/by-puuid`，用户自己的个人金钥，设置 `riotApiKey`）。不读游戏内存、不注入、不替玩家操作、不截图识别。两个本机接口用 Riot 自己的证书，TLS 库对不上 127.0.0.1，不验证（流量不离开本机）；Riot API 照常验证。
+
+- **Riot 的政策**（developer.riotgames.com/docs/lol 的 Game Integrity）：不能提供游戏里看不到、有优势的信息，不能替玩家做决定，不能找出游戏刻意隐藏的玩家。所以不做敌方召唤师技能、大招计时；说的都是中性的事实（「小龙 0:42 后刷新」，不说「去插眼」）；选英雄只查自己和组队的队友（Solo/Duo 里别的队友被隐藏，`lcu::to_look_up` 只认自己和 lobby 成员的 PUUID）。Overwolf 的 Riot 合规指南更严，明确禁止敌方召唤师技能计时和指挥玩家行动的通知。
+- **分工**（`lol::view`，放进每只桌宠的 `pet:update` 的 `game`）：claude 游戏时间、一分钟内要刷新的目标；grok 小龙 / 男爵 / 先锋的刷新倒数（按剩余时间排，最多四行）、我方五人带的召唤师技能（Live Client 没有任何人的冷却，只有带了哪两个）；codex 对方新出的关键装备（`KEY_ITEMS`，名字用游戏给的、跟客户端语言）、出装或阵亡时自己的 CS / 每分钟、KDA、金钱（Live Client 没有地图坐标，「回泉水」只能用「出了新装」代替），选英雄时自己和组队队友的段位。页面自己用 `gameTime` + 读到时的时间往下走钟，只有内容变了（或 30 秒）才重画。
+- **目标的时间**（2026 赛季：小龙 5:00 首刷、之后每次被杀 5:00 后，远古龙 6:00 后；男爵 20:00 首刷、6:00 后；先锋 14:00 一次）是 `lol.rs` 的常量，没从游戏读到，换赛季要对一下。
+- **侦测**：每 5 秒用进程快照找 `League of Legends.exe`（几毫秒）；对局中每秒读一次（玩家列表每 5 次读一次）。连不上三次或进程没了就当对局结束，全部恢复。没有对局时，看 `LeagueClientUx.exe` 的 gameflow phase，选英雄（`ChampSelect`）时才读 session、查段位（每个 PUUID 查一次）。
+- **全屏例外**：对局中，`fullscreen.rs` 不把 `league of legends.exe` 当全屏，桌宠不躲；游戏要用无边框模式（README）。
+- **设置**：「通用」页「英雄联盟对局助手」开关（`lol`）、「Riot API 金钥」（`riotApiKey`，只送 Riot API，不进日志和崩溃报告）。
+- **测试**：`tools/lol_fake.py` 假装 Live Client、LCU 和 Riot API（`WAKUWAKU_LOL_URL`、`WAKUWAKU_LCU_URL`、`WAKUWAKU_RIOT_API_URL`），可以加事件、改时间、换装备、换 phase；`src-tauri/fixtures/lol/events.json` 是 Riot 官方的事件样本（时间都是 0，测试里另给时间）。还没在真的对局里测过。
+
 ## 踩过的坑
 
 - **藏窗口不等于藏页面**：`WebviewWindow::hide` 只藏窗口，WebView2 照样当页面可见，定时器和动画都在跑；要连 WebView 一起藏（`win.as_ref().hide()`，即 `SetIsVisible(false)`），`document.hidden` 才是真。

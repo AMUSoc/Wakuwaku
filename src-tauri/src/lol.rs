@@ -13,7 +13,8 @@
 //   grok    the objectives' respawn countdowns, and her own team's summoner spells
 //   codex   the other team's key items as they get them; and as she buys
 //           something or dies, her own CS a minute, KDA and gold (her own
-//           numbers only: Riot's approved "showing (self) player stats")
+//           numbers only: Riot's approved "showing (self) player stats");
+//           in champion select, out of a game, her rank and her party's (lcu.rs)
 //
 // Looked for every 5 s (the game's process, by name: League of Legends.exe),
 // read once a second in a game; done, all as it was. The Live Client's
@@ -75,12 +76,20 @@ pub fn in_game() -> bool {
 // agent with no part.
 pub fn view(agent: &str) -> Value {
     let game = GAME.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let Some(g) = game else { return Value::Null };
+    let Some(g) = game else { return select_view(agent) };
     let clock = json!({ "time": g.time, "at": g.at });
     match agent {
         "claude" => json!({ "role": "clock", "clock": clock, "objectives": g.objectives }),
         "grok" => json!({ "role": "objectives", "clock": clock, "objectives": g.objectives, "allies": g.allies }),
         "codex" => json!({ "role": "intel", "clock": clock, "news": g.news, "coach": g.coach }),
+        _ => Value::Null,
+    }
+}
+
+// Out of a game, Codex's pet in champion select (lcu.rs).
+fn select_view(agent: &str) -> Value {
+    match (agent, crate::lcu::view()) {
+        ("codex", Some(s)) => json!({ "role": "select", "players": s["players"], "keyless": s["keyless"] }),
         _ => Value::Null,
     }
 }
@@ -252,8 +261,13 @@ fn read(agent: &ureq::Agent, base: &str, r: &mut Reading) -> Option<Game> {
 }
 
 // Whether a program of this name runs (a snapshot of the processes: a few ms).
-#[cfg(windows)]
 fn running(exe: &str) -> bool {
+    pid_of(exe).is_some()
+}
+
+// The process of a program of this name (lower case), if one runs.
+#[cfg(windows)]
+pub fn pid_of(exe: &str) -> Option<u32> {
     #[repr(C)]
     struct Entry {
         size: u32,
@@ -279,15 +293,17 @@ fn running(exe: &str) -> bool {
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == -1 {
-            return false;
+            return None;
         }
         let mut e: Entry = std::mem::zeroed();
         e.size = std::mem::size_of::<Entry>() as u32;
         let mut ok = Process32FirstW(snap, &mut e) != 0;
-        let mut found = false;
-        while ok && !found {
+        let mut found = None;
+        while ok && found.is_none() {
             let len = e.name.iter().position(|c| *c == 0).unwrap_or(e.name.len());
-            found = String::from_utf16_lossy(&e.name[..len]).to_lowercase() == exe;
+            if String::from_utf16_lossy(&e.name[..len]).to_lowercase() == exe {
+                found = Some(e.pid);
+            }
             ok = Process32NextW(snap, &mut e) != 0;
         }
         CloseHandle(snap);
@@ -296,8 +312,8 @@ fn running(exe: &str) -> bool {
 }
 
 #[cfg(not(windows))]
-fn running(_exe: &str) -> bool {
-    false
+pub fn pid_of(_exe: &str) -> Option<u32> {
+    None
 }
 
 fn set(sh: &Shared, game: Option<Game>) {
@@ -337,12 +353,16 @@ pub fn start(sh: &Arc<Shared>) {
         let fake = std::env::var("WAKUWAKU_LOL_URL").ok();
         let base = fake.clone().unwrap_or_else(|| LIVE.to_string());
         let agent = agent();
-        let (mut reading, mut misses) = (Reading::default(), 0u32);
+        let (mut reading, mut misses, mut looking) = (Reading::default(), 0u32, crate::lcu::Looking::default());
         loop {
             if sh.setting("lol") == false || (fake.is_none() && !running(GAME_EXE)) {
                 set(&sh, None);
                 reading = Reading::default();
                 misses = 0;
+                // No game: the client, in champion select (lcu.rs).
+                if sh.setting("lol") != false {
+                    crate::lcu::look(&sh, &mut looking);
+                }
                 std::thread::sleep(Duration::from_secs(5));
                 continue;
             }

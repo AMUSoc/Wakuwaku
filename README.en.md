@@ -189,7 +189,7 @@ While she's closed, Claude Code works as usual: the events sent to her are refus
 
 ### League of Legends game helper
 
-While you play League of Legends, each pet out on the desktop (turn on "On the desktop" for its agent on the Look page) takes a part: Claude's shows the game clock; Grok's shows the Dragon, Baron and Herald respawn countdowns and the summoner spells your team's five took. The agents' notifications go on as ever. Once the game is over, all is as it was.
+While you play League of Legends, each pet out on the desktop (turn on "On the desktop" for its agent on the Look page) takes a part: Claude's shows the game clock and an objective about to spawn ("Dragon respawns in 0:42"); Grok's shows the Dragon, Baron and Herald respawn countdowns and the summoner spells your team's five took; Codex's shows the other team's key items as they get them ("Their Zed has Zhonya's Hourglass"), and your own CS (a minute), KDA and gold as you buy something or die. In champion select, Codex's shows your rank and your party's (put your own personal Riot API key on the General page; players not in your party are not looked up). The agents' notifications go on as ever. Once the game is over, all is as it was.
 
 - **Riot's own ways in only**: in a game she reads only the Live Client Data API the game itself opens on this computer (`127.0.0.1:2999`). Never the game's memory, no injecting, nothing done for you, no reading the screen.
 - **Neutral information only**: as Riot's developer policy asks (no information not in the game that gives an edge, no deciding for the player), no enemy summoner spell or ultimate timers, and no "ward now" or "group up".

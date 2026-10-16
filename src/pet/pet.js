@@ -254,11 +254,12 @@ function mmss(s) {
 // objectives' respawns (soonest first, four at most) and her own team's
 // summoner spells; Codex's the other team's key items, each 30 game seconds,
 // and her own numbers for 20 as she buys something or dies.
+// Out of a game, in champion select, Codex's her rank and her party's.
 // Neutral: what is, never what to do.
 function fillGame() {
   clearTimeout(gameTimer)
   const g = now.game
-  if (!g || isIsland()) {
+  if (!g || isIsland() || (!g.clock && g.role !== 'select')) {
     if (!gameStrip.hidden) {
       gameStrip.hidden = true
       gameStrip.replaceChildren()
@@ -266,13 +267,24 @@ function fillGame() {
     return
   }
   const line = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text })
-  const at = gameNow(g)
+  const at = g.clock ? gameNow(g) : 0
   const lines = []
   if (g.role === 'clock') {
     lines.push(line('clock', t(lang, 'lol.clock', { time: mmss(at) })))
     for (const o of g.objectives || []) {
       const left = o.at - at
       if (left > 0 && left <= 60) lines.push(line('timer soon', t(lang, 'lol.soon', { what: t(lang, `lol.${o.what}`), time: mmss(left) })))
+    }
+  }
+  // In champion select (lcu.rs): her rank and her party's.
+  if (g.role === 'select') {
+    lines.push(line('head', t(lang, 'lol.select')))
+    if (g.keyless) lines.push(line('news', t(lang, 'lol.keyless')))
+    for (const p of g.players || []) {
+      const r = p.rank
+      const rank = !g.keyless && r ? t(lang, 'lol.rank', { tier: t(lang, `lol.tier.${r.tier}`), rank: ['MASTER', 'GRANDMASTER', 'CHALLENGER'].includes(r.tier) ? '' : r.rank, lp: r.lp, wins: r.wins, losses: r.losses }) : g.keyless ? '' : t(lang, 'lol.unranked')
+      const pos = p.position ? t(lang, `lol.pos.${p.position.toUpperCase()}`) : ''
+      lines.push(line(`ally${p.me ? ' me' : ''}`, [[p.name, pos].filter(Boolean).join(' · '), rank].filter(Boolean).join('：')))
     }
   }
   if (g.role === 'intel') {

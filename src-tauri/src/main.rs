@@ -46,6 +46,7 @@ mod gpu;
 mod i18n;
 mod island;
 mod jump;
+mod lcu;
 mod lol;
 mod notch;
 mod notify;

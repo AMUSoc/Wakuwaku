@@ -53,6 +53,7 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 - `pointer.rs`（點擊穿透）、`screen.rs`（各螢幕工作區）、`focus.rs`（鍵盤焦點的取與還）、`fullscreen.rs`（別的程式是否全螢幕，每 1.5 秒看一次）。
 
 **其他**
+- `lol.rs`、`lcu.rs`：英雄聯盟對局助手。只讀 Riot 官方介面（Live Client Data API、客戶端 LCU、用個人金鑰的 Riot API），對局中各隻桌寵分工顯示（claude 時間、grok 目標倒數和我方召喚師技能、codex 對方關鍵裝備和自己的數據、選角時自己和組隊隊友的段位），只說中性事實、不做敵方計時（Riot 政策）。細節見 `docs/DEVELOPMENT.md` 的「英雄联盟对局助手」。
 - `jump.rs`：點會話跳到它的視窗（行程鏈、找視窗、叫到前面、Claude 桌面版的會話連結）。
 - `widgets.rs`（島上的外掛：腳本送來的、內建的今天 / token / 監控）、`scripts.rs`（她代跑的外掛腳本）、`tokens.rs`（讀三種 agent 自己的紀錄算今天的 token）。
 - `tray.rs`（系統匣圖示與選單）、`notify.rs`（toast 通知）、`updates.rs`（自動更新）、`crash.rs`、`crash/`（當機報告，含守護程序 `guard` / `spawn_guard`）、`proxy.rs`（Windows 系統代理，當機報告送中繼時用）、`power.rs`（省電、EcoQoS）、`gpu.rs`（WebView2 用哪張顯卡）、`detach.rs`（以檔案總管為父行程啟動自己，脫離 agent 的 job）、`fetch.rs`（codex-pets.net 下載寵物）、`i18n.rs`。

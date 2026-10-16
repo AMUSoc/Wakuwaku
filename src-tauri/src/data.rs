@@ -111,8 +111,10 @@ fn defaults() -> Map<String, Value> {
         "promptWaitSec": 290,
         "dnd": false,
         "hideInFullscreen": true,
-        // A League of Legends game on: the pets show of it (lol.rs).
+        // A League of Legends game on: the pets show of it (lol.rs); her own
+        // Riot API key, for her rank and her party's in champion select (lcu.rs).
         "lol": true,
+        "riotApiKey": "",
         "onboarded": false,
     }) else {
         unreachable!()
