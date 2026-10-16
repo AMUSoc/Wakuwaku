@@ -276,6 +276,10 @@ body {
   white-space: normal;
 }
 
+#game .coach {
+  font-variant-numeric: tabular-nums;
+}
+
 .below #game {
   margin: 8px 0 0;
 }

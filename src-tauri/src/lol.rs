@@ -11,7 +11,9 @@
 // Each agent's pet a part (data.rs AGENTS):
 //   claude  the game's clock, and an objective about to spawn (a minute before)
 //   grok    the objectives' respawn countdowns, and her own team's summoner spells
-//   codex   the other team's key items as they get them
+//   codex   the other team's key items as they get them; and as she buys
+//           something or dies, her own CS a minute, KDA and gold (her own
+//           numbers only: Riot's approved "showing (self) player stats")
 //
 // Looked for every 5 s (the game's process, by name: League of Legends.exe),
 // read once a second in a game; done, all as it was. The Live Client's
@@ -58,6 +60,8 @@ pub struct Game {
     pub allies: Vec<Value>,
     // The other team's key items as they came: { champion, item, at }.
     pub news: Vec<Value>,
+    // Her own numbers as she last bought something or died (coach_of).
+    pub coach: Option<Value>,
 }
 
 static GAME: Mutex<Option<Game>> = Mutex::new(None);
@@ -76,7 +80,7 @@ pub fn view(agent: &str) -> Value {
     match agent {
         "claude" => json!({ "role": "clock", "clock": clock, "objectives": g.objectives }),
         "grok" => json!({ "role": "objectives", "clock": clock, "objectives": g.objectives, "allies": g.allies }),
-        "codex" => json!({ "role": "intel", "clock": clock, "news": g.news }),
+        "codex" => json!({ "role": "intel", "clock": clock, "news": g.news, "coach": g.coach }),
         _ => Value::Null,
     }
 }
@@ -147,6 +151,30 @@ pub fn item_news(seen: &mut HashMap<String, HashSet<u64>>, players: &[Value], me
     news
 }
 
+// Whether to show her own numbers now: something new in her items (bought),
+// or she just died. Her items not known before (the first look): no.
+pub fn coach_moment(before: Option<&HashSet<u64>>, items: &HashSet<u64>, was_dead: bool, dead: bool) -> Option<&'static str> {
+    if dead && !was_dead {
+        Some("dead")
+    } else if before.is_some_and(|b| items.iter().any(|i| !b.contains(i))) {
+        Some("bought")
+    } else {
+        None
+    }
+}
+
+// Her own numbers: CS and CS a minute, kills, deaths, assists, gold.
+pub fn coach_of(me: &Value, gold: f64, time: f64, why: &str) -> Value {
+    let s = &me["scores"];
+    let cs = s["creepScore"].as_f64().unwrap_or(0.0);
+    let per_min = if time >= 60.0 { (cs / (time / 60.0) * 10.0).round() / 10.0 } else { cs };
+    json!({
+        "why": why, "at": time, "cs": cs as u64, "perMin": per_min,
+        "k": s["kills"].as_u64().unwrap_or(0), "d": s["deaths"].as_u64().unwrap_or(0), "a": s["assists"].as_u64().unwrap_or(0),
+        "gold": gold.round() as u64,
+    })
+}
+
 fn is_me(p: &Value, me: &str) -> bool {
     !me.is_empty() && (p["riotId"] == me || p["summonerName"] == me)
 }
@@ -177,25 +205,30 @@ struct Reading {
     nth: u64,
     seen: HashMap<String, HashSet<u64>>,
     news: Vec<Value>,
+    // Her own: gold, items and whether dead as last read, her numbers shown last.
+    gold: f64,
+    items: Option<HashSet<u64>>,
+    dead: bool,
+    coach: Option<Value>,
 }
 
 fn read(agent: &ureq::Agent, base: &str, r: &mut Reading) -> Option<Game> {
-    let Reading { players, me, nth, .. } = r;
-    let nth = *nth;
+    let nth = r.nth;
     let stats = get(agent, base, "gamestats")?;
     let events = get(agent, base, "eventdata")?;
     // The players change little: every 5th read (and the first).
-    if nth % 5 == 0 || players.is_empty() {
+    if nth % 5 == 0 || r.players.is_empty() {
         if let Some(list) = get(agent, base, "playerlist").and_then(|v| v.as_array().cloned()) {
-            *players = list;
+            r.players = list;
         }
         if let Some(active) = get(agent, base, "activeplayer") {
-            *me = active["riotId"].as_str().or(active["summonerName"].as_str()).unwrap_or("").to_string();
+            r.me = active["riotId"].as_str().or(active["summonerName"].as_str()).unwrap_or("").to_string();
+            r.gold = active["currentGold"].as_f64().unwrap_or(r.gold);
         }
     }
     let events = events["Events"].as_array().cloned().unwrap_or_default();
     let time = stats["gameTime"].as_f64().unwrap_or(0.0);
-    let (objectives, allies) = (objectives(&events), allies(players, me));
+    let (objectives, allies) = (objectives(&events), allies(&r.players, &r.me));
     if nth % 5 == 0 {
         let fresh = item_news(&mut r.seen, &r.players, &r.me);
         for mut n in fresh {
@@ -204,8 +237,18 @@ fn read(agent: &ureq::Agent, base: &str, r: &mut Reading) -> Option<Game> {
         }
         let over = r.news.len().saturating_sub(NEWS_KEPT);
         r.news.drain(..over);
+        // Her own numbers, as she buys something or dies.
+        if let Some(mine) = r.players.iter().find(|p| is_me(p, &r.me)).cloned() {
+            let items: HashSet<u64> = mine["items"].as_array().into_iter().flatten().filter_map(|i| i["itemID"].as_u64()).collect();
+            let dead = mine["isDead"].as_bool().unwrap_or(false);
+            if let Some(why) = coach_moment(r.items.as_ref(), &items, r.dead, dead) {
+                r.coach = Some(coach_of(&mine, r.gold, time, why));
+            }
+            r.items = Some(items);
+            r.dead = dead;
+        }
     }
-    Some(Game { time, at: now_ms(), objectives, allies, news: r.news.clone() })
+    Some(Game { time, at: now_ms(), objectives, allies, news: r.news.clone(), coach: r.coach.clone() })
 }
 
 // Whether a program of this name runs (a snapshot of the processes: a few ms).
@@ -262,7 +305,7 @@ fn set(sh: &Shared, game: Option<Game>) {
         let mut kept = GAME.lock().unwrap_or_else(|e| e.into_inner());
         // The clock alone moving on: the pages run it themselves.
         let same = match (&*kept, &game) {
-            (Some(a), Some(b)) => a.objectives == b.objectives && a.allies == b.allies && a.news == b.news && (b.time - a.time).abs() < 30.0,
+            (Some(a), Some(b)) => a.objectives == b.objectives && a.allies == b.allies && a.news == b.news && a.coach == b.coach && (b.time - a.time).abs() < 30.0,
             (None, None) => true,
             _ => false,
         };
@@ -387,6 +430,23 @@ mod tests {
         // Sold and bought again: news again.
         item_news(&mut seen, &foe(&[]), "Me#TW1");
         assert_eq!(item_news(&mut seen, &foe(&[(3157, "Zhonya's Hourglass")]), "Me#TW1").len(), 1);
+    }
+
+    #[test]
+    fn her_own_numbers_as_she_buys_or_dies() {
+        let set = |ids: &[u64]| ids.iter().copied().collect::<HashSet<u64>>();
+        // The first look: nothing to compare with.
+        assert_eq!(coach_moment(None, &set(&[1055]), false, false), None);
+        // Something new: bought. The same, or one sold: no.
+        assert_eq!(coach_moment(Some(&set(&[1055])), &set(&[1055, 1001]), false, false), Some("bought"));
+        assert_eq!(coach_moment(Some(&set(&[1055, 1001])), &set(&[1055, 1001]), false, false), None);
+        assert_eq!(coach_moment(Some(&set(&[1055, 1001])), &set(&[1055]), false, false), None);
+        // Just died: dead; still dead, no more.
+        assert_eq!(coach_moment(Some(&set(&[1055])), &set(&[1055]), false, true), Some("dead"));
+        assert_eq!(coach_moment(Some(&set(&[1055])), &set(&[1055]), true, true), None);
+        let me = json!({ "scores": { "creepScore": 87, "kills": 3, "deaths": 1, "assists": 4 } });
+        // 87 CS at 12:00: 7.3 a minute.
+        assert_eq!(coach_of(&me, 1234.6, 720.0, "bought"), json!({ "why": "bought", "at": 720.0, "cs": 87, "perMin": 7.3, "k": 3, "d": 1, "a": 4, "gold": 1235 }));
     }
 
     #[test]

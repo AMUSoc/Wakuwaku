@@ -252,7 +252,8 @@ function mmss(s) {
 // Her part, drawn anew each second while a game is on: Claude's pet the
 // clock, and an objective a minute or less from spawning; Grok's the
 // objectives' respawns (soonest first, four at most) and her own team's
-// summoner spells; Codex's the other team's key items, each 30 game seconds.
+// summoner spells; Codex's the other team's key items, each 30 game seconds,
+// and her own numbers for 20 as she buys something or dies.
 // Neutral: what is, never what to do.
 function fillGame() {
   clearTimeout(gameTimer)
@@ -276,6 +277,12 @@ function fillGame() {
   }
   if (g.role === 'intel') {
     for (const n of (g.news || []).filter(n => at - n.at <= 30).slice(-4)) lines.push(line('news', t(lang, 'lol.item', { champion: n.champion, item: n.item })))
+    const c = g.coach
+    if (c && at - c.at <= 20) {
+      lines.push(line('head', t(lang, c.why === 'dead' ? 'lol.coachDead' : 'lol.coachBought')))
+      lines.push(line('coach', t(lang, 'lol.coachCs', { cs: c.cs, perMin: c.perMin.toFixed(1) })))
+      lines.push(line('coach', t(lang, 'lol.coachKda', { k: c.k, d: c.d, a: c.a, gold: c.gold })))
+    }
   }
   if (g.role === 'objectives') {
     const rows = (g.objectives || [])

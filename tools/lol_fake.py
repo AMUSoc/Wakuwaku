@@ -97,7 +97,7 @@ class Handler(BaseHTTPRequestHandler):
                 ME.update({k: v for k, v in body.items() if k in ME or k == 'currentGold'})
                 for p in PLAYERS:
                     if p['riotId'] == ME['riotId']:
-                        p.update({k: v for k, v in body.items() if k in p})
+                        p.update({k: v for k, v in body.items() if k in p and k != 'scores'})
                         p['scores'].update(body.get('scores', {}))
                 return self.send({'ok': True})
         self.send({'error': 'not found'}, 404)
