@@ -95,7 +95,7 @@ Grok Build ──HTTP hook（~/.grok/hooks/wakuwaku.json）───────
    ```
    主要欄位：`mood`（`idle` / `working` / `waiting` / `done` / `review` / `error`）、`event`（`turn-start` / `tool-start` / `tool-done` / `tool-failed` / `turn-end` / `session-end`）、`react` / `say`、`title` / `task`、`step` / `toolId`、`todo`、`file`、`reply` / `error`、`agent` / `turn`。完整表格見 `docs/DEVELOPMENT.md` 的「消息」一節。
 3. 補上會話所在的行程鏈 `chain`（Claude Code 和 Grok 用請求的對端連接埠查 TCP 表；Codex / agy 用 hook 自己算好的），然後 `sh.apply(&msg)`。
-4. 如果是 `PermissionRequest` 且她看得見（`asks_seen`）：把 tiny_http 的請求包成 `Responder` 交給 `asks.rs` 掛起，`push_asks()` 通知頁面；使用者回答、逾時（`promptWaitSec`，Codex 最多 60 秒）、或終端機已回答時才回覆。看不見（勿擾、隱藏、全螢幕）就直接回 `{}` 交給終端機。
+4. 如果是 `PermissionRequest` 且她看得見（`asks_seen`）：把 tiny_http 的請求包成 `Responder` 交給 `asks.rs` 掛起，`push_asks()` 通知頁面（各頁面只收自己的：桌寵在桌面上的 agent 的給那隻桌寵，其餘給島）；使用者回答、逾時（`promptWaitSec`，Codex 最多 60 秒）、或終端機已回答時才回覆。看不見（勿擾、隱藏、全螢幕）就直接回 `{}` 交給終端機。
 5. 其他事件：`asks.seen(&event)` 收掉同一呼叫或同一會話已在終端機處理掉的確認，然後立刻回 `{}`。
 
 ### 3. state.rs
@@ -117,7 +117,8 @@ Grok Build ──HTTP hook（~/.grok/hooks/wakuwaku.json）───────
 
 - 持有鎖時絕不呼叫 Tauri 的視窗 getter（它們要等主執行緒，而選單回呼在主執行緒上拿鎖）；同時不拿兩把鎖；頁面的命令一律寫成 `async`。
 - 新視窗要加進 `src-tauri/capabilities/` 的 `windows`（目前是 `pet-*`、`island`），否則頁面的 `listen()` 會被拒。
-- **島一顆、桌寵每個 agent 一隻**：島顯示最需要你的會話（`state.get`）；桌寵只看自己 agent 的會話（`get_for`、`list_for`、`mood_for`、`seen_for`，`main.rs` 的 `pet_payload`）。「放她出來／叫她回家」、從島裡拉出來，都是對島正在代表的 agent（`island_agent`：顯示中的會話的 agent，沒有就 `claude`）；確認面板只在島裡。細節和實測的記憶體見 `docs/DEVELOPMENT.md` 的「每个 agent 一只桌宠」。
+- **島一顆、桌寵每個 agent 一隻**：島顯示最需要你的會話（`state.get`）；桌寵只看自己 agent 的會話（`get_for`、`list_for`、`mood_for`、`seen_for`，`main.rs` 的 `pet_payload`）。「放她出來／叫她回家」、從島裡拉出來，都是對島正在代表的 agent（`island_agent`：顯示中的會話的 agent，沒有就 `claude`）。細節和實測的記憶體見 `docs/DEVELOPMENT.md` 的「每个 agent 一只桌宠」。
+- **通知和確認在桌寵旁邊**：某個 agent 的桌寵在桌面上時，它的權限確認在那隻桌寵頭頂（`main.rs` 的 `asks_for` 依 agent 分給各頁面，回答照 id 回到原本的 hook），做完／改好／出錯的摘要泡泡在它旁邊（`pet.js` 的 `fillSummary`，跟著「提醒停留」或滑鼠經過收起），島不再為它自動展開；面板放不下她上面就放下面，她在螢幕上不動（`pet.rs` 的 `set_panel`、`Win::bottom`）。桌寵不在桌面上的 agent 照舊走島。系統通知和提示音不變。細節見 `docs/DEVELOPMENT.md` 的「通知和确认在桌宠旁边」。
 - 設定只有島一種家（`display` 永遠是 `island`）；已移除功能留下的設定鍵，讀設定時由 `data.rs` 的 `GONE` 丟掉。新增設定鍵要同時改 `data.rs` 的預設值和 `settings.rs` 的 `is_ok` 白名單。
 - 她的視窗一律經 `Shared::show_window` 顯示（`show()` 會啟用視窗，要暫時忽略島的失焦）。
 - hook 的回覆必須是物件；自動壓縮觸發的 `SessionStart`（`source: compact`）要忽略。

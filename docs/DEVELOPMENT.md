@@ -200,7 +200,7 @@ hook 事件在 `events.rs`（Codex 的在 `events_codex.rs`）换算成消息，
 
 面板什么时候收起：同一个调用的 `PostToolUse` / `PostToolUseFailure` 到达（比较输入时忽略 `answers`）；同一个会话的 `UserPromptSubmit`、`Stop`、`StopFailure`、`SessionEnd`、`Interrupt`（Codex）；同一个 agent 又来了新请求；等待时间到。每个请求怎么结束的，日志里都有一行：`answer N`（在她身上答的）、`prompt N handed to the terminal: its time is up`（超时）、`… asked to on her`（去终端处理）、`prompt N settled in the terminal (事件名)`（终端已答）、`… out of sight`（看不见）。`asks.rs` 的 `expire` 和 `seen` 返回结束了的 id，供调用的地方写日志。以前超时、终端已答都不写，等满 290 秒退回终端的那次在日志里看不出来（2026-10-13 测试会话）。
 
-面板在哪：灵动岛模式在岛里（岛的 `ask` 形状）；设置开着时是设置里的横幅（`panel.js` 的 `holdsPanel()` 看 `settingsOpen`）；只有宠物时在她头顶，她的窗口向上、向两侧长大，她本人不动（`pet.rs` 的 `set_panel`，挡在屏幕边上时用 `pet:shift` 把她挪回原位）。
+面板在哪：哪个 agent 的确认，看那个 agent 的桌宠在不在桌面上（`main.rs` 的 `asks_for`，`asks::agent_of`）。在桌面上，就在那只桌宠头顶（下面「通知和确认在桌宠旁边」一节）；不在，就在岛里（岛的 `ask` 形状），设置开着时是设置里的横幅。
 
 ## 点会话就到它的窗口
 
@@ -401,7 +401,7 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 - **窗口**：`pet.rs` 每个 agent 一个窗口，标签 `pet-<agent>`（`capabilities` 写 `pet-*`），页面是 `index.html?role=pet&agent=<agent>`。状态在 `Shared.pets`（`pet::Pets`，每只一把锁；遍历时一只一只拿，不同时拿两把）。设置的 `desktop` 打开时才建窗口，关掉就关窗口（`pet::open_or_close`，`Shared::apply_visibility` 里每只看一次）：藏起来的 WebView 仍占着它的内存。没有窗口的 agent，`pointer` 线程、`ticker` 都直接跳过。
 - **各自的会话**：`state.rs` 的 `get_for`、`list_for`、`mood_for`、`seen_for` 只看那个 agent 的会话（`state::agent_key`：Claude Code 的会话没有 `agent`，算 `claude`）。每只的 `pet:update` 是 `Shared::pet_payload`：岛的那份里共用的部分（设置、语言、静默、插件……）加上自己 agent 的会话和自己 agent 的角色（`data::pet_of`），带 `agent`；页面只收自己 agent 的。会话的反应（`pet:react`，`state.rs` 在里面写上会话的 agent）只发给岛和那个 agent 的桌宠；她自己的反应（没有会话）发给全部。点一下桌宠：只有它跳，跳到它自己 agent 的会话的窗口。指针移到它上面：只把它自己 agent 的结束算看过。眼睛跟光标看的是它自己 agent 的心情。
 - **岛代表谁**：`Shared::island_agent` 是岛正在显示的会话的 agent（没有会话就是 `claude`）。岛上、托盘的「放她出来 / 叫她回家」，设置「通用」的「她在桌面上」快捷开关，从岛里把她拉出来，都是对这只；桌宠自己的右键菜单对它自己（`tray::Over::Her(agent)`，菜单项 `out:<agent>`、`corner:<agent>`）。岛上显示的那个 agent 的桌宠在桌面上时，岛里放她的头像，不放她本人（`herOut`）。
-- **确认面板**留在岛里（`panel.js` 的 `holdsPanel` 只有岛），等你的那个 agent 的桌宠自己会播等待的动作。
+- **确认面板和通知**：桌宠在桌面上的 agent，确认在它头顶、做完的摘要在它旁边，岛不再自己打开（下一节）。
 - **位置**：每只各自记在 `spots`；没有记过的，从右下角起，按 `data::AGENTS` 的顺序每只往左挪一个窗口宽，不会叠在一起。大小、闲逛、眼睛跟光标是全部桌宠共用的设置。
 - **设置**：「外观」页「各个 agent 的角色」每一行有「放到桌面上」开关（`data-agent-out`，改 `desktop`）。
 - **测试副本**：`/health` 带 `pets`（每只的窗口：`made`、`shown`、位置），`/debug/walk` 可以带 `agent`。
@@ -417,6 +417,18 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 | 再全部关掉 | 6（1） | 208 MB | 265 MB | 0.16 s |
 
 每只桌宠一个自己的渲染进程，私有内存多 30–60 MB；浏览器、GPU、工具进程共用。CPU 主要是第一只：她一动，GPU 进程就要一直合成透明窗口；第二、第三只加得不多。全部关掉后窗口和渲染进程都没了，私有内存多出的约 20 MB 留在浏览器进程里。工作集受静默时的内存目标影响（没人碰时被压低），看私有内存比较准。
+
+## 通知和确认在桌宠旁边（beside）
+
+某个 agent 的桌宠在桌面上（`desktop`）时，它的会话的事都在它旁边说，岛不替它说；桌宠不在桌面上的 agent 照旧走岛。
+
+- **确认**（PermissionRequest：权限、AskUserQuestion、ExitPlanMode）：`asks::agent_of` 看确认是哪个 agent 的（`from` 为空是 Claude Code），`main.rs` 的 `asks_for` 给每个页面它自己那份：在桌面上的桌宠拿自己 agent 的，岛拿其余的；`push_asks` 每个页面各发一份，桌宠出去或回家（`desktop` 变了）、桌宠页面准备好时都重发一次，等着的确认就跟着搬过去。回答按 id，在哪个页面答都一样回到原来那个 hook；排队、逾时、终端先答了就收走，都和以前一样。两个 agent 同时问，各自在各自的桌宠头顶。页面收到和上次一样的清单不重画：别的页面答了一个，`push_asks` 会把所有页面都重发一遍，重画会让按钮又睡 600ms，点下去没反应（2026-10-16 测出来的）。
+- **面板在她头顶**：`panel.js` 量好大小交给 `pet_panel` → `pet.rs` 的 `set_panel`，窗口长大，她在屏幕上的位置不动。她所在那块屏的工作区里，她上面放得下就放上面；放不下而下面放得下就放下面（窗口从她头顶开始，她在窗口最上面，页面加 `.below`，`#stage` 改成 `column-reverse`）；两边都放不下就放空间大的那边。左右挡在屏幕边上时，窗口推回屏幕里，她在窗口里往回挪（`pet:shift` 的 `x`）。她的脚在哪由 `Win::bottom` 算（面板在下面时是窗口顶加她自己的高度），记住的位置、岛伸手够她、眼睛跟光标都用它。面板开着时她不闲逛（`pet.rs` 的 `walk` 拒绝，正在走的停下；`pet.js` 的 `isFree`）。
+- **打字**：和岛一样，只有点进输入框（AskUserQuestion 的「其他答案」）才拿键盘（`set_keyboard`：窗口变成可聚焦、拉到前面），答完或面板收起就把焦点还给原来的窗口（`prev_focus`，跳过她自己的窗口，所以在两只桌宠之间点来点去还是还给终端）。
+- **做完的摘要**：她 agent 的会话做完、改好、出错（她自己那份 `get_for` 是 done / review / error）时，`pet.js` 的 `fillSummary` 在她旁边放一个泡泡，内容和岛展开时一样：会话名、怎么结束的（改了几个文件）和用了多久、回复（最多三行）；「显示具体内容」关掉时只有怎么结束的。它跟着状态走：「提醒停留」到了（`state.tick`）或者看过了（指针移到她或泡泡上：`pet.rs` 的 `hover` → `seen_for`）就回到闲着，泡泡就收起。泡泡固定宽 240px（和面板一样不随她的大小缩放），窗口为它长大的方法和面板一样（`panel.js` 的 `report` 量面板或泡泡里正在显示的那个）。确认来了，泡泡先藏起来（`.asking`）。
+- **岛不自己打开**：岛显示的会话是这种 agent 的（`herOut`）时，心情变了也不展开（`island.js` 的 `nudgeFor` 那一行）；岛照样显示状态，点开也照样能看。系统通知和提示音不变。
+
+实测（2026-10-16，测试副本，两块屏：主屏 100%、左边那块 150%）：Codex 的确认只出现在 Codex 的桌宠头顶，允许 / 拒绝 / 交给终端都回到对的 hook；Claude 和 Codex 同时问，各在各的；Codex 的桌宠收回去，它的确认搬到岛上。桌宠在主屏最上面：面板在下面，她的位置一个像素都没动；在 150% 那块屏的左上角：面板在下面、往右推回屏幕里，她也没动。做完的泡泡：会话名、「改好了 · 2 個檔案 · 花了 0:00」、回复；8 秒后收起，窗口回原大小；指针移上去立刻收起；「显示具体内容」关掉只剩怎么结束的。「把焦点还给原来的窗口」在测试环境里看不到前台窗口，没量到。
 
 ## 踩过的坑
 
