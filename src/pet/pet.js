@@ -219,9 +219,30 @@ function render() {
   }
   sprite.classList.remove('empty')
 
-  bubble.classList.add('hidden')
+  // Her agent's session done, changed or failed: what of it, in her bubble
+  // (as the open island says it), until it is seen (the pointer over her or
+  // it: pet.rs hover) or its hold is up (state.rs): then it is at rest.
+  const isSaying = Status.isEnding(now) && !!now.id
+  if (isSaying) fillSummary()
+  bubble.classList.toggle('summary', isSaying)
+  bubble.classList.toggle('hidden', !isSaying)
+  // The window grows for it as for a prompt (panel.js report).
+  window.Panel?.report()
   const { main, more } = words()
   sprite.title = [main, more].filter(Boolean).join('\n')
+}
+
+// How her agent's session ended: its name, how it ended (the files changed)
+// and how long it took, the reply; with the specifics off, how it ended alone.
+function fillSummary() {
+  const detailed = config.details !== false
+  const line = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text })
+  const time = Status.time(now)
+  const ended = [Status.status(lang, now, { detailed }), time && t(lang, 'detail.took', { time })].filter(Boolean).join(' · ')
+  const name = detailed ? Status.nameOf(now, true) : ''
+  const reply = detailed && now.reply ? now.reply : ''
+  bubble.replaceChildren(...[name && line('title', name), line('status', ended), reply && line('reply', reply)].filter(Boolean))
+  bubble.title = [name, ended, reply].filter(Boolean).join('\n')
 }
 
 // --- Idle life: walk a little, glance around ---------------------------------------
@@ -236,9 +257,9 @@ function scheduleIdle() {
 }
 
 // Free for a walk or a glance: at rest, someone about, and she out to be
-// seen; no prompt up above her (panel.js).
+// seen; no prompt or bubble up above her (panel.js).
 function isFree() {
-  return now.mood === 'idle' && !quiet && !document.body.classList.contains('asking') && !document.hidden && !reaction && !walking && !dragged && !(looking && performance.now() < looking.until)
+  return now.mood === 'idle' && !quiet && !document.body.classList.contains('asking') && !bubble.classList.contains('summary') && !document.hidden && !reaction && !walking && !dragged && !(looking && performance.now() < looking.until)
 }
 
 async function idleAct() {
@@ -383,6 +404,9 @@ window.pet.onDragEnd(() => {
 
 sprite.addEventListener('mouseenter', () => window.pet.hover(true))
 sprite.addEventListener('mouseleave', () => window.pet.hover(false))
+// The pointer on her bubble: seen, as on her (it goes).
+bubble.addEventListener('mouseenter', () => bubble.classList.contains('summary') && window.pet.hover(true))
+bubble.addEventListener('mouseleave', () => bubble.classList.contains('summary') && window.pet.hover(false))
 sprite.addEventListener('mousedown', e => {
   // Into the debug log (when on): which window a press reaches.
   console.log('mousedown on her, button', e.button)

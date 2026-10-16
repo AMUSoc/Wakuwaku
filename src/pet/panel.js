@@ -243,13 +243,18 @@
   }
 
   // Tell main how much room the panel needs; null when it is gone.
+  // Above a pet out on the desktop: the prompt, or else her bubble telling
+  // how her agent's session ended (pet.js), the window grown for it.
+  const bubble = document.getElementById('bubble')
   function report() {
     // In the island, the island sizes itself and the window around it.
     if (window.Island?.isOn()) return window.Island.changed()
     requestAnimationFrame(() => {
-      window.pet.panel(panel.hidden ? null : { width: panel.offsetWidth + 16, height: panel.offsetHeight + 10 })
+      const box = !panel.hidden ? panel : bubble.classList.contains('summary') && !bubble.classList.contains('hidden') ? bubble : null
+      window.pet.panel(box ? { width: box.offsetWidth + 16, height: box.offsetHeight + 10 } : null)
     })
   }
+  window.Panel = { report }
 
   // Which page holds a prompt: main sends each its own (main.rs asks_for).
   // An agent's pet out on the desktop holds its agent's, above its head; the

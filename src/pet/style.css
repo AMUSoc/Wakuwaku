@@ -51,6 +51,50 @@ body {
   opacity: 0;
 }
 
+/* How her agent's session ended (pet.js fillSummary), out on the desktop:
+   fixed size text whatever her scale, as the prompt panel; the pointer on
+   it has seen it. */
+#bubble.summary {
+  flex: none;
+  width: 240px;
+  max-width: none;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  text-align: left;
+  white-space: normal;
+  pointer-events: auto;
+}
+
+#bubble.summary.hidden {
+  display: none;
+}
+
+#bubble.summary .title {
+  display: block;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#bubble.summary .status {
+  display: block;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+#bubble.summary .reply {
+  display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #4a5160;
+  font-size: 12px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 #bubble .line {
   display: block;
   overflow: hidden;
@@ -140,6 +184,10 @@ body {
 
 .below #bubble {
   margin: calc(6px * var(--scale) / 0.55) 0 0;
+}
+
+.below #bubble.summary {
+  margin: 8px 0 0;
 }
 
 #panel .head {
