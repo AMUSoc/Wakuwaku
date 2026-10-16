@@ -1463,7 +1463,9 @@
     // Something new that wants you, or is finished: the island opens for a
     // moment, a longer one with Claude's words to read.
     const isReading = isDetailed() && Status.isEnding(now) && !!now.reply
-    if (isOn() && before !== now.mood && NUDGE_CLIP[now.mood]) nudgeFor(NUDGE_CLIP[now.mood], null, isReading ? NUDGE_READ_MS : NUDGE_MS)
+    // Not for an agent whose pet is out on the desktop: it says so itself,
+    // beside her (pet.js, panel.js); the island shows it, opened by a click.
+    if (isOn() && before !== now.mood && NUDGE_CLIP[now.mood] && now.herOut !== true) nudgeFor(NUDGE_CLIP[now.mood], null, isReading ? NUDGE_READ_MS : NUDGE_MS)
     else update()
   })
 
