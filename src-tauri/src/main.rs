@@ -56,6 +56,8 @@ mod pet;
 mod pointer;
 mod power;
 mod proxy;
+mod reply;
+mod run;
 mod screen;
 mod scripts;
 mod server;
@@ -1232,6 +1234,10 @@ fn main() {
     }
     if let Some(at) = args.iter().position(|a| a == connection::AGY_FLAG) {
         return agy_hook(port, args.get(at + 1).map_or("", String::as_str));
+    }
+    // A task from the phone, run out of her job (run.rs).
+    if let Some(at) = args.iter().position(|a| a == run::FLAG) {
+        return run::helper(args.get(at + 1).map_or("", String::as_str));
     }
 
     // In the job of whoever started her (a hook of an older her, a terminal,

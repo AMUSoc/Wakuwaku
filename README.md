@@ -220,6 +220,21 @@ cargo build --release     # target/release/wakuwaku.exe，单个文件
 
 **推送（ntfy）**：「推送到手机」打开，手机装 [ntfy](https://ntfy.sh) 订阅设置里的主题，做完、改好了、出错、等你确认时就会推一则，点开是手机页。推送只写是哪个 agent、什么状态（「Codex 做完了」），不写项目、命令或文件。主题是随机产生的（ntfy.sh 上谁猜到主题名都能订阅）；也可以填自己架的 ntfy 服务器。勿扰时不推。
 
+**完整回复**：手机页上点一个会话，会打开它最后一则完整回复（从各家自己的对话记录读，最多 4000 字，Markdown 原样显示）。找不到对话记录时只有摘要，会注明。
+
+**从手机下新指令**：每个 agent 的卡片底下有一个输入框和「交给她」按钮。她会在电脑上用那个 agent 的非交互模式，在设置里给它指定的项目文件夹执行（「外观」页每个 agent 那行的文件夹；没设就不能交）。它的 hook 事件照常回到宠物，手机上看得到进度和结果。同一个 agent 同时只能有一个手机交的任务。这两个功能都要「手机访问」开着、带对 token 才能用，在这台电脑上也一样；日志里只记任务的前 80 个字。
+
+不加任何跳过权限的参数。各家非交互模式遇到要批准的工具时实际会怎样（2026-10-17 在这台电脑上实测：Claude Code 2.1.280、Codex 0.163.0、Grok 1.0.60、agy 1.4.0）：
+
+| agent | 用的命令 | 要批准的工具 |
+| --- | --- | --- |
+| Claude Code | `claude -p`（任务从 stdin 读） | 照常经 PermissionRequest hook 来问，**可以在手机上回答**；没人回答，等到「面板最多等」的时间就当作拒绝，Claude 会换个做法或放弃 |
+| Codex | `codex exec -`（任务从 stdin 读） | **完全不问**（就算设了 `approval_policy="on-request"` 也一样），在 Codex 默认的只读沙盒里跑：能读、能回答，写文件会被挡下。注意它有时仍会说「做完了」，要看完整回复 |
+| Grok | `grok --prompt-file … --permission-mode default` | 无头模式不能问，直接拒绝那个工具。特意加 `--permission-mode default`：`~/.grok/config.toml` 里如果设了 `permission_mode = "always-approve"`，手机交的任务也不会跟着全部自动批准 |
+| Antigravity | `agy -p <任务>` | 无头模式不能问，直接拒绝；`settings.json` 里 `permissions.allow` 的规则照样有效 |
+
+所以手机交的任务里，只有 Claude Code 能做要你批准的事（批准还是在手机上按）；其他三家适合问问题、看代码、写说明。
+
 ### 更新
 
 下载的 exe 启动时会同时看一次 GitHub 和 Gitee 上的最新发布（GitHub 的 `https://api.github.com/repos/zhoupengjie/Wakuwaku/releases/latest`，Gitee 上仓库的 tag 列表和发行版里的 `.sha256` 文件，都不带任何账号信息），之后每天看一次。草稿和预发布不算。有新版本时灵动岛提示一次，点一下打开设置「通用」页的「软件更新」，那里能看说明，点「更新」才会下载。

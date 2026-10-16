@@ -139,6 +139,10 @@ pub fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
                 _ => events::to_message(&event),
             };
             if let Some(mut msg) = msg {
+                // Its transcript, where its last reply is read in full (reply.rs).
+                if let Some(path) = ["transcript_path", "transcriptPath"].iter().filter_map(|k| event.get(*k).and_then(Value::as_str)).find(|p| !p.is_empty()) {
+                    msg["transcript"] = json!(path);
+                }
                 // Where the session runs, for going to its window (jump.rs).
                 if let Some(chain) = chain_for(sh, &req, &event, matches!(agent, Some("codex" | "agy"))) {
                     msg["chain"] = jump::chain_json(&chain);

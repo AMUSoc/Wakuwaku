@@ -1,7 +1,8 @@
 // The phone's page (mobile.rs): each agent's pet playing its session's mood,
 // what its sessions are doing, how a turn ended, and the prompts waiting,
 // answered here as on her panel. Asked again every 2 seconds while the page
-// is in sight.
+// is in sight. A tap on a session: its last reply whole (api/reply), its
+// Markdown as it is. Under each agent: a box for a new task (api/run).
 //
 // Everything that came from the sessions (names, replies, commands) is set
 // as text, never as HTML.
@@ -274,10 +275,19 @@
     const line = el('div', { class: 'line' })
     const reply = el('div', { class: 'reply' })
     const others = el('div', { class: 'others' })
-    const root = el('article', { class: 'agent', 'data-agent': agent }, pet, el('div', { class: 'info' }, name, line, reply, others))
+    const info = el('div', { class: 'info' }, name, line, reply, others)
+    // A new task: the box, its button, what came of it.
+    const words = el('textarea', { class: 'input task', rows: 2, maxLength: 8000 })
+    const give = el('button', { class: 'btn primary give', onclick: () => giveTask(agent) }, '')
+    const said = el('div', { class: 'note task-note' })
+    const runbox = el('div', { class: 'runbox' }, words, el('div', { class: 'row' }, give), said)
+    const root = el('article', { class: 'agent', 'data-agent': agent }, el('div', { class: 'top' }, pet, info), runbox)
     agentsBox.append(root)
-    cards[agent] = { root, pet, name, line, reply, others, sheet: '', mood: 'idle', version: 2 }
-    return cards[agent]
+    const c = { root, pet, name, line, reply, others, info, words, give, said, sheet: '', mood: 'idle', version: 2, session: '' }
+    // The session shown: its whole reply.
+    info.addEventListener('click', () => c.session && openReply(c.session, c.name.textContent))
+    cards[agent] = c
+    return c
   }
 
   function drawAgent(a) {
@@ -313,13 +323,84 @@
         const words = Status.isEnding(x) ? brief : [Status.nameOf(x, detailed), brief || T('mood.idle')].filter(Boolean).join(' · ')
         return el(
           'div',
-          { class: 'other', style: `--mood:${COLOR[x.mood] || COLOR.idle}` },
+          { class: 'other tappable', style: `--mood:${COLOR[x.mood] || COLOR.idle}`, onclick: e => (e.stopPropagation(), openReply(x.id, Status.nameOf(x, detailed) || AGENT_NAMES[a.agent])) },
           el('div', { class: 'other-line' }, el('i'), el('span', {}, words)),
           Status.isEnding(x) && x.reply ? el('div', { class: 'other-reply' }, x.reply) : null,
         )
       }),
     )
     c.others.hidden = !rest.length
+    c.session = s.id || ''
+    c.info.classList.toggle('tappable', !!s.id)
+    c.info.title = s.id ? T('m.tapForReply') : ''
+    drawRunbox(c, a)
+  }
+
+  // --- A new task ---------------------------------------------------------------------
+
+  function drawRunbox(c, a) {
+    const name = AGENT_NAMES[a.agent]
+    c.words.placeholder = T('m.runPlaceholder', { agent: name })
+    c.give.textContent = T('m.run')
+    const blocked = !a.canRun ? T('m.runNoFolder', { agent: name }) : a.running ? T('m.running', { time: Status.clock(state.at - a.running) }) : ''
+    c.words.disabled = !a.canRun
+    c.give.disabled = !a.canRun || !!a.running || c.sending
+    if (blocked) c.said.textContent = blocked
+    else if (c.said.dataset.kept !== '1') c.said.textContent = ''
+    c.said.classList.toggle('bad', !a.canRun)
+  }
+
+  async function giveTask(agent) {
+    const c = cards[agent]
+    const prompt = c.words.value.trim()
+    if (!prompt || c.sending) return
+    c.sending = true
+    c.give.disabled = true
+    let note
+    try {
+      const res = await fetch('api/run', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', 'x-wakuwaku': '1' },
+        body: JSON.stringify({ agent, prompt }),
+      })
+      const got = await res.json().catch(() => ({}))
+      if (res.ok) {
+        c.words.value = ''
+        note = T('m.runSent')
+      } else {
+        note = got.error === 'busy' ? T('m.runBusy', { agent: AGENT_NAMES[agent] }) : got.error === 'noFolder' ? T('m.runNoFolder', { agent: AGENT_NAMES[agent] }) : T('m.runFailed', { why: got.error || res.status })
+      }
+    } catch {
+      note = T('m.offline')
+    }
+    c.sending = false
+    c.said.textContent = note
+    c.said.dataset.kept = '1'
+    setTimeout(() => (c.said.dataset.kept = ''), 6000)
+    poll()
+  }
+
+  // --- A whole reply --------------------------------------------------------------------
+
+  const sheet = el('div', { class: 'sheet', hidden: true })
+  document.body.append(sheet)
+  sheet.addEventListener('click', e => e.target === sheet && (sheet.hidden = true))
+
+  async function openReply(session, title) {
+    const text = el('pre', { class: 'md' }, T('m.loading'))
+    const note = el('div', { class: 'note' })
+    const close = el('button', { class: 'btn', onclick: () => (sheet.hidden = true) }, T('m.close'))
+    sheet.replaceChildren(el('div', { class: 'sheet-box' }, el('div', { class: 'sheet-head' }, el('span', { class: 'title' }, title), close), note, text))
+    sheet.hidden = false
+    try {
+      const got = await get(`api/reply?session=${encodeURIComponent(session)}`)
+      // Markdown as it is: set as text, never as HTML.
+      text.textContent = got.text || (got.hidden ? '' : T('m.noReply'))
+      note.textContent = [got.hidden && T('m.hidden'), got.summaryOnly && got.text && T('m.summaryOnly'), got.clipped && T('m.clipped')].filter(Boolean).join(' · ')
+    } catch (e) {
+      text.textContent = e.token ? T('m.needToken') : T('m.offline')
+    }
   }
 
   function draw() {

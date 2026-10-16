@@ -222,6 +222,21 @@ As for safety:
 
 **Pushes (ntfy)**: turn on "Pushes to the phone", subscribe in the [ntfy](https://ntfy.sh) app to the topic in the settings, and a session done, changed, failed or waiting for you sends a push; tapping it opens the phone's page. A push names the agent and how it is alone ("Codex is done"): no project, command or file. The topic is random (anyone who guesses a topic's name on ntfy.sh can subscribe); a server of your own can be put in instead. None while Do not disturb is on.
 
+**The whole reply**: tap a session on the phone's page for its last reply in full (read from its agent's own transcript, 4000 characters at most, its Markdown as it is). With no transcript found, the summary alone, and it says so.
+
+**New tasks from the phone**: under each agent's card, a box and "Give it to her". She runs the agent's non-interactive mode on the computer, in the project folder set for it (the Look page, each agent's row; none set, no task). Its hook events come back to the pets as ever, so the phone shows how it goes and how it ends. One task from the phone at a time for each agent. Both need Phone access on and the token, on this computer too; her log keeps a task's first 80 characters alone.
+
+No flag that skips a permission. What each agent's non-interactive mode does with a tool that needs approval (tried on this computer on 2026-10-17: Claude Code 2.1.280, Codex 0.163.0, Grok 1.0.60, agy 1.4.0):
+
+| Agent | Run as | A tool that needs approval |
+| --- | --- | --- |
+| Claude Code | `claude -p` (the task on stdin) | Asked through its PermissionRequest hook as ever: **answered on the phone**; unanswered, after "Panel waits up to", denied, and Claude tries another way or gives up |
+| Codex | `codex exec -` (the task on stdin) | **Never asked** (not even with `approval_policy="on-request"`); it runs in Codex's read-only sandbox by default: it reads and answers, and writing a file is blocked. It may still say it is done: read the whole reply |
+| Grok | `grok --prompt-file … --permission-mode default` | Headless, it cannot ask: the tool is denied. `--permission-mode default` on purpose: with `permission_mode = "always-approve"` in `~/.grok/config.toml`, a task from the phone does not approve everything with it |
+| Antigravity | `agy -p <task>` | Headless, it cannot ask: denied; `permissions.allow` rules in its `settings.json` still apply |
+
+So of the tasks from the phone, only Claude Code's can do what needs your approval (still given on the phone); the other three are for questions, reading code and writing it up.
+
 ### Updates
 
 The downloaded exe looks at the latest release on GitHub and on Gitee as it starts (GitHub's `https://api.github.com/repos/zhoupengjie/Wakuwaku/releases/latest`; on Gitee, the repo's tags and the `.sha256` file in a release; with no account of yours), then once a day. Drafts and prereleases don't count. A new version is told on the island once; click it for Updates on the General page of the settings, where you can read its notes. Nothing is downloaded until you click Update.

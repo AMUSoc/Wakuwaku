@@ -7,6 +7,8 @@
 //   GET  /mobile/api/state     each agent's session shown and its sessions (state.rs view)
 //   GET  /mobile/api/asks      the prompts waiting (asks.rs views), every page's
 //   POST /mobile/api/answer    { id, choice }: as the panel answers (Shared::answer)
+//   GET  /mobile/api/reply     ?session=<id>: its last reply whole, from its transcript (reply.rs)
+//   POST /mobile/api/run       { agent, prompt, cwd? }: a task for an agent (run.rs)
 //
 // On this computer (127.0.0.1) the page needs nothing. With "phone access"
 // on (the setting mobile), the same port is listened on at one more address
@@ -16,7 +18,8 @@
 // (tailscale serve: a forwarding header, or a host not this one), may ask for
 // /mobile/ alone, and its data only with the token (mobileToken: a cookie,
 // ?t=, or the x-wakuwaku-token header); the hooks and everything else are
-// this computer's.
+// this computer's. The two that read a transcript or start a task ask for
+// both, phone access on and the token, from this computer too.
 //
 // ntfy (the setting ntfy: { on, server, topic }): a done, changed, failed or
 // waiting session told on the phone, by its agent and how it is alone, a tap
@@ -84,6 +87,32 @@ pub fn is_local(req: &Request) -> bool {
 
 fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
+}
+
+// %XX and + in a query's value.
+fn decode(v: &str) -> String {
+    let b = v.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' if i + 2 < b.len() => {
+                let hex = |c: u8| (c as char).to_digit(16);
+                match (hex(b[i + 1]), hex(b[i + 2])) {
+                    (Some(h), Some(l)) => {
+                        out.push((h * 16 + l) as u8);
+                        i += 3;
+                        continue;
+                    }
+                    _ => out.push(b'%'),
+                }
+            }
+            b'+' => out.push(b' '),
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn query_of<'a>(url: &'a str, key: &str) -> Option<&'a str> {
@@ -352,6 +381,9 @@ fn state(sh: &Shared) -> Value {
                 "version": pet.as_ref().map_or(2, |p| p.version),
                 "pet": pet.as_ref().map(|p| p.name.clone()),
                 "color": pet.as_ref().and_then(|p| p.color.clone()).unwrap_or_else(|| data::agent_color(agent).to_string()),
+                // A task may be given it (its project folder set), and the one from the phone running.
+                "canRun": crate::run::folder(sh, agent).is_some(),
+                "running": crate::run::running(agent),
             })
         })
         .collect();
@@ -402,6 +434,31 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
         ("GET", "/mobile/sw.js") => respond(req, 200, "text/javascript; charset=utf-8", WORKER.as_bytes().to_vec(), &[("cache-control", "no-cache".into())]),
         ("GET", "/mobile/icon-192.png") => respond(req, 200, "image/png", ICON_192.to_vec(), &[("cache-control", "max-age=86400".into())]),
         ("GET", "/mobile/icon-512.png") => respond(req, 200, "image/png", ICON_512.to_vec(), &[("cache-control", "max-age=86400".into())]),
+        // Phone access on and the token, wherever they come from.
+        ("GET", "/mobile/api/reply") | ("POST", "/mobile/api/run") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
+        ("GET", "/mobile/api/reply") | ("POST", "/mobile/api/run") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
+        ("GET", "/mobile/api/reply") => {
+            let id = query_of(req.url(), "session").map(decode).unwrap_or_default();
+            let found = sh.pet.lock().unwrap().transcript_of(&id);
+            let Some((agent, transcript, summary)) = found else { return json_reply(req, 404, json!({ "error": "no such session" })) };
+            // The specifics kept off screen: none of it.
+            if sh.setting("details") == false {
+                return json_reply(req, 200, json!({ "session": id, "agent": agent, "text": "", "hidden": true }));
+            }
+            let whole = (!transcript.is_empty()).then(|| crate::reply::last_reply(&agent, &transcript)).flatten();
+            let summary_only = whole.is_none();
+            let (text, clipped) = crate::reply::clip(&whole.unwrap_or(summary));
+            json_reply(req, 200, json!({ "session": id, "agent": agent, "text": text, "clipped": clipped, "summaryOnly": summary_only }))
+        }
+        // As an answer: only with the header no other site's page can send.
+        ("POST", "/mobile/api/run") if header(&req, "x-wakuwaku").is_some() => {
+            let Some(body) = read_json(&mut req) else { return json_reply(req, 400, json!({ "error": "bad json" })) };
+            let agent = body["agent"].as_str().unwrap_or("");
+            match crate::run::start(sh, agent, body["prompt"].as_str().unwrap_or(""), body["cwd"].as_str()) {
+                Ok(started) => json_reply(req, 200, started),
+                Err(why) => json_reply(req, if why == "busy" { 409 } else { 400 }, json!({ "error": why })),
+            }
+        }
         _ if !allowed => json_reply(req, 401, json!({ "error": "token" })),
         ("GET", "/mobile/api/state") => {
             SEEN.store(now_ms(), Ordering::SeqCst);
@@ -538,6 +595,15 @@ mod tests {
         assert!(same("abc", "abc"));
         assert!(!same("abc", "abd"));
         assert!(!same("abc", "abcd"));
+    }
+
+    #[test]
+    fn a_query_value_decoded() {
+        assert_eq!(decode("01a1-b2%3Ac"), "01a1-b2:c");
+        assert_eq!(decode("a+b%E5%AD%97"), "a b字");
+        assert_eq!(decode("50%"), "50%");
+        assert_eq!(decode("%zz"), "%zz");
+        assert_eq!(decode("%字"), "%字");
     }
 
     #[test]

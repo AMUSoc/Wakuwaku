@@ -39,8 +39,9 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 ## Rust 模組的職責
 
 **入口與共用狀態**
-- `main.rs`：入口。依參數分流成 `--wakuwaku-ensure-running`（Claude Code 的 SessionStart）、`--wakuwaku-codex-hook`、`--wakuwaku-agy-hook <事件>`、`--wakuwaku-guard`（當機報告的守護程序）；否則以「誰佔著連接埠誰就是寵物」做單實例，建立 `Shared`（所有部分共用的狀態，**任何時候都不同時持有兩把鎖**），註冊頁面可呼叫的 Tauri 命令，並啟動 pointer、widgets、monitor、fullscreen、ticker 等背景執行緒。
+- `main.rs`：入口。依參數分流成 `--wakuwaku-ensure-running`（Claude Code 的 SessionStart）、`--wakuwaku-codex-hook`、`--wakuwaku-agy-hook <事件>`、`--wakuwaku-guard`（當機報告的守護程序）、`--wakuwaku-run <job>`（手機交的任務，run.rs）；否則以「誰佔著連接埠誰就是寵物」做單實例，建立 `Shared`（所有部分共用的狀態，**任何時候都不同時持有兩把鎖**），註冊頁面可呼叫的 Tauri 命令，並啟動 pointer、widgets、monitor、fullscreen、ticker 等背景執行緒。
 - `server.rs`：127.0.0.1:47213 的 HTTP 介面（`/hook`、`/state`、`/widget`、`/health`、`/come-home`、`/quit`、`/debug/*`、`/mobile/…`）。不是本機來的請求（`mobile::is_local`）只能到 `/mobile/…`。
+- `reply.rs`：讀各家 transcript 的最後一則完整回覆（`/mobile/api/reply`）。`run.rs`：手機交的新任務（`/mobile/api/run`）：在 `agentDirs` 的資料夾用各家的非互動模式跑，提示文字不上命令列，不加跳過權限的旗標，同一 agent 一次一個。
 - `mobile.rs`：手機頁（`src/mobile/`）：設定 `mobile` 打開時在 Tailscale 位址（或 `mobileBind` 指定的）上也聽同一個連接埠；外來請求要 token（`mobileToken`）；ntfy 推播（只寫 agent 和狀態）。細節見 `docs/DEVELOPMENT.md` 的「手机页」。
 - `state.rs`：狀態機。按會話記 mood、名字、執行中的工具、任務清單、改過的檔案、結果，挑出最需要你的那一個顯示；也負責閒置會話的隱藏（`is_shown`）與遺忘。
 - `events.rs` / `events_codex.rs` / `events_agy.rs` / `events_grok.rs`：把 Claude Code / Codex / Antigravity / Grok Build 的 hook 事件換算成統一的「訊息」；會話名、專案名（git 倉庫名，含 worktree）。`events_grok.rs` 的測試直接用 `src-tauri/fixtures/grok/` 裡 Grok 1.0.52 實際送來的 payload（用 `tools/hook_dump.py` 抓的）。

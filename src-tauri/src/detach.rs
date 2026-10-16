@@ -142,7 +142,8 @@ mod imp {
         wide(std::ffi::OsStr::new(&line))
     }
 
-    pub fn spawn(exe: &Path, args: &[&str]) -> bool {
+    // Started: its process id.
+    pub fn spawn_pid(exe: &Path, args: &[&str]) -> Option<u32> {
         let app = wide(exe.as_os_str());
         let mut line = command_line(exe, args);
         // Her own folder, not the starter's (a hook's: the project's): she would hold on to it.
@@ -192,7 +193,7 @@ mod imp {
                 CloseHandle(info.process);
             }
         }
-        made
+        made.then_some(info.process_id)
     }
 
     // The process that started this one (by a snapshot of them all).
@@ -237,14 +238,15 @@ mod imp {
 mod imp {
     use std::path::Path;
 
-    pub fn spawn(exe: &Path, args: &[&str]) -> bool {
+    pub fn spawn_pid(exe: &Path, args: &[&str]) -> Option<u32> {
         std::process::Command::new(exe)
             .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
-            .is_ok()
+            .ok()
+            .map(|c| c.id())
     }
 
     pub fn should_leave() -> bool {
@@ -252,4 +254,8 @@ mod imp {
     }
 }
 
-pub use imp::{should_leave, spawn};
+pub use imp::{should_leave, spawn_pid};
+
+pub fn spawn(exe: &std::path::Path, args: &[&str]) -> bool {
+    spawn_pid(exe, args).is_some()
+}

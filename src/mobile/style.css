@@ -211,7 +211,7 @@ body {
   border-left: 4px solid var(--edge, var(--line));
   min-width: 0;
 }
-.agent:not(.busy) {
+.agent:not(.busy) .top {
   opacity: 0.72;
 }
 .pet {
@@ -293,4 +293,85 @@ body {
   height: 6px;
   border-radius: 50%;
   background: var(--mood);
+}
+
+/* A card: the pet and its words on top, a new task's box under them. */
+.agent {
+  flex-direction: column;
+  gap: 8px;
+}
+.agent .top {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+.info.tappable,
+.other.tappable {
+  cursor: pointer;
+}
+.runbox {
+  padding-left: 6px;
+}
+.runbox .input.task {
+  resize: vertical;
+  min-height: 44px;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.runbox .btn.give {
+  flex: 0 0 auto;
+}
+.runbox .btn:disabled,
+.runbox .input:disabled {
+  opacity: 0.5;
+}
+.task-note.bad {
+  color: var(--danger);
+}
+
+/* A whole reply, over the page. */
+.sheet {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 10;
+}
+.sheet-box {
+  background: var(--card);
+  width: 100%;
+  max-width: 640px;
+  max-height: 86vh;
+  border-radius: 18px 18px 0 0;
+  padding: 14px 16px max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sheet-head .title {
+  flex: 1;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-head .btn {
+  flex: 0 0 auto;
+}
+.md {
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 14px/1.55 ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  background: var(--code);
+  border-radius: 10px;
+  padding: 12px;
 }

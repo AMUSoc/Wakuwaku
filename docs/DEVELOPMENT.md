@@ -458,6 +458,20 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 | `GET /mobile/api/asks` | `{ asks }`：所有确认（不分岛和桌宠） |
 | `POST /mobile/api/answer` | `{ id, choice }`，回 `{ ok }`；要带 `x-wakuwaku` 头 |
 | `GET /mobile/sheet/<agent>` | 那个 agent 的宠物的 `spritesheet.webp`（网址带宠物 id 和修改时间，换宠物就换网址） |
+| `GET /mobile/api/reply` | `?session=<id>`：`{ session, agent, text, clipped, summaryOnly }`，它最后一则完整回复（`reply.rs`）；`details` 关着时 `{ hidden: true }` 不给内容 |
+| `POST /mobile/api/run` | `{ agent, prompt, cwd? }`，回 `{ ok, started }`；`busy`（409）、`noFolder`、`badCwd`、`prompt`（400）；要带 `x-wakuwaku` 头 |
+
+`reply` 和 `run` 不分本机外来：都要「手机访问」开着（否则 403）、token 对（否则 401）。`api/state` 每个 agent 多了 `canRun`（设了项目文件夹）和 `running`（手机交的任务在跑：开始的时间）。
+
+**完整回复（reply.rs）**：hook 事件带的对话记录路径（Claude Code、Codex 的 `transcript_path`，Grok、agy 的 `transcriptPath`）由 `server.rs` 放进消息的 `transcript`，`state.rs` 记在会话上。读文件尾 2 MB：Claude Code 取最后一段 assistant 的 text（一则回复可能分好几行，碰到 user 行就停）；Codex 取最后一个 assistant `response_item` 的 `output_text`，没有就用 `task_complete.last_agent_message`；Grok 取最后一轮（从 `user_message_chunk` 起）的 `agent_message_chunk`，有工具调用时只取最后一次调用之后的；agy 取最后一个有内容的 `PLANNER_RESPONSE`。最多 4000 字。读不到就给 `reply` 摘要并标 `summaryOnly`。2026-10-17 用这台电脑上四家真的对话记录试过。
+
+**下新指令（run.rs）**：工作目录只能是设置 `agentDirs` 里那个 agent 的文件夹或它下面的（两边都 `canonicalize` 后比），没设就拒绝。任务的字从不放命令行：`claude`、`codex` 是 npm 的 `.cmd`，要经过 cmd.exe，里面的 `&`、`|` 会被当成命令。她把字写进 `data/runs/<agent>-<时间>.prompt.txt`，用 `detach::spawn_pid` 启动自己的 `--wakuwaku-run <job.json>`（脱离她的 job），由它跑 agent：`claude -p` 和 `codex exec -` 从 stdin 读那个文件，`grok --prompt-file <文件> --permission-mode default`，`agy -p <字>`（agy 只接受参数；它是 `.exe`，由 Rust 的 `Command` 正确转义，找到的不是 `.exe` 就不跑）。`CREATE_NO_WINDOW`，输出写进同名 `.log`；跑完删掉 prompt 文件，在 job 里写 `ended` 和 `exit`。同一 agent 只能一个：记着小帮手的 pid，`OpenProcess` + `GetExitCodeProcess` 看它还在不在、job 有没有 `ended`。`data/runs` 只留最近 20 次。日志只记前 80 字（`run::first_words`）。
+
+各家非交互模式遇到要批准的工具（2026-10-17 实测，README 有表）：Claude Code `-p` 会触发 PermissionRequest hook，能在手机上回答，没人回答就当拒绝（`--permission-prompts` 默认 `host`，没有 host 时拒绝）；Codex `exec` 不问任何人（`-c approval_policy="on-request"` 也不问），默认只读沙盒；Grok 无头模式拒绝（但用户的 `config.toml` 若是 `always-approve` 就全部自动批准，所以手机交的一律加 `--permission-mode default`）；agy 无头模式拒绝。试法：暂存文件夹里请它执行 `echo … > probe.txt`，Claude Code 用 `--setting-sources project --settings` 把 hook 指到测试用的 47299，Codex 和 agy 的命令 hook 带着 `WAKUWAKU_PORT=47299`。
+
+**结束时关掉的会话**：非交互模式做完会马上送 `SessionEnd`（`claude -p`、`codex exec` 都是），原来一收到就删掉会话，手机上连「做完了」都看不到。现在会话在结束状态（做完、改好了、出错）时收到 `session-end`，只标 `closed`：结束状态照常停留到被看到或时间到，之后不显示但留着（还能读完整回复），跟其他闲置会话一样 2 小时后遗忘。不在结束状态时照旧立刻删掉。
+
+实测（2026-10-17，另开一份在 47299）：没 token、手机访问关着、没 `x-wakuwaku` 头、没设文件夹的 agent、`cwd` 是 `C:\Windows` 或 `..`、空任务都被挡；同一 agent 第二个任务 409；四家各从 `/run` 跑一次都成功（Claude Code 的任务里有 `"`、`&`、`|`、`%PATH%`，原样到了它手上）；Codex 的会话结束后留着，`/reply` 读到它带 Markdown 的完整回复；Chrome 里点会话打开完整回复、从输入框交任务给 Codex。
 
 **谁算本机**（`mobile::is_local`）：对端是 loopback、没有 `X-Forwarded-For` / `Forwarded` / `Tailscale-*` 头、`Host` 是 `127.0.0.1` / `localhost` / `[::1]`（或者没有）。三条都满足才是本机；不是本机的请求只能到 `/mobile…`（其余一律 404，包括 `/hook`、`/health`、`/quit`），而且「手机访问」关着时连 `/mobile` 也 404；`api/` 和 `sheet/` 要 token（cookie、`?t=`、或 `x-wakuwaku-token` 头，定时比较）。这样 `tailscale serve`（从 127.0.0.1 转进来，但带 `Tailscale-*` 和 `X-Forwarded-For`，`Host` 是 ts.net 的名字）也算外面，DNS rebinding（`Host` 是别人的网域）也挡掉。本机的网页可以不带 token 打开 `/mobile/`，但别的网站的页面想替你按「允许」：`answer` 要 `x-wakuwaku` 头，跨源请求得先 preflight，这个端口从不回 CORS，所以送不出来。
 
