@@ -246,12 +246,14 @@
   // Above a pet out on the desktop: the prompt, or else her bubble telling
   // how her agent's session ended (pet.js), the window grown for it.
   const bubble = document.getElementById('bubble')
+  const game = document.getElementById('game')
   function report() {
     // In the island, the island sizes itself and the window around it.
     if (window.Island?.isOn()) return window.Island.changed()
     requestAnimationFrame(() => {
-      const box = !panel.hidden ? panel : bubble.classList.contains('summary') && !bubble.classList.contains('hidden') ? bubble : null
-      window.pet.panel(box ? { width: box.offsetWidth + 16, height: box.offsetHeight + 10 } : null)
+      // A prompt alone; else her bubble and her game's strip (pet.js), one over the other.
+      const shown = !panel.hidden ? [panel] : [bubble.classList.contains('summary') && !bubble.classList.contains('hidden') ? bubble : null, game.hidden ? null : game].filter(Boolean)
+      window.pet.panel(shown.length ? { width: Math.max(...shown.map(b => b.offsetWidth)) + 16, height: shown.reduce((h, b) => h + b.offsetHeight + 10, 0) } : null)
     })
   }
   window.Panel = { report }

@@ -219,6 +219,63 @@ body {
   display: none;
 }
 
+/* Her part of a League of Legends game (pet.js fillGame): fixed size text,
+   white, edged in her colour; under a prompt, out of the way. */
+#game {
+  flex: none;
+  width: 240px;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 2px solid var(--pet-color, var(--accent));
+  background: #fff;
+  color: #1f2430;
+  font-size: 12.5px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+#game[hidden],
+.asking #game {
+  display: none;
+}
+
+#game > span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#game .clock {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+#game .timer {
+  font-variant-numeric: tabular-nums;
+}
+
+#game .timer.soon {
+  color: #c2410c;
+  font-weight: 600;
+}
+
+#game .head {
+  margin-top: 3px;
+  color: #6b7280;
+  font-size: 11.5px;
+}
+
+#game .ally.me {
+  font-weight: 600;
+}
+
+.below #game {
+  margin: 8px 0 0;
+}
+
 /* No room above her on her screen: the panel (or the bubble) below her, she
    at the window's top where she was (pet.rs set_panel). */
 .below #stage {

@@ -111,6 +111,8 @@ fn defaults() -> Map<String, Value> {
         "promptWaitSec": 290,
         "dnd": false,
         "hideInFullscreen": true,
+        // A League of Legends game on: the pets show of it (lol.rs).
+        "lol": true,
         "onboarded": false,
     }) else {
         unreachable!()

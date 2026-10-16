@@ -187,6 +187,16 @@ The repository's [`wallpapers/`](wallpapers/) folder has five desktop wallpapers
 
 While she's closed, Claude Code works as usual: the events sent to her are refused at once (about 1 ms) and nothing waits.
 
+### League of Legends game helper
+
+While you play League of Legends, each pet out on the desktop (turn on "On the desktop" for its agent on the Look page) takes a part: Claude's shows the game clock; Grok's shows the Dragon, Baron and Herald respawn countdowns and the summoner spells your team's five took. The agents' notifications go on as ever. Once the game is over, all is as it was.
+
+- **Riot's own ways in only**: in a game she reads only the Live Client Data API the game itself opens on this computer (`127.0.0.1:2999`). Never the game's memory, no injecting, nothing done for you, no reading the screen.
+- **Neutral information only**: as Riot's developer policy asks (no information not in the game that gives an edge, no deciding for the player), no enemy summoner spell or ultimate timers, and no "ward now" or "group up".
+- **Play in borderless mode** (game settings → Video → Window mode → Borderless). Full screen covers every other window, the pets with them.
+- **The full-screen exception**: with "Hide while an app is full screen" on, League of Legends in a game does not count as full screen, so the pets stay; other full-screen apps hide them as before.
+- Not wanted: turn off "League of Legends game helper" on the General page.
+
 ### Updates
 
 The downloaded exe looks at the latest release on GitHub and on Gitee as it starts (GitHub's `https://api.github.com/repos/zhoupengjie/Wakuwaku/releases/latest`; on Gitee, the repo's tags and the `.sha256` file in a release; with no account of yours), then once a day. Drafts and prereleases don't count. A new version is told on the island once; click it for Updates on the General page of the settings, where you can read its notes. Nothing is downloaded until you click Update.

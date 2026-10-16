@@ -229,10 +229,66 @@ function render() {
   if (isSaying) fillSummary()
   bubble.classList.toggle('summary', isSaying)
   bubble.classList.toggle('hidden', !isSaying)
+  fillGame()
   // The window grows for it as for a prompt (panel.js report).
   window.Panel?.report()
   const { main, more } = words()
   sprite.title = [main, more].filter(Boolean).join('\n')
+}
+
+// --- A League of Legends game (lol.rs): her part of it ---------------------------------
+
+const gameStrip = document.getElementById('game')
+let gameTimer
+
+// The game's clock now: as last read, run on since.
+const gameNow = g => g.clock.time + Math.max(0, Date.now() - g.clock.at) / 1000
+
+function mmss(s) {
+  const t = Math.max(0, Math.round(s))
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
+}
+
+// Her part, drawn anew each second while a game is on: Claude's pet the
+// clock; Grok's the objectives' respawns (soonest first, four at most) and
+// her own team's summoner spells. Neutral: what is, never what to do.
+function fillGame() {
+  clearTimeout(gameTimer)
+  const g = now.game
+  if (!g || isIsland()) {
+    if (!gameStrip.hidden) {
+      gameStrip.hidden = true
+      gameStrip.replaceChildren()
+    }
+    return
+  }
+  const line = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text })
+  const at = gameNow(g)
+  const lines = []
+  if (g.role === 'clock') lines.push(line('clock', t(lang, 'lol.clock', { time: mmss(at) })))
+  if (g.role === 'objectives') {
+    const rows = (g.objectives || [])
+      .map(o => ({ ...o, left: o.at - at }))
+      .sort((a, b) => a.left - b.left)
+      .slice(0, 4)
+    for (const o of rows) {
+      const what = t(lang, `lol.${o.what}`)
+      const row = line(`timer${o.left <= 30 ? ' soon' : ''}`, o.left > 0 ? t(lang, 'lol.in', { what, time: mmss(o.left) }) : t(lang, 'lol.up', { what }))
+      lines.push(row)
+    }
+    if ((g.allies || []).length) {
+      lines.push(line('head', t(lang, 'lol.allies')))
+      for (const a of g.allies) {
+        const pos = a.position ? t(lang, `lol.pos.${a.position}`) : ''
+        lines.push(line(`ally${a.me ? ' me' : ''}`, `${[pos, a.champion].filter(Boolean).join(' · ')}：${a.spells.filter(Boolean).join(' / ')}`))
+      }
+    }
+  }
+  const wasHidden = gameStrip.hidden
+  gameStrip.replaceChildren(...lines)
+  gameStrip.hidden = !lines.length
+  if (wasHidden !== gameStrip.hidden) window.Panel?.report()
+  if (!gameStrip.hidden) gameTimer = setTimeout(fillGame, 1000)
 }
 
 // How her agent's session ended: its name, how it ended (the files changed)

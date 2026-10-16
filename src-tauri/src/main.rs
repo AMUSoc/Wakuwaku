@@ -46,6 +46,7 @@ mod gpu;
 mod i18n;
 mod island;
 mod jump;
+mod lol;
 mod notch;
 mod notify;
 mod pet;
@@ -358,6 +359,8 @@ impl Shared {
         now["petColor"] = json!(sprite.and_then(|p| p.color.clone()).unwrap_or_else(|| data::agent_color(agent).to_string()));
         now["list"] = list;
         now["agent"] = json!(agent);
+        // A League of Legends game on: its part for this agent's pet (lol.rs).
+        now["game"] = lol::view(agent);
         now
     }
 
@@ -1372,6 +1375,8 @@ fn main() {
             updates::start(&sh);
             // Crashes since: their reports made, sent or asked about.
             crash::start(&sh);
+            // A League of Legends game: what the pets show of it (lol.rs).
+            lol::start(&sh);
 
             // The mouse: click-through, her eyes, drags; for both windows.
             // Quiet (nobody touching it), looked at once a second.

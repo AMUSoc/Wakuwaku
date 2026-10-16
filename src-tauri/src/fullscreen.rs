@@ -6,6 +6,21 @@
 // And only on a display she is on (on: their rects; none given, any): a
 // video full screen on the second display is none of hers (the user,
 // 2026-10-13). Looked at every 1.5 s (main.rs).
+//
+// A League of Legends game on (lol.rs) is not full screen to her: her pets
+// stay out over it (the game in its borderless mode: README).
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static GAME: AtomicBool = AtomicBool::new(false);
+
+pub fn set_game(on: bool) {
+    GAME.store(on, Ordering::SeqCst);
+}
+
+fn is_game(program: &str) -> bool {
+    GAME.load(Ordering::SeqCst) && program == "league of legends.exe"
+}
 
 #[cfg(windows)]
 mod imp {
@@ -125,7 +140,8 @@ mod imp {
             let m = &info.monitor;
             let mon = (m.left, m.top, m.right - m.left, m.bottom - m.top);
             let covers = rect.left <= m.left && rect.top <= m.top && rect.right >= m.right && rect.bottom >= m.bottom;
-            Some((covers && !SKIP_PROGRAMS.contains(&program_of(hwnd).as_str())).then_some(mon))
+            let program = program_of(hwnd);
+            Some((covers && !SKIP_PROGRAMS.contains(&program.as_str()) && !super::is_game(&program)).then_some(mon))
         }
     }
 

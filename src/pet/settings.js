@@ -507,6 +507,7 @@
       ${sec(T('s.quiet'))}<div class="grp">
         ${row(esc(T('menu.dnd')), esc(T('s.dndNote')), sw('dnd', s.dnd))}
         ${row(esc(T('settings.hideInFullscreen')), '', sw('hideInFullscreen', s.hideInFullscreen, snap.fullscreenAvailable ? '' : 'disabled'))}
+        ${row(esc(T('s.lol')), esc(T('s.lolNote')), sw('lol', s.lol !== false))}
       </div>`
   }
 
