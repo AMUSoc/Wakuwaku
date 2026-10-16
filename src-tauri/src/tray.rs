@@ -83,6 +83,12 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
         _ => "corner".into(),
     };
     menu.append(&MenuItem::with_id(app, corner, t("menu.backToCorner"), true, None::<&str>)?)?;
+    // On a pet: a new conversation with its agent, in a terminal; its website (launch.rs).
+    if let Over::Her(agent) = over {
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+        menu.append(&MenuItem::with_id(app, format!("new:{agent}"), t("menu.newChat"), true, None::<&str>)?)?;
+        menu.append(&MenuItem::with_id(app, format!("web:{agent}"), t("menu.web"), true, None::<&str>)?)?;
+    }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&CheckMenuItem::with_id(app, "dnd", t("menu.dnd"), true, flag("dnd"), None::<&str>)?)?;
     menu.append(&MenuItem::with_id(app, "settings", t("menu.settings"), true, None::<&str>)?)?;
@@ -109,6 +115,10 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
                 crate::set_out(sh, agent, !sh.is_out(agent));
             } else if let Some(agent) = id.strip_prefix("corner:") {
                 crate::pet::come_home(sh, agent);
+            } else if let Some(agent) = id.strip_prefix("new:") {
+                crate::launch::terminal(sh, agent);
+            } else if let Some(agent) = id.strip_prefix("web:") {
+                crate::launch::web(sh, agent);
             } else if let Some(pet_id) = id.strip_prefix("pet:") {
                 sh.change(json!({ "pet": pet_id }));
             } else if let Some(name) = id.strip_prefix("size:") {

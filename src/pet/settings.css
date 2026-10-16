@@ -842,6 +842,14 @@
   background: var(--g2);
 }
 
+/* Each agent's project folder, under its name (settings.js agentPetsPart). */
+#island-settings .agent-dir {
+  width: 100%;
+  margin-top: 4px;
+  box-sizing: border-box;
+  font-size: 12px;
+}
+
 /* "On the desktop" before each agent's switch (settings.js agentPetsPart). */
 #island-settings .agent-out {
   flex: none;

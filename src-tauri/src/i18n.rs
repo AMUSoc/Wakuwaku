@@ -64,6 +64,8 @@ pub fn t(lang: &str, key: &str) -> String {
             "Wakuwaku has crashed {n} times in a row.\n\nSend crash reports automatically from now on? They are posted publicly as issues on GitHub or Gitee, with user names, paths, other programs' names and window titles, mail addresses and the like taken out first.\n\nYou can turn this off in Settings → General → Crash reports.",
         ),
         "menu.quit" => ("退出", "結束", "Quit"),
+        "menu.newChat" => ("开新对话", "開新對話", "New conversation"),
+        "menu.web" => ("开网页版", "開網頁版", "Open on the web"),
         "deny.message" => ("用户在桌宠上拒绝了。", "使用者在桌寵上拒絕了。", "The user denied this on the desktop pet."),
         "codex.waiting" => ("等你在 Wakuwaku 上确认…", "等你在 Wakuwaku 上確認…", "Waiting for your answer on Wakuwaku…"),
         "notify.waiting" => ("{project}需要你确认", "{project}需要你確認", "{project}needs your OK"),

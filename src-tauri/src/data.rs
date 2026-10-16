@@ -71,6 +71,12 @@ fn defaults() -> Map<String, Value> {
         // A pet of its own for an agent's sessions ({ claude: id, ... });
         // one not set, or gone, is the pet above (pet_for).
         "agentPets": {},
+        // Each agent's project folder, where a new terminal of it starts
+        // (launch.rs; none: the home folder).
+        "agentDirs": {},
+        // A click on a pet: to the session it shows, else a new terminal
+        // ("jump"); or a new terminal always ("terminal").
+        "clickAction": "jump",
         "scale": 0.55,
         // Her home: the island. Each agent's pet may be out on the desktop
         // as well (desktop), each where it was left (spots: physical px,

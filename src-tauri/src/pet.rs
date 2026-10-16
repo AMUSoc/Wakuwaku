@@ -896,19 +896,36 @@ pub fn let_go(sh: &Arc<Shared>, agent: &str) {
         let agent = agent.to_string();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(DOUBLE_MS + 20));
-            let goes = {
+            let (is_single, goes) = {
                 let mut w = sh.pets.of(&agent).lock().unwrap();
                 let is_single = w.last_click.is_some_and(|t| t.elapsed() >= Duration::from_millis(DOUBLE_MS));
-                match w.click_goes.take() {
+                let goes = match w.click_goes.take() {
                     Some((id, at)) if is_single && at.elapsed() < Duration::from_millis(CLICK_GOES_MS) => Some(id),
                     other => {
                         w.click_goes = other;
                         None
                     }
-                }
+                };
+                (is_single, goes)
             };
-            if let Some(id) = goes {
-                crate::jump_to(&sh, &id);
+            if !is_single {
+                return;
+            }
+            // As set (clickAction): always a new terminal; else to the session
+            // she shows (or her agent's she shows none of), and with none of
+            // her agent's at all, a new terminal (launch.rs).
+            if sh.setting("clickAction") == "terminal" {
+                crate::launch::terminal(&sh, &agent);
+                return;
+            }
+            let own = sh.pet.lock().unwrap().get_for(&agent, now_ms())["id"].as_str().unwrap_or("").to_string();
+            match goes.or((!own.is_empty()).then_some(own)) {
+                Some(id) => {
+                    crate::jump_to(&sh, &id);
+                }
+                None => {
+                    crate::launch::terminal(&sh, &agent);
+                }
             }
         });
     }

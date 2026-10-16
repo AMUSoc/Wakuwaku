@@ -120,6 +120,10 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
     match key {
         "lang" => matches!(v.as_str(), Some("auto" | "zh" | "zh-TW" | "en")),
         "pet" => v.as_str().is_some_and(|id| data::pets(&sh.dir).iter().any(|p| p.id == id)),
+        // Each agent's project folder (launch.rs): a path, or blank.
+        "agentDirs" => v.as_object().is_some_and(|m| m.iter().all(|(agent, dir)| data::AGENTS.contains(&agent.as_str()) && dir.as_str().is_some_and(|d| d.len() <= 400))),
+        // A click on a pet: to its session (else a new terminal), or a new terminal always.
+        "clickAction" => matches!(v.as_str(), Some("jump" | "terminal")),
         // Her own Riot API key (lcu.rs): none, or one as Riot gives them.
         "riotApiKey" => v.as_str().is_some_and(|k| k.is_empty() || (k.len() <= 64 && k.starts_with("RGAPI-") && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))),
         // Each agent's pet out on the desktop or not; one left out, as it is.

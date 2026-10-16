@@ -405,6 +405,7 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 - **位置**：每只各自记在 `spots`；没有记过的，从右下角起，按 `data::AGENTS` 的顺序每只往左挪一个窗口宽，不会叠在一起。大小、闲逛、眼睛跟光标是全部桌宠共用的设置。
 - **设置**：「外观」页「各个 agent 的角色」每一行有「放到桌面上」开关（`data-agent-out`，改 `desktop`）。
 - **不叠在一起**（`pet.rs` 的「Room between them」）：同一块屏上两只的脚（窗口里她的中线，`Win::bottom`）左右至少隔她一个身宽加 20 逻辑像素（`room`，按那块屏的缩放）；不同屏互不相干。走路时（她自己闲逛、`/debug/walk`、被推开）目的地先截在别只前面（`clip_walk`：往别只走就停在 room 外，离开不拦），每一步再看一次，别只正在走就按它现在的位置，快撞上就停。放下时（拖完松手、从岛里拉出来松手、启动或打开时回到记住的位置，`make_room`）落在别只身上就走开：往左有空位、而且不用穿过别只就往左，不然往右（`free_spot`；身上压着的那只不算穿过），用跑步的样子过去（`pet:drag`）。几只同时放下（一起启动）时各自先按别只要去的地方（`heading`）规划，到了再看一次，最多三次。面板或泡泡开着的那只不会被推开，别只绕开她。实测（2026-10-16，测试副本）：三只启动时放在各差 30px 的位置，各自走开后间隔正好 126px；之后 3 分钟，闲逛加每 8 秒硬让一只朝另一只走 600px（共 22 次），每 0.5 秒量一次，最近的两只一直是 126px，没有更近过。
+- **单击和开新对话**（`launch.rs`）：单击桌宠（等过双击的 500ms）跳到她显示的会话的窗口；她 agent 一个会话都没有时，开一个那个 agent 的新终端：Windows Terminal（`wt.exe`，在 `%LOCALAPPDATA%\Microsoft\WindowsApps` 或 PATH 里找）开新分页 `wt -w 0 new-tab -d <文件夹> --title <命令> powershell.exe -NoExit -Command <命令>`（命令 `claude` / `codex` / `grok` / `agy` 是 npm 的 `.cmd`，要经 shell 跑；跑完 PowerShell 留着），没有 Windows Terminal 就开一个 PowerShell 窗口。文件夹是设置 `agentDirs` 里那个 agent 的（「外观」页「各个 agent 的角色」每行的「项目文件夹」），没设、或那个文件夹不在了就用家目录。设置 `clickAction` 设成 `terminal` 时单击一律开新终端。桌宠的右键菜单有「开新对话」（同上）和「开网页版」（`rundll32 url.dll,FileProtocolHandler <网址>`，默认浏览器）。测试副本设 `WAKUWAKU_LAUNCH_DRY` 时只把要跑的写进日志，什么都不开。
 - **测试副本**：`/health` 带 `pets`（每只的窗口：`made`、`shown`、位置），`/debug/walk` 可以带 `agent`。
 
 实测（2026-10-16，Windows 11，release 版测试副本，三个 agent 各有一个干活中的会话；每种情况等 20 秒，3 秒一次取 3 次平均；她的进程加上它的 WebView2 进程）：

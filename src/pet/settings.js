@@ -251,7 +251,9 @@
         const pet = snap.pets.find(p => p.id === own[agent])
         const shown = pet || inUse
         const note = pet ? pet.name : T('s.agentPetDefault', { name: inUse ? inUse.name : '—' })
-        return `<div class="r petrow">${shown ? thumb(36, shown.url, shown.version) : ''}<div class="grow"><div>${esc(name)}</div><div class="d">${esc(note)}</div></div>
+        const dir = (snap.settings.agentDirs || {})[agent] || ''
+        return `<div class="r petrow">${shown ? thumb(36, shown.url, shown.version) : ''}<div class="grow"><div>${esc(name)}</div><div class="d">${esc(note)}</div>
+          <input class="in agent-dir" data-agent-dir="${agent}" spellcheck="false" placeholder="${esc(T('s.agentDir'))}" title="${esc(T('s.agentDirNote'))}" value="${esc(dir)}"></div>
           ${pet ? `<button class="pbtn sm" data-agent-pet-clear="${agent}">${esc(T('s.agentPetClear'))}</button>` : ''}
           <span class="d agent-out">${esc(T('s.agentOut'))}</span><button class="sw${out[agent] ? ' on' : ''}" data-agent-out="${agent}" title="${esc(T('s.agentOut'))}"></button></div>`
       })
@@ -507,6 +509,7 @@
       ${sec(T('s.quiet'))}<div class="grp">
         ${row(esc(T('menu.dnd')), esc(T('s.dndNote')), sw('dnd', s.dnd))}
         ${row(esc(T('settings.hideInFullscreen')), '', sw('hideInFullscreen', s.hideInFullscreen, snap.fullscreenAvailable ? '' : 'disabled'))}
+        ${row(esc(T('s.clickAction')), esc(T('s.clickActionNote')), seg('clickAction', [['jump', T('s.clickJump')], ['terminal', T('s.clickTerminal')]], s.clickAction || 'jump'))}
         ${row(esc(T('s.lol')), esc(T('s.lolNote')), sw('lol', s.lol !== false))}
         ${row(esc(T('s.riotKey')), esc(T('s.riotKeyNote')), `<input class="in" id="s-riot-key" type="password" spellcheck="false" autocomplete="off" placeholder="RGAPI-…" value="${esc(s.riotApiKey || '')}">`)}
       </div>`
@@ -1477,6 +1480,14 @@
   // number that is none goes back to what it was.
   layer.addEventListener('change', e => {
     if (e.target.dataset.ilook) return ilookInput(e.target, true)
+    // An agent's project folder, kept once typed (launch.rs); blank, none.
+    if (e.target.dataset.agentDir) {
+      const dirs = { ...(snap.settings.agentDirs || {}) }
+      const dir = e.target.value.trim()
+      if (dir) dirs[e.target.dataset.agentDir] = dir
+      else delete dirs[e.target.dataset.agentDir]
+      return patch({ agentDirs: dirs })
+    }
     // Her Riot API key, kept once typed (lcu.rs); one not as Riot gives them is not kept.
     if (e.target.id === 's-riot-key') return patch({ riotApiKey: e.target.value.trim() })
     const key = e.target.dataset.field
