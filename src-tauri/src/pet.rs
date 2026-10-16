@@ -72,6 +72,9 @@ pub struct Win {
     // How far she sits right of the window's centre: when the screen edge
     // stops the grown window from centring on her, she shifts so she stays put.
     shift: i32,
+    // The panel below her, not above: too little room above her on her
+    // screen. The window then starts at her top, she at its top.
+    below: bool,
     // Where the window was before a panel grew it, to go back to exactly.
     parked: Option<(i32, i32)>,
 }
@@ -125,10 +128,24 @@ impl Win {
         }
     }
 
+    // Her own height on the screen (one cell).
+    fn her_height(&self, scale: f64) -> i32 {
+        (CELL_H * scale * self.sf()).round() as i32
+    }
+
+    // Her feet on the screen: the window's bottom, or with a panel below
+    // her, her own height down from its top.
+    fn bottom(&self, scale: f64) -> i32 {
+        if self.below {
+            self.pos.1 + self.her_height(scale)
+        } else {
+            self.pos.1 + self.size.1
+        }
+    }
+
     // Her middle on the screen, for the island to reach for.
     fn her_point(&self, scale: f64) -> (i32, i32) {
-        let (x, y) = self.pos;
-        (x + self.size.0 / 2 + self.shift, y + self.size.1 - (CELL_H * scale * self.sf() / 2.0).round() as i32)
+        (self.pos.0 + self.size.0 / 2 + self.shift, self.bottom(scale) - self.her_height(scale) / 2)
     }
 }
 
@@ -197,7 +214,7 @@ fn remember(sh: &Shared, agent: &str) {
     let (x, y) = {
         let w = sh.pets.of(agent).lock().unwrap();
         let base = w.base_size(scale);
-        (w.pos.0 + w.size.0 / 2 + w.shift - base.0 / 2, w.pos.1 + w.size.1 - base.1)
+        (w.pos.0 + w.size.0 / 2 + w.shift - base.0 / 2, w.bottom(scale) - base.1)
     };
     let mut settings = sh.settings.lock().unwrap();
     let spots = settings.entry("spots").or_insert_with(|| json!({}));
@@ -413,10 +430,11 @@ pub fn return_to_spot(sh: &Shared, agent: &str) {
         w.panel = None;
         w.parked = None;
         w.shift = 0;
+        w.below = false;
         w.size = w.size_for(scale);
         w.size
     };
-    let _ = sh.app.emit_to(label(&agent), "pet:shift", 0);
+    let _ = sh.app.emit_to(label(&agent), "pet:shift", json!({ "x": 0, "below": false }));
     if let Some(win) = window(sh, agent) {
         let _ = win.set_size(PhysicalSize::new(size.0 as u32, size.1 as u32));
     }
@@ -429,14 +447,14 @@ pub fn return_to_spot(sh: &Shared, agent: &str) {
 pub fn set_panel(sh: &Shared, agent: &str, measured: Option<(f64, f64)>) {
     let scale = scale(sh);
     let screens = sh.screens();
-    let (pos, size, shift, sf) = {
+    let (pos, size, shift, sf, below) = {
         let mut w = sh.pets.of(agent).lock().unwrap();
         if w.panel == measured {
             return;
         }
         let (old, before) = (w.pos, w.size);
         let pet_x = old.0 + before.0 / 2 + w.shift;
-        let pet_bottom = old.1 + before.1;
+        let pet_bottom = w.bottom(scale);
         if w.panel.is_none() && measured.is_some() {
             w.parked = Some(old);
             // Not walking off with it.
@@ -449,22 +467,36 @@ pub fn set_panel(sh: &Shared, agent: &str, measured: Option<(f64, f64)>) {
             (None, Some(parked)) => {
                 w.pos = parked;
                 w.shift = 0;
+                w.below = false;
             }
             (panel, parked) => {
                 w.parked = parked;
                 let want_x = pet_x - w.size.0 / 2;
-                let p = screens.clamp((want_x, pet_bottom - w.size.1), w.size);
+                // Above her if it fits on her screen's work area; else below
+                // if that does; else whichever side has more room.
+                let grown = w.size.1 - w.base_size(scale).1;
+                let her_h = w.her_height(scale);
+                w.below = match (panel, screens.near(pet_x, pet_bottom - her_h / 2)) {
+                    (Some(_), Some(a)) => {
+                        let above = pet_bottom - w.base_size(scale).1 - a.y;
+                        let below = a.y + a.h - pet_bottom;
+                        above < grown && (below >= grown || below > above)
+                    }
+                    _ => false,
+                };
+                let want_y = if w.below { pet_bottom - her_h } else { pet_bottom - w.size.1 };
+                let p = screens.clamp((want_x, want_y), w.size);
                 w.pos = p;
                 w.shift = if panel.is_some() { want_x - p.0 } else { 0 };
             }
         }
-        (w.pos, w.size, w.shift, w.sf())
+        (w.pos, w.size, w.shift, w.sf(), w.below)
     };
     if let Some(win) = window(sh, agent) {
         let _ = win.set_size(PhysicalSize::new(size.0 as u32, size.1 as u32));
     }
     place(sh, agent, pos);
-    let _ = sh.app.emit_to(label(&agent), "pet:shift", (shift as f64 / sf).round());
+    let _ = sh.app.emit_to(label(&agent), "pet:shift", json!({ "x": (shift as f64 / sf).round(), "below": below }));
 }
 
 // Put the window back on screen at its own size if anything moved it off or
@@ -610,7 +642,7 @@ pub fn poll(sh: &Arc<Shared>, agent: &str, cursor: (i32, i32)) -> u64 {
             // Her eyes follow only while idle.
             let mut is_looking = false;
             if seen.moved && look && is_idle && w.panel.is_none() {
-                let face = (pos.0 as f64 + size.0 as f64 / 2.0 + w.shift as f64, pos.1 as f64 + size.1 as f64 - CELL_H * scale * sf * 0.62);
+                let face = (pos.0 as f64 + size.0 as f64 / 2.0 + w.shift as f64, w.bottom(scale) as f64 - CELL_H * scale * sf * 0.62);
                 let (dx, dy) = ((cursor.0 as f64 - face.0) / sf, (cursor.1 as f64 - face.1) / sf);
                 if dx.hypot(dy) <= LOOK_FAR {
                     events.push(("pet:cursor", json!({ "dx": dx, "dy": dy })));
@@ -925,6 +957,8 @@ pub fn where_(sh: &Shared, agent: &str) -> Value {
         "size": [w.size.0, w.size.1],
         "scaleFactor": w.sf(),
         "made": w.made,
+        "below": w.below,
+        "panel": w.panel.map(|(pw, ph)| json!([pw, ph])),
         "shown": w.shown,
         "over": w.ct.over,
         "walking": w.walking,

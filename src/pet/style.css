@@ -127,6 +127,21 @@ body {
   display: none;
 }
 
+/* No room above her on her screen: the panel (or the bubble) below her, she
+   at the window's top where she was (pet.rs set_panel). */
+.below #stage {
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+}
+
+.below #panel {
+  margin: 8px 0 0;
+}
+
+.below #bubble {
+  margin: calc(6px * var(--scale) / 0.55) 0 0;
+}
+
 #panel .head {
   display: flex;
   align-items: center;

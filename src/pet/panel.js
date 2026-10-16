@@ -317,8 +317,13 @@
     }
   })
 
-  // Main moves the pet within a grown window so she stays put on screen.
-  window.pet.onShift(px => document.documentElement.style.setProperty('--shift', `${px}px`))
+  // Main moves the pet within a grown window so she stays put on screen, and
+  // puts the panel below her where there is no room above (pet.rs set_panel).
+  window.pet.onShift(at => {
+    const { x, below } = typeof at === 'number' ? { x: at, below: false } : at || {}
+    document.documentElement.style.setProperty('--shift', `${x || 0}px`)
+    document.body.classList.toggle('below', below === true)
+  })
 
   window.pet.onUpdate(data => {
     const wasHolding = holdsPanel()
