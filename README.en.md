@@ -237,6 +237,26 @@ No flag that skips a permission. What each agent's non-interactive mode does wit
 
 So of the tasks from the phone, only Claude Code's can do what needs your approval (still given on the phone); the other three are for questions, reading code and writing it up.
 
+**Going on with a conversation from the computer**: tap a session on the phone's page for its whole conversation (read from its agent's own transcript, Markdown as it is, the last 80 messages at most), with a box below to go on with it. Sessions closed on the computer are on the cards too ("Closed on the computer"), to read and go on with, forgotten after two hours.
+
+Whether you can go on depends on whether the session is open on the computer (tried on 2026-10-17):
+
+| Agent | Open on the computer | Not open |
+| --- | --- | --- |
+| Claude Code | **Watch only**: `claude --resume <id> -p` now would fork the conversation in two, the open one never seeing what the phone said (tried) | `claude --resume <id> -p`, on the same session |
+| Codex | **Go on**: `codex queue` puts your words into its running conversation, and the open one takes them at once | `codex exec resume <id>`; if it is open after all (just opened again, nothing said yet), Codex refuses, and she uses `codex queue` instead |
+| Grok | **Watch only** (as Claude Code; Grok's leader mode can share, but it means changing your config: not done) | `grok -r <id> --prompt-file … --permission-mode default` |
+| Antigravity | **Watch only** (as above) | `agy --conversation <id> -p` |
+
+How she knows it is open: Claude Code's `claude agents --json`; Grok's `~/.grok/active_sessions.json`; the `presence/<conversation>.lock` Antigravity holds; and whether the process the session's hook events came from still runs. Each runs in the session's own folder, one from the phone at a time for each agent (shared with new tasks).
+
+Two things seen while trying it:
+
+- **Claude Code's background sessions (`claude --bg`)**: a tool that needs approval is asked through the PermissionRequest hook as ever, and the phone's answer counts (it says "Allowed by PermissionRequest hook"). But Claude Code on this computer is in auto mode by default, and what it judges safe it runs without asking at all: no prompt on the phone then.
+- **`codex queue` into a session nobody has open**: it says "Queued message …" and nothing happens until the session is next opened, when it is taken. So she queues only into an open session, and resumes one that is not.
+
+And a fix: started by a Claude Code session's hook, she carried its marks (`CLAUDE_CODE_CHILD_SESSION` and the like), and a `claude -p` she started saved no transcript ("Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker"). She drops them as she starts now.
+
 ### Updates
 
 The downloaded exe looks at the latest release on GitHub and on Gitee as it starts (GitHub's `https://api.github.com/repos/zhoupengjie/Wakuwaku/releases/latest`; on Gitee, the repo's tags and the `.sha256` file in a release; with no account of yours), then once a day. Drafts and prereleases don't count. A new version is told on the island once; click it for Updates on the General page of the settings, where you can read its notes. Nothing is downloaded until you click Update.

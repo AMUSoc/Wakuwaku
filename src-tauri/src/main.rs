@@ -63,6 +63,7 @@ mod scripts;
 mod server;
 mod settings;
 mod state;
+mod talk;
 mod tokens;
 mod tray;
 mod updates;
@@ -1218,6 +1219,9 @@ fn agy_hook(port: u16, name: &str) {
 }
 
 fn main() {
+    // Started from a Claude Code session's hook: not one of its children to
+    // what she starts (run.rs strip_session_marks).
+    run::strip_session_marks();
     // Her exe again, as her guard (crash.rs): it waits for her to end, and
     // sees whether she crashed.
     let args: Vec<String> = std::env::args().collect();

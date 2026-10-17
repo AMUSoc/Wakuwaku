@@ -143,6 +143,11 @@ pub fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
                 if let Some(path) = ["transcript_path", "transcriptPath"].iter().filter_map(|k| event.get(*k).and_then(Value::as_str)).find(|p| !p.is_empty()) {
                     msg["transcript"] = json!(path);
                 }
+                // The folder it works in (Antigravity's first workspace), where the phone's words resume it.
+                let cwd = event.get("cwd").and_then(Value::as_str).or_else(|| event.get("workspacePaths").and_then(Value::as_array).and_then(|w| w.first()).and_then(Value::as_str));
+                if let Some(cwd) = cwd.filter(|c| !c.is_empty()) {
+                    msg["cwd"] = json!(cwd);
+                }
                 // Where the session runs, for going to its window (jump.rs).
                 if let Some(chain) = chain_for(sh, &req, &event, matches!(agent, Some("codex" | "agy"))) {
                     msg["chain"] = jump::chain_json(&chain);

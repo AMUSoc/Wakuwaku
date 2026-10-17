@@ -460,6 +460,8 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 | `GET /mobile/sheet/<agent>` | 那个 agent 的宠物的 `spritesheet.webp`（网址带宠物 id 和修改时间，换宠物就换网址） |
 | `GET /mobile/api/reply` | `?session=<id>`：`{ session, agent, text, clipped, summaryOnly }`，它最后一则完整回复（`reply.rs`）；`details` 关着时 `{ hidden: true }` 不给内容 |
 | `POST /mobile/api/run` | `{ agent, prompt, cwd? }`，回 `{ ok, started }`；`busy`（409）、`noFolder`、`badCwd`、`prompt`（400）；要带 `x-wakuwaku` 头 |
+| `GET /mobile/api/conversation` | `?session=<id>`：`{ session, agent, mood, messages: [{ role, text, clipped }], truncated, summaryOnly, hidden, live, busy, canSay, how, why }`（`talk.rs`）；`how` 是 `resume` 或 `queue`，`why` 是 `live`、`busy`、`noCwd` |
+| `POST /mobile/api/say` | `{ session, text }`，回 `{ ok, mode }`；`live`、`busy`（409）、`noCwd`、`prompt`（400）；要带 `x-wakuwaku` 头 |
 
 `reply` 和 `run` 不分本机外来：都要「手机访问」开着（否则 403）、token 对（否则 401）。`api/state` 每个 agent 多了 `canRun`（设了项目文件夹）和 `running`（手机交的任务在跑：开始的时间）。
 
@@ -469,7 +471,17 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 
 各家非交互模式遇到要批准的工具（2026-10-17 实测，README 有表）：Claude Code `-p` 会触发 PermissionRequest hook，能在手机上回答，没人回答就当拒绝（`--permission-prompts` 默认 `host`，没有 host 时拒绝）；Codex `exec` 不问任何人（`-c approval_policy="on-request"` 也不问），默认只读沙盒；Grok 无头模式拒绝（但用户的 `config.toml` 若是 `always-approve` 就全部自动批准，所以手机交的一律加 `--permission-mode default`）；agy 无头模式拒绝。试法：暂存文件夹里请它执行 `echo … > probe.txt`，Claude Code 用 `--setting-sources project --settings` 把 hook 指到测试用的 47299，Codex 和 agy 的命令 hook 带着 `WAKUWAKU_PORT=47299`。
 
-**结束时关掉的会话**：非交互模式做完会马上送 `SessionEnd`（`claude -p`、`codex exec` 都是），原来一收到就删掉会话，手机上连「做完了」都看不到，更点不到它的完整回复。现在会话在结束状态（做完、改好了、出错）时收到 `session-end` 就留着：结束状态照常停留，之后像其他会话一样闲置（`idleHideMin` 后不显示、2 小时后遗忘），这段时间都能读它的完整回复。不在结束状态时照旧立刻删掉。（先试过停留完就把它藏起来：Codex 跑 9 秒、停留 8 秒，手机还没看到就没了，2026-10-17 在模拟器上看到的。）
+**接着电脑上的对话讲（talk.rs）**：先做了调查（2026-10-17，四家各在暂存文件夹开一个会话，用 ConPTY 开 TUI）：TUI 开着时从外面 `--resume -p`（Claude Code）、`-r -p`（Grok）、`--conversation -p`（agy）都会跑，但开着的那个看不到，对话就分岔（Claude 的 jsonl 长出两条枝，Grok 和 agy 的记录交错在一起）；Codex 的 `exec resume` 会被拒（「already has an active writer」），`codex queue` 能把话送进开着的那个。从 TUI 的画面读对话行不通：Claude 的输入框有灰色的「建议下一句」，Grok 的对话卷出了屏幕缓冲区。所以对话一律读对话记录，话一律走各家自己的命令，没有用 ConPTY。
+
+- 对话：Claude 的 jsonl 是一棵树，从最新一行沿 `parentUuid`（压缩处用 `logicalParentUuid`）走回根，只取人打的（不要 tool_result、`<command-…>` 之类）和 text；Codex 取 `response_item` 的 user `input_text`（不要 `<environment_context>`、`# AGENTS.md`）和 assistant `output_text`；Grok 把 `user_message_chunk`、`agent_message_chunk` 按顺序接起来；agy 取 `USER_INPUT`（`<USER_REQUEST>` 里的）和 `PLANNER_RESPONSE`。读文件尾 32 MB，回最近 80 则，每则 4000 字；按「路径、长度、时间」缓存最近 8 份，页面每 3 秒问也不重读。
+- 开着没：Claude Code 问 `claude agents --json`（3 秒缓存，约 0.45 秒一次），以它为准；Grok 看 `~/.grok/active_sessions.json` 有这个 session、pid 还在；agy 看 `presence/<id>.lock` 能不能独占打开（开着时它握着，关了文件还在）；再加上会话的进程链头还是原来那个（`jump::is_alive`）。只靠进程链会慢一步：重新打开的会话在第一轮之前不送 hook 事件。Codex 因此另有保险：`exec resume` 撞上 active writer，小帮手改用 `codex queue`。
+- 讲：没开着用各家的 resume（`run.rs` 的 `Mode::Resume`），在会话自己的 `cwd`（hook 事件的 `cwd`，agy 的 `workspacePaths[0]`；`state.rs` 记着）跑；Codex 开着用 `Mode::Queue`：话只能放在参数里，所以直接跑 npm 包里的 `codex.exe`（带上 `CODEX_MANAGED_PACKAGE_ROOT`、`CODEX_MANAGED_BY_NPM`，跟 `codex.cmd` 的 node 脚本一样），不经过 cmd.exe。session id 只收字母、数字、`-`、`_`（要上命令行）。
+- 关掉的会话：`session-end` 不再删掉，标 `closed`：结束状态照常停留，之后（或者不在结束状态时立刻）她这边看不到，手机的 `api/state` 每个 agent 多一个 `closed`（最近 5 个），一样能读能讲；跟其他闲置会话一样 2 小时后忘掉；再有事件（resume 了）就回来。
+- 她一启动就清掉 Claude Code 会话的标记（`run::SESSION_MARKS`：`CLAUDECODE`、`CLAUDE_CODE_CHILD_SESSION`、`CLAUDE_CODE_SESSION_ID`……，不碰 `CLAUDE_CONFIG_DIR` 这类设置）：被 Claude Code 的 hook 叫起来时带着它们，她启动的 `claude -p` 就不存对话记录（实测，画面上写着 inherited CLAUDE_CODE_CHILD_SESSION marker）。
+
+实测（2026-10-17，47299）：Claude 没开着时 resume 接上；用 ConPTY 把同一个会话打开，`claude agents` 认出开着，手机送 409；`/exit` 后又能接，上下文完整（APPLE, BANANA）。`claude --bg` 加 `--permission-mode manual` 时 PermissionRequest 到手机、回答有效；默认 auto mode 时 echo 直接放行没问。Codex 没开着 `exec resume` 接上；`codex resume` 打开后还没说话时她判断成没开着，`exec resume` 被拒，自动改 queue，开着的 TUI 处理了；`codex queue` 对没开着的会话说成功但不处理，下次打开才送进去。Grok（单独的家目录，没有 hook）没开着 `-r -p` 接上，打开 TUI 后 `active_sessions.json` 立刻认出开着。agy 没开着 `--conversation -p` 接上，打开后锁文件认出开着。Chrome 里点 agy 的会话、在对话页送出、对话页更新出 APPLE, BANANA。
+
+**结束时关掉的会话**：非交互模式做完会马上送 `SessionEnd`（`claude -p`、`codex exec` 都是）。原来一收到就删，手机上连「做完了」都看不到；中间试过「留成闲置会话」，可电脑上关掉的会话就一直挂在岛上。现在是上面「关掉的会话」那样：标 `closed`，结束状态照常停留，之后她这边看不到，手机那边还在。
 
 实测（2026-10-17，另开一份在 47299）：没 token、手机访问关着、没 `x-wakuwaku` 头、没设文件夹的 agent、`cwd` 是 `C:\Windows` 或 `..`、空任务都被挡；同一 agent 第二个任务 409；四家各从 `/run` 跑一次都成功（Claude Code 的任务里有 `"`、`&`、`|`、`%PATH%`，原样到了它手上）；Codex 的会话结束后留着，`/reply` 读到它带 Markdown 的完整回复；Chrome 里点会话打开完整回复、从输入框交任务给 Codex。
 

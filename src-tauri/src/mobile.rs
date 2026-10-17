@@ -9,6 +9,8 @@
 //   POST /mobile/api/answer    { id, choice }: as the panel answers (Shared::answer)
 //   GET  /mobile/api/reply     ?session=<id>: its last reply whole, from its transcript (reply.rs)
 //   POST /mobile/api/run       { agent, prompt, cwd? }: a task for an agent (run.rs)
+//   GET  /mobile/api/conversation  ?session=<id>: the whole conversation, and whether the phone may add to it (talk.rs)
+//   POST /mobile/api/say       { session, text }: the phone's words for that session (talk.rs, run.rs)
 //
 // On this computer (127.0.0.1) the page needs nothing. With "phone access"
 // on (the setting mobile), the same port is listened on at one more address
@@ -360,13 +362,13 @@ fn state(sh: &Shared) -> Value {
     let agents: Vec<Value> = data::AGENTS
         .iter()
         .map(|agent| {
-            let (mut shown, mut list) = {
+            let (mut shown, mut list, mut closed) = {
                 let pet = sh.pet.lock().unwrap();
-                (pet.get_for(agent, now), pet.list_for(agent))
+                (pet.get_for(agent, now), pet.list_for(agent), pet.closed_for(agent, 5))
             };
             // With the specifics kept off screen, no replies or errors either.
             if !details {
-                for s in std::iter::once(&mut shown).chain(list.as_array_mut().into_iter().flatten()) {
+                for s in std::iter::once(&mut shown).chain(list.as_array_mut().into_iter().flatten()).chain(closed.as_array_mut().into_iter().flatten()) {
                     s["reply"] = json!("");
                     s["error"] = Value::Null;
                 }
@@ -377,6 +379,8 @@ fn state(sh: &Shared) -> Value {
                 "agent": agent,
                 "now": shown,
                 "list": list,
+                // Closed on the computer lately, out of her sight: still to be read and gone on with.
+                "closed": closed,
                 "sheet": pet.as_ref().map(|p| format!("sheet/{agent}?pet={}&m={stamp}", p.id)),
                 "version": pet.as_ref().map_or(2, |p| p.version),
                 "pet": pet.as_ref().map(|p| p.name.clone()),
@@ -388,6 +392,50 @@ fn state(sh: &Shared) -> Value {
         })
         .collect();
     json!({ "lang": sh.lang(), "details": details, "at": now, "agents": agents })
+}
+
+// A session's whole conversation, and how the phone may add to it: { session,
+// agent, messages: [{ role, text, clipped }], truncated, live, canSay, how
+// (resume | queue), why (live, busy, noCwd) }.
+fn conversation(sh: &Shared, id: &str) -> Option<Value> {
+    let t = sh.pet.lock().unwrap().talk_of(id)?;
+    let hidden = sh.setting("details") == false;
+    let (messages, truncated, summary_only) = match (!hidden && !t.transcript.is_empty()).then(|| crate::talk::conversation(&t.agent, &t.transcript)).flatten() {
+        Some((m, cut)) if !m.is_empty() => (Value::Array(m), cut, false),
+        // No transcript: what the island knows of it, said so.
+        _ if !hidden && !t.reply.is_empty() => (json!([{ "role": "assistant", "text": t.reply, "clipped": false }]), false, true),
+        _ => (json!([]), false, !hidden),
+    };
+    let live = crate::talk::is_live(&t.agent, id, &t.chain);
+    let busy = crate::run::running(&t.agent).is_some();
+    let has_cwd = !t.cwd.is_empty() && std::path::Path::new(&t.cwd).is_dir() && crate::run::is_id(id);
+    let way = crate::talk::way(&t.agent, live, busy, has_cwd);
+    Some(json!({
+        "session": id,
+        "agent": t.agent,
+        "mood": t.mood,
+        "messages": messages,
+        "truncated": truncated,
+        "summaryOnly": summary_only,
+        "hidden": hidden,
+        "live": live,
+        "busy": busy,
+        "canSay": way.is_ok() && !hidden,
+        "how": way.ok(),
+        "why": way.err(),
+    }))
+}
+
+// The phone's words for a session: resumed, or queued into it while it is
+// open (Codex); refused where they would fork it.
+fn say(sh: &Shared, id: &str, text: &str) -> Result<Value, &'static str> {
+    let t = sh.pet.lock().unwrap().talk_of(id).ok_or("no such session")?;
+    let live = crate::talk::is_live(&t.agent, id, &t.chain);
+    let busy = crate::run::running(&t.agent).is_some();
+    let dir = std::path::PathBuf::from(&t.cwd);
+    let how = crate::talk::way(&t.agent, live, busy, !t.cwd.is_empty() && dir.is_dir())?;
+    let mode = if how == "queue" { crate::run::Mode::Queue(id.to_string()) } else { crate::run::Mode::Resume(id.to_string()) };
+    crate::run::say(sh, &t.agent, text, &dir, mode)
 }
 
 fn read_json(req: &mut Request) -> Option<Value> {
@@ -435,8 +483,23 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
         ("GET", "/mobile/icon-192.png") => respond(req, 200, "image/png", ICON_192.to_vec(), &[("cache-control", "max-age=86400".into())]),
         ("GET", "/mobile/icon-512.png") => respond(req, 200, "image/png", ICON_512.to_vec(), &[("cache-control", "max-age=86400".into())]),
         // Phone access on and the token, wherever they come from.
-        ("GET", "/mobile/api/reply") | ("POST", "/mobile/api/run") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
-        ("GET", "/mobile/api/reply") | ("POST", "/mobile/api/run") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation") | ("POST", "/mobile/api/run" | "/mobile/api/say") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation") | ("POST", "/mobile/api/run" | "/mobile/api/say") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
+        ("GET", "/mobile/api/conversation") => {
+            let id = query_of(req.url(), "session").map(decode).unwrap_or_default();
+            match conversation(sh, &id) {
+                Some(body) => json_reply(req, 200, body),
+                None => json_reply(req, 404, json!({ "error": "no such session" })),
+            }
+        }
+        ("POST", "/mobile/api/say") if header(&req, "x-wakuwaku").is_some() => {
+            let Some(body) = read_json(&mut req) else { return json_reply(req, 400, json!({ "error": "bad json" })) };
+            let id = body["session"].as_str().unwrap_or("").to_string();
+            match say(sh, &id, body["text"].as_str().unwrap_or("")) {
+                Ok(done) => json_reply(req, 200, done),
+                Err(why) => json_reply(req, if matches!(why, "busy" | "live") { 409 } else if why == "no such session" { 404 } else { 400 }, json!({ "error": why })),
+            }
+        }
         ("GET", "/mobile/api/reply") => {
             let id = query_of(req.url(), "session").map(decode).unwrap_or_default();
             let found = sh.pet.lock().unwrap().transcript_of(&id);

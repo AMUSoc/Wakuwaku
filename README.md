@@ -235,6 +235,26 @@ cargo build --release     # target/release/wakuwaku.exe，单个文件
 
 所以手机交的任务里，只有 Claude Code 能做要你批准的事（批准还是在手机上按）；其他三家适合问问题、看代码、写说明。
 
+**接着电脑上的对话讲**：手机页上点一个会话，打开的是它的整段对话（从各家自己的对话记录读，Markdown 原样显示，最多最近 80 则），底下有输入框可以接着讲。电脑上关掉的会话也列在卡片里（「电脑上关掉了」），一样点得进去、接得下去，两小时后才忘掉。
+
+能不能接着讲，看那个会话在电脑上是不是开着（2026-10-17 实测）：
+
+| agent | 电脑上开着 | 电脑上没开着 |
+| --- | --- | --- |
+| Claude Code | **只能看**：这时用 `claude --resume <id> -p` 会让对话分岔成两条，开着的那边看不到手机讲的话（实测过） | `claude --resume <id> -p`，接在同一个会话后面 |
+| Codex | **可以讲**：`codex queue` 把你的话排进它正在跑的对话，开着的那边马上处理 | `codex exec resume <id>`；它要是其实开着（刚重新打开、还没说过话），Codex 会拒绝，她就改用 `codex queue` |
+| Grok | **只能看**（同 Claude Code；Grok 的 leader 模式能共用，但要改你的设置，没做） | `grok -r <id> --prompt-file … --permission-mode default` |
+| Antigravity | **只能看**（同上） | `agy --conversation <id> -p` |
+
+怎么知道开着：Claude Code 问 `claude agents --json`；Grok 看 `~/.grok/active_sessions.json`；Antigravity 看它握着的 `presence/<对话>.lock`；再加上会话的 hook 事件来自的进程还在不在。都在会话自己的文件夹里跑，同一个 agent 一次一个手机发起的（和「交新任务」共用这个限制）。
+
+实测时注意到的两件事：
+
+- **Claude Code 的后台会话（`claude --bg`）**：需要批准的工具照样经 PermissionRequest hook 问，手机上回答有效（画面上显示 Allowed by PermissionRequest hook）。但这台电脑的 Claude Code 默认是 auto mode，它自己判断安全的命令根本不问，手机上也就不会出现确认。
+- **`codex queue` 对没开着的会话**：命令说「Queued message …」，但什么都不会发生，要等下次有人打开那个会话才送进去处理。所以她只在会话开着时用 queue，没开着用 `codex exec resume`。
+
+另外修了一个问题：她如果是被 Claude Code 的 hook 叫起来的，会带着 `CLAUDE_CODE_CHILD_SESSION` 之类的标记，她再启动的 `claude -p` 就不存对话记录（「Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker」）。现在她一启动就把这些标记清掉。
+
 ### 更新
 
 下载的 exe 启动时会同时看一次 GitHub 和 Gitee 上的最新发布（GitHub 的 `https://api.github.com/repos/zhoupengjie/Wakuwaku/releases/latest`，Gitee 上仓库的 tag 列表和发行版里的 `.sha256` 文件，都不带任何账号信息），之后每天看一次。草稿和预发布不算。有新版本时灵动岛提示一次，点一下打开设置「通用」页的「软件更新」，那里能看说明，点「更新」才会下载。

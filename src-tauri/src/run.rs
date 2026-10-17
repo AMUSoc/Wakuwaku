@@ -24,6 +24,20 @@
 //
 // One task from the phone at a time for each agent: her job file says which
 // helper runs it (its pid), until the helper writes how it ended.
+//
+// The phone's words added to a session (talk.rs) go the same way, as its
+// agent's resume of that session in the folder it works in:
+//
+//   claude  claude --resume <id> -p                    (the words on stdin)
+//   codex   codex exec resume <id> -                   (the words on stdin)
+//           codex queue --thread <id> --message <words>  while it is open:
+//                                                      Codex's own codex.exe, no cmd.exe
+//   grok    grok -r <id> --prompt-file <file> --permission-mode default
+//   agy     agy --conversation <id> -p <words>
+//
+// What runs here never carries the marks of a Claude Code session she may
+// have been started from (strip_session_marks): Claude Code saves no
+// transcript for a session that has them, as for one of its own children.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -92,7 +106,22 @@ fn ended(job: &Path) -> bool {
     std::fs::read_to_string(job).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).is_some_and(|v| v.get("ended").is_some())
 }
 
-pub fn start(sh: &Shared, agent: &str, prompt: &str, cwd: Option<&str>) -> Result<Value, &'static str> {
+// What a run does: a new task, or words for a session (its id), resumed or
+// queued into it while it is open (Codex).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Mode {
+    New,
+    Resume(String),
+    Queue(String),
+}
+
+// A session id as the agents make them (UUIDs, Claude's short ones): it goes
+// on a command line, so nothing else.
+pub fn is_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 100 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn checked(agent: &str, prompt: &str) -> Result<String, &'static str> {
     if !crate::data::AGENTS.contains(&agent) {
         return Err("agent");
     }
@@ -100,8 +129,33 @@ pub fn start(sh: &Shared, agent: &str, prompt: &str, cwd: Option<&str>) -> Resul
     if prompt.is_empty() || prompt.chars().count() > MAX_PROMPT {
         return Err("prompt");
     }
+    Ok(prompt.to_string())
+}
+
+pub fn start(sh: &Shared, agent: &str, prompt: &str, cwd: Option<&str>) -> Result<Value, &'static str> {
+    let prompt = checked(agent, prompt)?;
     let folder = folder(sh, agent).ok_or("noFolder")?;
     let dir = workdir(&folder, cwd).ok_or("badCwd")?;
+    launch(sh, agent, &prompt, &dir, Mode::New)
+}
+
+// The phone's words for a session, in the folder it works in (talk.rs).
+pub fn say(sh: &Shared, agent: &str, prompt: &str, dir: &Path, mode: Mode) -> Result<Value, &'static str> {
+    let prompt = checked(agent, prompt)?;
+    match &mode {
+        Mode::Resume(id) | Mode::Queue(id) if is_id(id) => {}
+        _ => return Err("session"),
+    }
+    if matches!(mode, Mode::Queue(_)) && agent != "codex" {
+        return Err("session");
+    }
+    if !dir.is_dir() {
+        return Err("noCwd");
+    }
+    launch(sh, agent, &prompt, dir, mode)
+}
+
+fn launch(sh: &Shared, agent: &str, prompt: &str, dir: &Path, mode: Mode) -> Result<Value, &'static str> {
     if running(agent).is_some() {
         return Err("busy");
     }
@@ -112,7 +166,12 @@ pub fn start(sh: &Shared, agent: &str, prompt: &str, cwd: Option<&str>) -> Resul
     let job = runs.join(format!("{agent}-{started}.json"));
     let words = runs.join(format!("{agent}-{started}.prompt.txt"));
     std::fs::write(&words, prompt).map_err(|_| "io")?;
-    let spec = json!({ "agent": agent, "dir": dir.to_string_lossy(), "prompt": words.to_string_lossy(), "log": runs.join(format!("{agent}-{started}.log")).to_string_lossy(), "started": started });
+    let (resume, queue) = match &mode {
+        Mode::New => (Value::Null, Value::Null),
+        Mode::Resume(id) => (json!(id), Value::Null),
+        Mode::Queue(id) => (Value::Null, json!(id)),
+    };
+    let spec = json!({ "agent": agent, "dir": dir.to_string_lossy(), "prompt": words.to_string_lossy(), "log": runs.join(format!("{agent}-{started}.log")).to_string_lossy(), "started": started, "resume": resume, "queue": queue });
     std::fs::write(&job, spec.to_string()).map_err(|_| "io")?;
     let exe = std::env::current_exe().map_err(|_| "io")?;
     let job_arg = job.to_string_lossy().into_owned();
@@ -121,8 +180,13 @@ pub fn start(sh: &Shared, agent: &str, prompt: &str, cwd: Option<&str>) -> Resul
         return Err("spawn");
     };
     RUNS.lock().unwrap().get_or_insert_with(HashMap::new).insert(agent.to_string(), Run { pid, started, job });
-    sh.log(&format!("run from the phone: {agent} in {} (helper {pid}): {}", dir.display(), first_words(prompt)));
-    Ok(json!({ "ok": true, "agent": agent, "started": started }))
+    let how = match &mode {
+        Mode::New => "run".to_string(),
+        Mode::Resume(id) => format!("resume {id}"),
+        Mode::Queue(id) => format!("queue into {id}"),
+    };
+    sh.log(&format!("{how} from the phone: {agent} in {} (helper {pid}): {}", dir.display(), first_words(prompt)));
+    Ok(json!({ "ok": true, "agent": agent, "started": started, "mode": match mode { Mode::New => "new", Mode::Resume(_) => "resume", Mode::Queue(_) => "queue" } }))
 }
 
 // Only the last few runs' files kept.
@@ -142,7 +206,7 @@ fn prune(runs: &Path) {
 // --- The helper (her exe again, out of her job) ---------------------------------------
 
 // An agent's command, as found: on the PATH, or where each installs itself.
-fn find(name: &str) -> Option<PathBuf> {
+pub fn find(name: &str) -> Option<PathBuf> {
     let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
     dirs.extend([env("APPDATA").map(|a| a.join("npm")), env("USERPROFILE").map(|h| h.join(".grok").join("bin")), env("LOCALAPPDATA").map(|l| l.join("agy").join("bin"))].into_iter().flatten());
@@ -150,13 +214,60 @@ fn find(name: &str) -> Option<PathBuf> {
     dirs.iter().flat_map(|d| names.iter().map(move |n| d.join(n))).find(|p| p.is_file())
 }
 
+// Codex's own codex.exe under its npm package (the codex.cmd shim runs it
+// through node): words as an argument never pass cmd.exe so.
+fn codex_exe() -> Option<(PathBuf, PathBuf)> {
+    let found = find("codex")?;
+    if found.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
+        return Some((found, PathBuf::new()));
+    }
+    let root = found.parent()?.join("node_modules").join("@openai").join("codex");
+    ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"].iter().find_map(|arch| {
+        let platform = if arch.starts_with("x86") { "codex-win32-x64" } else { "codex-win32-arm64" };
+        let exe = root.join("node_modules").join("@openai").join(platform).join("vendor").join(arch).join("bin").join("codex.exe");
+        exe.is_file().then(|| (exe, root.clone()))
+    })
+}
+
 // What runs, and whether the words go on its input.
-pub fn command(agent: &str, prompt_file: &str, prompt: &str) -> (&'static str, Vec<String>, bool) {
-    match agent {
-        "codex" => ("codex", vec!["exec".into(), "-".into()], true),
-        "grok" => ("grok", vec!["--prompt-file".into(), prompt_file.into(), "--permission-mode".into(), "default".into()], false),
-        "agy" => ("agy", vec!["-p".into(), prompt.into()], false),
-        _ => ("claude", vec!["-p".into()], true),
+pub fn command(agent: &str, prompt_file: &str, prompt: &str, mode: &Mode) -> (&'static str, Vec<String>, bool) {
+    let v = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    match (agent, mode) {
+        ("codex", Mode::Queue(id)) => ("codex", v(&["queue", "--thread", id, "--message", prompt]), false),
+        ("codex", Mode::Resume(id)) => ("codex", v(&["exec", "resume", id, "-"]), true),
+        ("codex", _) => ("codex", v(&["exec", "-"]), true),
+        ("grok", Mode::Resume(id)) => ("grok", v(&["-r", id, "--prompt-file", prompt_file, "--permission-mode", "default"]), false),
+        ("grok", _) => ("grok", v(&["--prompt-file", prompt_file, "--permission-mode", "default"]), false),
+        ("agy", Mode::Resume(id)) => ("agy", v(&["--conversation", id, "-p", prompt]), false),
+        ("agy", _) => ("agy", v(&["-p", prompt]), false),
+        (_, Mode::Resume(id)) => ("claude", v(&["--resume", id, "-p"]), true),
+        _ => ("claude", v(&["-p"]), true),
+    }
+}
+
+// The marks of a Claude Code session in the environment (seen 2026-10-17 in
+// a hook's and a tool's): a Claude Code started with them saves no
+// transcript ("inherited CLAUDE_CODE_CHILD_SESSION marker"). Not settings
+// a person sets (CLAUDE_CONFIG_DIR, CLAUDE_CODE_USE_BEDROCK and the like).
+pub const SESSION_MARKS: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+    "AI_AGENT",
+];
+
+// Out of her own environment as she starts, so nothing she starts (a task,
+// a new terminal) inherits them.
+pub fn strip_session_marks() {
+    for name in SESSION_MARKS {
+        std::env::remove_var(name);
     }
 }
 
@@ -166,13 +277,36 @@ pub fn helper(job_path: &str) {
     let get = |k: &str| job[k].as_str().unwrap_or("").to_string();
     let (agent, dir, prompt_file, log) = (get("agent"), get("dir"), get("prompt"), get("log"));
     let prompt = std::fs::read_to_string(&prompt_file).unwrap_or_default();
-    let (name, args, on_input) = command(&agent, &prompt_file, &prompt);
-    let outcome = match find(name) {
-        // agy's words are an argument: never through cmd.exe.
-        Some(exe) if agent == "agy" && !exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) => Err("agy is not an .exe here".to_string()),
-        Some(exe) => run_it(&exe, &args, &dir, &prompt_file, on_input, &log),
+    let mode = match (job["resume"].as_str(), job["queue"].as_str()) {
+        (Some(id), _) => Mode::Resume(id.to_string()),
+        (_, Some(id)) => Mode::Queue(id.to_string()),
+        _ => Mode::New,
+    };
+    let (name, args, on_input) = command(&agent, &prompt_file, &prompt, &mode);
+    let words_as_argument = agent == "agy" || matches!(mode, Mode::Queue(_));
+    let exe = if matches!(mode, Mode::Queue(_)) { codex_exe().map(|(exe, root)| (exe, Some(root))) } else { find(name).map(|exe| (exe, None)) };
+    let mut outcome = match exe {
+        // Words as an argument: never through cmd.exe.
+        Some((exe, _)) if words_as_argument && !exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) => Err(format!("{name} is not an .exe here")),
+        Some((exe, root)) => run_it(&exe, &args, &dir, &prompt_file, on_input, &log, root.as_deref()),
         None => Err(format!("{name} not found")),
     };
+    // Codex refuses a resume while the session is open ("already has an
+    // active writer"): opened again, it says so to no hook before its first
+    // turn. The words queued into it then.
+    if let (Mode::Resume(id), "codex", Ok(Some(code))) = (&mode, agent.as_str(), &outcome) {
+        let said = std::fs::read_to_string(&log).unwrap_or_default();
+        if *code != 0 && said.contains("active writer") {
+            let queue = Mode::Queue(id.clone());
+            let (_, args, _) = command(&agent, &prompt_file, &prompt, &queue);
+            let again = format!("{log}.queue");
+            outcome = match codex_exe() {
+                Some((exe, root)) if exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) => run_it(&exe, &args, &dir, &prompt_file, false, &again, Some(&root)),
+                _ => Err("codex.exe not found for the queue".into()),
+            };
+            job["queue"] = json!(id);
+        }
+    }
     // The words gone with the run; how it ended kept.
     let _ = std::fs::remove_file(&prompt_file);
     job["ended"] = json!(now_ms());
@@ -183,12 +317,19 @@ pub fn helper(job_path: &str) {
     let _ = std::fs::write(&job_path, job.to_string());
 }
 
-fn run_it(exe: &Path, args: &[String], dir: &str, prompt_file: &str, on_input: bool, log: &str) -> Result<Option<i32>, String> {
+fn run_it(exe: &Path, args: &[String], dir: &str, prompt_file: &str, on_input: bool, log: &str, codex_root: Option<&Path>) -> Result<Option<i32>, String> {
     let out = std::fs::File::create(log).map_err(|e| e.to_string())?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
     let input = if on_input { std::process::Stdio::from(std::fs::File::open(prompt_file).map_err(|e| e.to_string())?) } else { std::process::Stdio::null() };
     let mut cmd = std::process::Command::new(exe);
     cmd.args(args).current_dir(dir).stdin(input).stdout(out).stderr(err);
+    for name in SESSION_MARKS {
+        cmd.env_remove(name);
+    }
+    // As the codex.cmd shim's node script starts it.
+    if let Some(root) = codex_root.filter(|r| !r.as_os_str().is_empty()) {
+        cmd.env("CODEX_MANAGED_PACKAGE_ROOT", root).env("CODEX_MANAGED_BY_NPM", "1");
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -236,14 +377,44 @@ mod tests {
 
     #[test]
     fn each_agent_s_non_interactive_command_and_no_skipping() {
-        assert_eq!(command("claude", "p.txt", "hi"), ("claude", vec!["-p".to_string()], true));
-        assert_eq!(command("codex", "p.txt", "hi"), ("codex", vec!["exec".to_string(), "-".to_string()], true));
-        assert_eq!(command("grok", "p.txt", "hi").1, ["--prompt-file", "p.txt", "--permission-mode", "default"]);
-        assert_eq!(command("agy", "p.txt", "a \"quoted\" & piped | thing"), ("agy", vec!["-p".to_string(), "a \"quoted\" & piped | thing".to_string()], false));
+        let new = Mode::New;
+        assert_eq!(command("claude", "p.txt", "hi", &new), ("claude", vec!["-p".to_string()], true));
+        assert_eq!(command("codex", "p.txt", "hi", &new), ("codex", vec!["exec".to_string(), "-".to_string()], true));
+        assert_eq!(command("grok", "p.txt", "hi", &new).1, ["--prompt-file", "p.txt", "--permission-mode", "default"]);
+        assert_eq!(command("agy", "p.txt", "a \"quoted\" & piped | thing", &new), ("agy", vec!["-p".to_string(), "a \"quoted\" & piped | thing".to_string()], false));
         for agent in crate::data::AGENTS {
-            let (_, args, _) = command(agent, "p.txt", "hi");
-            assert!(!args.iter().any(|a| a.contains("dangerously") || a.contains("always-approve") || a.contains("bypass") || a.contains("yolo")), "{agent}");
+            for mode in [Mode::New, Mode::Resume("s1".into()), Mode::Queue("s1".into())] {
+                let (_, args, _) = command(agent, "p.txt", "hi", &mode);
+                assert!(!args.iter().any(|a| a.contains("dangerously") || a.contains("always-approve") || a.contains("bypass") || a.contains("yolo")), "{agent}");
+            }
         }
+    }
+
+    #[test]
+    fn words_for_a_session_by_each_agent_s_resume() {
+        let id = Mode::Resume("01a1-b2".into());
+        assert_eq!(command("claude", "p.txt", "hi", &id), ("claude", vec!["--resume".to_string(), "01a1-b2".into(), "-p".into()], true));
+        assert_eq!(command("codex", "p.txt", "hi", &id), ("codex", vec!["exec".to_string(), "resume".into(), "01a1-b2".into(), "-".into()], true));
+        assert_eq!(command("grok", "p.txt", "hi", &id).1, ["-r", "01a1-b2", "--prompt-file", "p.txt", "--permission-mode", "default"]);
+        assert_eq!(command("agy", "p.txt", "hi", &id).1, ["--conversation", "01a1-b2", "-p", "hi"]);
+        assert_eq!(command("codex", "p.txt", "a & b", &Mode::Queue("t".into())), ("codex", vec!["queue".to_string(), "--thread".into(), "t".into(), "--message".into(), "a & b".into()], false));
+    }
+
+    #[test]
+    fn a_session_id_is_letters_digits_and_dashes() {
+        assert!(is_id("9cb798ca-bd1e-46e8-b799-8bddecfd72e8"));
+        assert!(is_id("9cb798ca"));
+        assert!(!is_id(""));
+        assert!(!is_id("a&b"));
+        assert!(!is_id("a b"));
+        assert!(!is_id("a\"b"));
+    }
+
+    #[test]
+    fn a_claude_code_session_s_marks_not_a_person_s_settings() {
+        assert!(SESSION_MARKS.contains(&"CLAUDE_CODE_CHILD_SESSION"));
+        assert!(!SESSION_MARKS.contains(&"CLAUDE_CONFIG_DIR"));
+        assert!(!SESSION_MARKS.iter().any(|m| m.contains("BEDROCK") || m.contains("VERTEX")));
     }
 
     #[test]

@@ -25,6 +25,7 @@
 //   reply    how the turn ended, in Claude's words; error   why it failed
 //   chain    the processes it runs in, [[pid, started], ...] (jump.rs)
 //   transcript  its agent's transcript file, where its replies are whole (reply.rs)
+//   cwd      the folder it works in (where the phone's words resume it, talk.rs)
 //
 // Each session keeps its own mood; the pet shows the one that most wants you.
 // Instead of callbacks and timers, calls return what happened (Outcome) and
@@ -161,6 +162,11 @@ struct Session {
     // The processes it runs in, for going to its window.
     chain: jump::Chain,
     transcript: String,
+    cwd: String,
+    // Its agent closed it (SessionEnd): out of sight on her once its ending
+    // is over, kept for the phone (closed_for) to read and go on with, until
+    // forgotten as any session at rest is.
+    closed: bool,
     // The turn under way, the last few that ended (Codex), and the last few
     // seen to start (Grok: an end of one of those, not the one under way, is late).
     turn: String,
@@ -198,6 +204,8 @@ impl Session {
             agent: String::new(),
             chain: Vec::new(),
             transcript: String::new(),
+            cwd: String::new(),
+            closed: false,
             turn: String::new(),
             ended_turns: Vec::new(),
             begun_turns: Vec::new(),
@@ -326,6 +334,16 @@ fn view(s: &Session) -> Value {
     })
 }
 
+// A session as its conversation page sees it.
+pub struct Talk {
+    pub agent: String,
+    pub transcript: String,
+    pub cwd: String,
+    pub chain: jump::Chain,
+    pub reply: String,
+    pub mood: String,
+}
+
 #[derive(Default)]
 pub struct Pet {
     sessions: HashMap<String, Session>,
@@ -380,14 +398,24 @@ impl Pet {
                 return Some(out);
             }
             if event == "session-end" {
-                // Closed as it ended (a non-interactive run: claude -p,
-                // codex exec): kept, its ending still to be seen and its
-                // whole reply asked for, at rest after as any other is.
-                if !self.sessions.get(&id).is_some_and(|s| is_ending(&s.mood)) {
-                    self.sessions.remove(&id);
+                // Closed: an ending still to be seen (a non-interactive run
+                // ends so: claude -p, codex exec); then, or at once, out of
+                // her sight, kept for the phone to go on with.
+                if let Some(s) = self.sessions.get_mut(&id) {
+                    s.closed = true;
+                    if !is_ending(&s.mood) {
+                        set(s, "idle", Value::String(String::new()), now, hold);
+                        s.hidden = true;
+                        out.changed = true;
+                    }
                 }
             } else {
                 let s = self.sessions.entry(id.clone()).or_insert_with(|| Session::new(id, now));
+                // Going again (resumed): in sight again.
+                if s.closed {
+                    s.closed = false;
+                    s.hidden = false;
+                }
                 if !project.is_empty() {
                     s.project = project;
                 }
@@ -401,6 +429,10 @@ impl Pet {
                 let transcript = str_field(msg, "transcript", 1000);
                 if !transcript.is_empty() {
                     s.transcript = transcript;
+                }
+                let cwd = str_field(msg, "cwd", 1000);
+                if !cwd.is_empty() {
+                    s.cwd = cwd;
                 }
                 let is_edit = event == "tool-done" && detail.as_str().is_some_and(|d| EDIT_TOOLS.contains(&d));
                 // Late, from a turn already over: only an edit counts, making its done a review.
@@ -556,6 +588,7 @@ impl Pet {
         for s in self.sessions.values_mut().filter(|s| is_ending(&s.mood) && of(s)) {
             set(s, "idle", Value::String(String::new()), now, hold);
             s.seen_at = Some(now);
+            s.hidden |= s.closed;
             changed = true;
         }
         changed
@@ -569,6 +602,7 @@ impl Pet {
             if s.settle_at.is_some_and(|t| t <= now) {
                 set(s, "idle", Value::String(String::new()), now, hold);
                 s.seen_at = Some(now);
+                s.hidden |= s.closed;
                 changed = true;
             }
         }
@@ -581,7 +615,7 @@ impl Pet {
     pub fn hide_quiet(&mut self, now: u64, hide_ms: u64) -> bool {
         let mut changed = false;
         for s in self.sessions.values_mut() {
-            let hidden = !is_shown(&s.mood, s.event_at, s.seen_at, now, hide_ms);
+            let hidden = (s.closed && !is_ending(&s.mood)) || !is_shown(&s.mood, s.event_at, s.seen_at, now, hide_ms);
             if s.hidden != hidden {
                 s.hidden = hidden;
                 changed = true;
@@ -648,6 +682,14 @@ impl Pet {
         self.list_where(|_| true)
     }
 
+    // An agent's sessions closed lately and out of her sight, the latest
+    // first: the phone may still read them and go on with them.
+    pub fn closed_for(&self, agent: &str, most: usize) -> Value {
+        let mut all: Vec<&Session> = self.sessions.values().filter(|s| s.closed && s.hidden && agent_key(&s.agent) == agent).collect();
+        all.sort_by(|a, b| b.at.cmp(&a.at));
+        Value::Array(all.into_iter().take(most).map(view).collect())
+    }
+
     // One agent's sessions so: its pet's bubble names only them.
     pub fn list_for(&self, agent: &str) -> Value {
         self.list_where(|s| agent_key(&s.agent) == agent)
@@ -684,6 +726,12 @@ impl Pet {
     pub fn transcript_of(&self, id: &str) -> Option<(String, String, String)> {
         let s = self.sessions.get(id)?;
         Some((agent_key(&s.agent).to_string(), s.transcript.clone(), s.reply.clone()))
+    }
+
+    // What the phone's conversation page needs of a session (talk.rs).
+    pub fn talk_of(&self, id: &str) -> Option<Talk> {
+        let s = self.sessions.get(id)?;
+        Some(Talk { agent: agent_key(&s.agent).to_string(), transcript: s.transcript.clone(), cwd: s.cwd.clone(), chain: s.chain.clone(), reply: s.reply.clone(), mood: s.mood.clone() })
     }
 
     // Whether a session already knows where it runs.
@@ -896,7 +944,7 @@ mod tests {
     }
 
     // A non-interactive run ends its session as it finishes (claude -p,
-    // codex exec): kept, its ending seen, then at rest as any other.
+    // codex exec): its ending in sight, then out of sight but kept.
     #[test]
     fn a_session_closed_as_it_ended_is_kept() {
         let mut pet = Pet::default();
@@ -906,14 +954,26 @@ mod tests {
         assert_eq!((pet.get(12)["mood"].as_str(), pet.get(12)["reply"].as_str()), (Some("done"), Some("PONG")));
         assert!(pet.transcript_of("a").is_some());
         assert!(pet.tick(10 + 8000, Hold::Secs(8)));
-        assert_eq!((pet.get(10 + 8001)["mood"].as_str(), pet.get(10 + 8001)["sessions"].as_u64()), (Some("idle"), Some(1)));
-        // Its whole reply still there to be asked for.
+        assert_eq!(pet.get(10 + 8001)["sessions"], 0);
+        assert!(!pet.hide_quiet(10 + 9000, 0));
+        // Its whole reply still there, and the phone still has it.
         assert!(pet.transcript_of("a").is_some_and(|(_, _, reply)| reply == "PONG"));
-        // Closed at work or at rest: gone at once, as before.
-        pet.apply(&msg(json!({ "session": "c", "mood": "working" })), 30, Hold::Seen);
+        assert_eq!(pet.closed_for("claude", 5)[0]["id"], "a");
+        // Closed at work or at rest: out of her sight at once, the phone's still.
+        pet.apply(&msg(json!({ "session": "c", "mood": "working", "agent": "codex" })), 30, Hold::Seen);
         pet.apply(&msg(json!({ "session": "c", "mood": "idle", "event": "session-end" })), 31, Hold::Seen);
+        assert_eq!(pet.get_for("codex", 32)["sessions"], 0);
+        assert!(!pet.hide_quiet(33, 0));
+        assert_eq!(pet.get_for("codex", 34)["sessions"], 0);
+        assert_eq!(pet.closed_for("codex", 5).as_array().map(Vec::len), Some(1));
+        // Resumed (the phone's words, the computer's /resume): in sight again.
+        pet.apply(&msg(json!({ "session": "c", "mood": "working", "agent": "codex", "event": "turn-start" })), 40, Hold::Seen);
+        assert_eq!(pet.get_for("codex", 41)["sessions"], 1);
+        assert_eq!(pet.closed_for("codex", 5).as_array().map(Vec::len), Some(0));
+        // Forgotten after a while at rest, as any other.
+        pet.apply(&msg(json!({ "session": "c", "mood": "idle", "event": "session-end" })), 50, Hold::Seen);
+        pet.check_stale(50 + FORGET_MS + 1, Hold::Seen);
         assert!(pet.transcript_of("c").is_none());
-        assert_eq!(pet.get(32)["sessions"], 1);
     }
 
     #[test]

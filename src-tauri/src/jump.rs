@@ -177,6 +177,16 @@ mod imp {
         }
     }
 
+    // Still the process it was (the same number, started then).
+    pub fn is_alive(pid: u32, at: u64) -> bool {
+        started(pid) == Some(at)
+    }
+
+    // A process of that number is running.
+    pub fn is_running(pid: u32) -> bool {
+        started(pid).is_some()
+    }
+
     // A process and the ones above it, up to what every program runs under.
     // A parent never starts after its child: one that did has a reused number.
     pub fn chain_of(pid: u32) -> Chain {
@@ -460,6 +470,12 @@ mod imp {
     pub fn chain_of(_pid: u32) -> Chain {
         Vec::new()
     }
+    pub fn is_alive(_pid: u32, _at: u64) -> bool {
+        false
+    }
+    pub fn is_running(_pid: u32) -> bool {
+        false
+    }
     pub fn hook_chain() -> Chain {
         Vec::new()
     }
@@ -483,7 +499,7 @@ mod imp {
     }
 }
 
-pub use imp::{chain_of, client_of, hook_chain, is_listening};
+pub use imp::{chain_of, client_of, hook_chain, is_alive, is_listening, is_running};
 
 // A window to the front, restored if minimized.
 pub fn bring_window(hwnd: isize) -> bool {

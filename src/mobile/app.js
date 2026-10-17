@@ -1,8 +1,9 @@
 // The phone's page (mobile.rs): each agent's pet playing its session's mood,
 // what its sessions are doing, how a turn ended, and the prompts waiting,
 // answered here as on her panel. Asked again every 2 seconds while the page
-// is in sight. A tap on a session: its last reply whole (api/reply), its
-// Markdown as it is. Under each agent: a box for a new task (api/run).
+// is in sight. A tap on a session: its whole conversation (api/conversation),
+// Markdown as it is, and a box to go on with it (api/say). Under each agent:
+// a box for a new task (api/run).
 //
 // Everything that came from the sessions (names, replies, commands) is set
 // as text, never as HTML.
@@ -329,7 +330,12 @@
         )
       }),
     )
-    c.others.hidden = !rest.length
+    // Closed on the computer lately: still there to read and go on with.
+    for (const x of a.closed || []) {
+      const name = Status.nameOf(x, detailed) || AGENT_NAMES[a.agent]
+      c.others.append(el('div', { class: 'other tappable closed', onclick: e => (e.stopPropagation(), openReply(x.id, name)) }, el('div', { class: 'other-line' }, el('i'), el('span', {}, `${T('m.closed')} · ${name}`))))
+    }
+    c.others.hidden = !rest.length && !(a.closed || []).length
     c.session = s.id || ''
     c.info.classList.toggle('tappable', !!s.id)
     c.info.title = s.id ? T('m.tapForReply') : ''
@@ -381,26 +387,105 @@
     poll()
   }
 
-  // --- A whole reply --------------------------------------------------------------------
+  // --- A session's conversation ---------------------------------------------------------
 
+  // Its page over this one: the whole conversation (Markdown as it is), and
+  // below, a box to go on with it where that cannot fork it (api/conversation
+  // says), else why not. Asked again every 3 seconds while it is open; what
+  // is typed, and where it is scrolled to, kept.
   const sheet = el('div', { class: 'sheet', hidden: true })
   document.body.append(sheet)
-  sheet.addEventListener('click', e => e.target === sheet && (sheet.hidden = true))
+  sheet.addEventListener('click', e => e.target === sheet && closeTalk())
+  let talk = null
 
-  async function openReply(session, title) {
-    const text = el('pre', { class: 'md' }, T('m.loading'))
+  function closeTalk() {
+    sheet.hidden = true
+    if (talk) clearTimeout(talk.timer)
+    talk = null
+  }
+
+  function openReply(session, title) {
+    closeTalk()
+    const list = el('div', { class: 'talk' }, el('div', { class: 'note' }, T('m.loading')))
     const note = el('div', { class: 'note' })
-    const close = el('button', { class: 'btn', onclick: () => (sheet.hidden = true) }, T('m.close'))
-    sheet.replaceChildren(el('div', { class: 'sheet-box' }, el('div', { class: 'sheet-head' }, el('span', { class: 'title' }, title), close), note, text))
+    const box = el('textarea', { class: 'input task', rows: 2, maxLength: 8000 })
+    const send = el('button', { class: 'btn primary give', onclick: () => sayIt() }, T('m.say'))
+    const said = el('div', { class: 'note task-note' })
+    const foot = el('div', { class: 'talk-foot' }, box, el('div', { class: 'row' }, send), said)
+    const close = el('button', { class: 'btn', onclick: closeTalk }, T('m.close'))
+    sheet.replaceChildren(el('div', { class: 'sheet-box' }, el('div', { class: 'sheet-head' }, el('span', { class: 'title' }, title), close), note, list, foot))
     sheet.hidden = false
+    talk = { session, list, note, box, send, said, foot, timer: 0, drawn: '', first: true }
+    loadTalk()
+  }
+
+  async function loadTalk() {
+    const t = talk
+    if (!t) return
+    clearTimeout(t.timer)
     try {
-      const got = await get(`api/reply?session=${encodeURIComponent(session)}`)
-      // Markdown as it is: set as text, never as HTML.
-      text.textContent = got.text || (got.hidden ? '' : T('m.noReply'))
-      note.textContent = [got.hidden && T('m.hidden'), got.summaryOnly && got.text && T('m.summaryOnly'), got.clipped && T('m.clipped')].filter(Boolean).join(' · ')
+      const got = await get(`api/conversation?session=${encodeURIComponent(t.session)}`)
+      if (t !== talk) return
+      drawTalk(t, got)
     } catch (e) {
-      text.textContent = e.token ? T('m.needToken') : T('m.offline')
+      if (t !== talk) return
+      t.note.textContent = e.token ? T('m.needToken') : T('m.offline')
     }
+    if (t === talk && !document.hidden) t.timer = setTimeout(loadTalk, 3000)
+  }
+
+  function drawTalk(t, got) {
+    const name = AGENT_NAMES[got.agent] || got.agent
+    const key = JSON.stringify(got.messages)
+    if (key !== t.drawn) {
+      // At the bottom (or first drawn): kept at the bottom as more comes.
+      const atBottom = t.first || t.list.scrollHeight - t.list.scrollTop - t.list.clientHeight < 40
+      t.drawn = key
+      const items = got.messages.map(m =>
+        el('div', { class: `msg ${m.role}` }, el('div', { class: 'who' }, m.role === 'user' ? T('m.you') : name), el('pre', { class: 'md' }, m.text + (m.clipped ? '\n…' : ''))),
+      )
+      t.list.replaceChildren(...(got.truncated ? [el('div', { class: 'note' }, T('m.earlier'))] : []), ...items, ...(items.length ? [] : [el('div', { class: 'note' }, got.hidden ? T('m.hidden') : T('m.noTalk'))]))
+      if (atBottom) t.list.scrollTop = t.list.scrollHeight
+      t.first = false
+    }
+    t.note.textContent = [got.summaryOnly && got.messages.length && T('m.summaryOnly'), got.how === 'queue' && T('m.sayQueue')].filter(Boolean).join(' · ')
+    t.box.placeholder = T('m.sayPlaceholder', { agent: name })
+    const why = got.why === 'live' ? T('m.sayLive') : got.why === 'busy' ? T('m.sayBusy', { agent: name }) : got.why === 'noCwd' ? T('m.sayNoCwd') : got.hidden ? T('m.hidden') : ''
+    t.box.disabled = !got.canSay
+    t.send.disabled = !got.canSay || t.sending
+    if (why) t.said.textContent = why
+    else if (t.said.dataset.kept !== '1') t.said.textContent = ''
+  }
+
+  async function sayIt() {
+    const t = talk
+    const text = t?.box.value.trim()
+    if (!t || !text || t.sending) return
+    t.sending = true
+    t.send.disabled = true
+    let note
+    try {
+      const res = await fetch('api/say', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', 'x-wakuwaku': '1' },
+        body: JSON.stringify({ session: t.session, text }),
+      })
+      const got = await res.json().catch(() => ({}))
+      if (res.ok) {
+        t.box.value = ''
+        note = T('m.sent')
+      } else {
+        note = got.error === 'live' ? T('m.sayLive') : got.error === 'busy' ? T('m.sayBusy', { agent: '' }) : T('m.sayFailed', { why: got.error || res.status })
+      }
+    } catch {
+      note = T('m.offline')
+    }
+    t.sending = false
+    t.said.textContent = note
+    t.said.dataset.kept = '1'
+    setTimeout(() => (t.said.dataset.kept = ''), 6000)
+    loadTalk()
   }
 
   function draw() {
