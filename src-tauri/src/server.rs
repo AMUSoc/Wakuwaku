@@ -107,6 +107,12 @@ pub fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
     match (method.as_str(), path.as_str()) {
         ("POST", "/hook") => {
             let Some(mut event) = read_json(&mut req) else { return reply(req, 200, json!({})) };
+            // Her own runs (an agent asked to review a game, Claude asked of
+            // OP.GG: review.rs, opgg.rs) report through the agents' hooks as
+            // any session does; none of the person's, they are not shown.
+            if is_hers(sh, &event) {
+                return reply(req, 200, json!({}));
+            }
             // Grok's, through Claude Code's hooks, while its own bring it too: once is enough.
             let Some(agent) = sender_of(req.url(), &event, sh.port) else { return reply(req, 200, json!({})) };
             // Heard from one: connected (the island stops asking).
@@ -249,6 +255,21 @@ pub fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
 
 // Run code in a page ("island", an agent's pet: "pet-codex"; "pet" is
 // Claude's) and wait for what it gives back.
+// A hook event from an agent she ran herself: its folder under hers for
+// them (data/lol/: reviews' and OP.GG's work folders). The folder is the
+// event's cwd (Claude Code, Codex, Grok), or Antigravity's first workspace.
+pub fn is_hers(sh: &Shared, event: &Value) -> bool {
+    let folder = event.get("cwd").and_then(Value::as_str).or_else(|| event.get("workspacePaths").and_then(|w| w.get(0)).and_then(Value::as_str)).unwrap_or("");
+    is_under(folder, &sh.dir.join("lol").to_string_lossy())
+}
+
+// A folder in another (or that one), whatever its slashes and case.
+pub fn is_under(folder: &str, root: &str) -> bool {
+    let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    let (folder, root) = (norm(folder), norm(root));
+    !folder.is_empty() && !root.is_empty() && (folder == root || folder.starts_with(&format!("{root}/")))
+}
+
 fn evaluate(sh: &Shared, page: &str, code: &str) -> Option<Value> {
     let label = if page == "pet" { pet::label("claude") } else { page.to_string() };
     let win = sh.app.get_webview_window(&label)?;
@@ -269,6 +290,16 @@ fn evaluate(sh: &Shared, page: &str, code: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn her_own_runs_by_their_folder() {
+        let root = r"C:\Users\x\Wakuwaku\data\lol";
+        assert!(is_under(r"C:\Users\x\Wakuwaku\data\lol\reviews\work\claude", root));
+        assert!(is_under("c:/users/x/wakuwaku/data/lol/opgg/work", root));
+        assert!(!is_under(r"C:\Users\x\Wakuwaku", root));
+        assert!(!is_under(r"C:\Users\x\Wakuwaku\data\lolly", root));
+        assert!(!is_under("", root));
+    }
 
     #[test]
     fn codex_hooks_say_where_they_come_from() {

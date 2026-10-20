@@ -307,7 +307,40 @@
     )
     if (p.group) node.title = T('scout.group', { n: p.group })
     node.addEventListener('click', () => openPlayer(p))
+    // Hers: OP.GG's build against her lane opponent.
+    if (p.me) {
+      const button = el('button', 'og-open', T('scout.og.open'))
+      button.addEventListener('click', e => {
+        e.stopPropagation()
+        openOpgg(p.championId, laneOf(p, p.championId), laneOpponent(p), data.them.map(x => x.championId))
+      })
+      node.querySelector('.p-main').append(button)
+    }
     return node
+  }
+
+  // Summoner's Rift's queues (Solo/Duo, Flex, Normal, Quickplay): where positions mean something.
+  const RIFT = [420, 440, 400, 430, 490]
+
+  // The position a player plays a champion in, by their last games on the
+  // Rift (else the one they play most there); none known, null (OP.GG then
+  // takes the champion's usual one).
+  function laneOf(p, champion) {
+    const list = ((p.recent && p.recent.list) || []).filter(g => RIFT.includes(g.queue))
+    const count = (games) => {
+      const by = {}
+      for (const g of games) if (g.pos) by[g.pos] = (by[g.pos] || 0) + 1
+      return Object.entries(by).sort((a, b) => b[1] - a[1])[0]
+    }
+    const on = count(list.filter(g => g.champion === champion)) || count(list)
+    return on ? on[0] : null
+  }
+
+  // Her lane opponent: the other team's player who plays her position most.
+  function laneOpponent(p) {
+    const lane = laneOf(p, p.championId)
+    const rival = lane && (data.them || []).find(x => laneOf(x, x.championId) === lane)
+    return rival ? rival.championId : null
   }
 
   // The four pets' lines over the two teams.
@@ -730,7 +763,75 @@
       })
     }
     const said = c ? T('scout.say.champ', { champ: champName(page.champion), games: c.games, rate: pct(c.wins, c.games), kda: c.d ? ((c.k + c.a) / c.d).toFixed(2) : '∞' }) : '…'
-    return [backBar(pic('div', 'champ-icon', champIcon(page.champion)), el('b', null, champName(page.champion))), card('codex', said, 'wide grow', el('div', 'games', page.rows.map(gameRow)))]
+    const roles = Object.entries((c && c.roles) || {}).sort((a, b) => b[1] - a[1])
+    const og = el('button', 'og-open', T('scout.og.open'))
+    og.addEventListener('click', () => openOpgg(page.champion, roles.length ? roles[0][0] : 'MIDDLE', null, null))
+    return [backBar(pic('div', 'champ-icon', champIcon(page.champion)), el('b', null, champName(page.champion)), og), card('codex', said, 'wide grow', el('div', 'games', page.rows.map(gameRow)))]
+  }
+
+  function openOpgg(champion, pos, opponent, enemies) {
+    openPage({ kind: 'opgg', champion, pos, opponent, enemies, result: undefined })
+  }
+
+  function askOpgg(page) {
+    page.result = null
+    const asked = page.opponent
+    window.pet.scoutOpgg(page.champion, page.pos || '', page.opponent).then(r => {
+      if (page.opponent !== asked) return
+      page.result = r || { error: 'no answer' }
+      if (opened[opened.length - 1] === page) drawDetail()
+    })
+  }
+
+  function opggPage(page) {
+    if (page.result === undefined) askOpgg(page)
+    const r = page.result
+    const pct1 = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—')
+    const vsName = page.opponent ? champName(page.opponent) : ''
+    const setOpponent = id => {
+      page.opponent = page.opponent === id ? null : id
+      askOpgg(page)
+      drawDetail()
+    }
+    // The other team, to pick the opponent from.
+    const pick = (page.enemies || []).length
+      ? el(
+          'div',
+          'og-pick',
+          el('span', null, T('scout.og.against')),
+          page.enemies.map(id => {
+            const i = pic('i', `og-enemy${id === page.opponent ? ' on' : ''}`, champIcon(id))
+            i.title = champName(id)
+            i.addEventListener('click', () => setOpponent(id))
+            return i
+          }),
+        )
+      : null
+    // None known: the one OP.GG took (its names back to Riot's).
+    const OPGG_ROLE = { TOP: 'TOP', JUNGLE: 'JUNGLE', MID: 'MIDDLE', ADC: 'BOTTOM', SUPPORT: 'UTILITY' }
+    const role = page.pos || (r && OPGG_ROLE[String(r.position || '').toUpperCase()]) || ''
+    const roleName = role ? T(`scout.role.${role}`) : ''
+    const head = backBar(pic('div', 'champ-icon', champIcon(page.champion)), el('b', null, champName(page.champion)), roleName ? el('span', null, roleName) : null, vsName ? el('span', null, `vs ${vsName}`) : null)
+    if (r === null) return [head, pick, card('claude:og', T('scout.og.asking'), 'wide')].filter(Boolean)
+    if (!r || r.error) return [head, pick, card('claude:og', T('scout.og.none', { why: (r && r.error) || '' }), 'wide')].filter(Boolean)
+    const said = T(r.vs != null && vsName ? 'scout.og.sayVs' : 'scout.og.say', { champ: champName(page.champion), role: roleName, wr: pct1(r.winrate), vs: vsName, vwr: pct1(r.vs), patch: r.patch || '' })
+    const block = (title, ...kids) => el('div', 'og-block', el('h4', null, title), el('div', 'og-row', ...kids))
+    const icons = (ids, f) => (ids || []).map(id => pic('i', 'og-icon', f(id)))
+    const counters = (r.counterIds || []).map(id => {
+      const node = el('div', `og-counter${id === page.opponent ? ' on' : ''}`, pic('i', 'og-icon', champIcon(id)), el('span', null, champName(id)))
+      node.addEventListener('click', () => setOpponent(id))
+      return node
+    })
+    const body = el(
+      'div',
+      'og-grid',
+      block(T('scout.og.core'), icons(r.core, item), el('span', 'og-plus', '+'), icons([r.boots], item)),
+      block(T('scout.og.runes'), icons([r.keystone, r.sub], perk), el('span', 'og-sep'), icons(r.spells, spell)),
+      block(T('scout.og.skills'), el('b', 'og-skills', r.skills || '—')),
+      block(T('scout.og.counters'), counters.length ? counters : el('span', 'muted', '—')),
+    )
+    const tips = (r.tips || []).length ? el('div', 'og-tips', el('h4', null, vsName ? T('scout.og.tipsVs', { vs: vsName }) : T('scout.og.tips')), (r.tips || []).map(t => el('div', 'og-tip', t))) : null
+    return [head, pick, card('claude:og', said, 'wide', body, tips, el('div', 'og-source', T('scout.og.source')))].filter(Boolean)
   }
 
   function drawDetail() {
@@ -738,7 +839,7 @@
     $('detail').hidden = !page
     if (!page) return
     films.length = 0
-    const pages = { player: () => playerPage(page.player), game: () => gamePage(page), season: seasonPage, role: () => rolePage(page), masteries: masteriesPage, champ: () => champPage(page) }
+    const pages = { player: () => playerPage(page.player), game: () => gamePage(page), season: seasonPage, role: () => rolePage(page), masteries: masteriesPage, champ: () => champPage(page), opgg: () => opggPage(page) }
     $('detail').replaceChildren(...pages[page.kind]())
   }
 

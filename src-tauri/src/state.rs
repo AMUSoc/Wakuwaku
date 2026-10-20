@@ -680,6 +680,14 @@ impl Pet {
         }
     }
 
+    // Those working in a folder that is not the person's (her own runs, as
+    // kept from before they were left out: server.rs is_hers) forgotten.
+    pub fn forget_where(&mut self, of_cwd: impl Fn(&str) -> bool) -> usize {
+        let before = self.sessions.len();
+        self.sessions.retain(|_, s| !of_cwd(&s.cwd));
+        before - self.sessions.len()
+    }
+
     // Whether a session of this id is known.
     pub fn knows(&self, id: &str) -> bool {
         self.sessions.contains_key(id)

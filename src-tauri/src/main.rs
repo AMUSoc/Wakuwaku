@@ -56,6 +56,7 @@ mod lol;
 mod mobile;
 mod notch;
 mod notify;
+mod opgg;
 mod pet;
 mod pointer;
 mod power;
@@ -974,6 +975,14 @@ async fn scout_review(app: AppHandle, id: String) -> Value {
     review::shown(&shared(&app), &id)
 }
 
+// A champion's build and matchup from OP.GG, through Claude (opgg.rs):
+// kept a day, or asked now (about twenty seconds).
+#[tauri::command]
+async fn scout_opgg(app: AppHandle, champion: u64, position: String, opponent: Option<u64>) -> Value {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || opgg::ask(&sh, champion, &position, opponent.filter(|o| *o > 0))).await.unwrap_or(Value::Null)
+}
+
 // The game's ten put away by its close button (scout.rs).
 #[tauri::command]
 async fn scout_close(app: AppHandle) {
@@ -1388,6 +1397,7 @@ fn main() {
             scout_timeline,
             scout_review_start,
             scout_review,
+            scout_opgg,
             pet_dismiss,
             pet_keyboard,
             pet_walk,

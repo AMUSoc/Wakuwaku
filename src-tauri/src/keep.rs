@@ -44,6 +44,10 @@ pub fn restore(sh: &Shared) {
     let now = now_ms();
     let kept = fs::read_to_string(sh.dir.join(FILE)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or(Value::Null);
     let back = sh.pet.lock().unwrap().restore(&kept, now, jump::is_alive);
+    // Her own runs (reviews, OP.GG) were kept too before they were left out.
+    let hers = sh.dir.join("lol").to_string_lossy().into_owned();
+    let dropped = sh.pet.lock().unwrap().forget_where(|cwd| crate::server::is_under(cwd, &hers));
+    let back = back - dropped.min(back);
     let mut grok = 0;
     for msg in grok_open() {
         let id = msg["session"].as_str().unwrap_or("");

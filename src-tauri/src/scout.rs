@@ -772,6 +772,13 @@ fn load_ddragon(lang: &str) {
             perks.insert(rune["id"].to_string(), rune["icon"].clone());
         }
     }
+    // In English too: OP.GG is asked by them (opgg.rs).
+    let champions_en: serde_json::Map<String, Value> = get(&format!("{base}/cdn/{v}/data/en_US/champion.json"))
+        .and_then(|c| c["data"].as_object().cloned())
+        .unwrap_or_default()
+        .values()
+        .filter_map(|c| Some((c["key"].as_str()?.to_string(), json!(c["name"].as_str()?))))
+        .collect();
     let champions: serde_json::Map<String, Value> = get(&format!("{base}/cdn/{v}/data/{locale}/champion.json"))
         .and_then(|c| c["data"].as_object().cloned())
         .unwrap_or_default()
@@ -786,7 +793,7 @@ fn load_ddragon(lang: &str) {
         .into_iter()
         .filter_map(|(id, item)| Some((id, json!(item["name"].as_str()?))))
         .collect();
-    *DDRAGON.lock().unwrap_or_else(|e| e.into_inner()) = Some(json!({ "v": v, "locale": locale, "spells": spells, "perks": perks, "champions": champions, "items": items }));
+    *DDRAGON.lock().unwrap_or_else(|e| e.into_inner()) = Some(json!({ "v": v, "locale": locale, "spells": spells, "perks": perks, "champions": champions, "championsEn": champions_en, "items": items }));
 }
 
 // The champions' names in her language, by id (Data Dragon's, once read):
@@ -794,6 +801,12 @@ fn load_ddragon(lang: &str) {
 pub fn champion_names() -> HashMap<u64, String> {
     let dd = DDRAGON.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or(Value::Null);
     dd["champions"].as_object().into_iter().flatten().filter_map(|(id, n)| Some((id.parse().ok()?, n.as_str()?.to_string()))).collect()
+}
+
+// The champions' names in English, by id: OP.GG is asked by them (opgg.rs).
+pub fn champion_names_en() -> HashMap<u64, String> {
+    let dd = DDRAGON.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or(Value::Null);
+    dd["championsEn"].as_object().into_iter().flatten().filter_map(|(id, n)| Some((id.parse().ok()?, n.as_str()?.to_string()))).collect()
 }
 
 // The items' names in her language, by id (Data Dragon's, once read).
@@ -899,6 +912,7 @@ fn push(sh: &Shared) {
         view["dd"] = DDRAGON.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or(Value::Null);
         if let Some(dd) = view["dd"].as_object_mut() {
             dd.remove("items");
+            dd.remove("championsEn");
         }
         view["pets"] = pets_of(sh);
         let _ = sh.app.emit_to(LABEL, "scout:update", view);

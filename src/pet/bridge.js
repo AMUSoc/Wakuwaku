@@ -65,6 +65,8 @@
     // A game reviewed by the agents asked (once each), and its reviews as they are.
     scoutReviewStart: (id, who, agents) => invoke('scout_review_start', { id: String(id || ''), who: String(who || ''), agents: (agents || []).map(String) }).catch(() => null),
     scoutReview: id => invoke('scout_review', { id: String(id || '') }).catch(() => null),
+    // A champion's build and matchup from OP.GG, through Claude (kept a day).
+    scoutOpgg: (champion, position, opponent) => invoke('scout_opgg', { champion: Number(champion) || 0, position: String(position || ''), opponent: Number(opponent) || null }).catch(() => null),
     scoutRows: (ids, who) => invoke('scout_rows', { ids: (ids || []).map(String), who: String(who || '') }).catch(() => []),
     answer: (id, choice) => send('pet_answer', { id, choice }),
     dismiss: id => send('pet_dismiss', { id }),
