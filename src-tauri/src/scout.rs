@@ -182,6 +182,8 @@ pub fn recent_of(puuid: &str, champion: u64, games: &[Value]) -> Value {
         "champGames": on.len(),
         "champWins": on.iter().filter(|p| won(p)).count(),
         "streak": if first { run } else { -run },
+        // Each game, the latest first: for her own panel (her alone).
+        "list": mine.iter().map(|p| json!({ "champion": p["champion"], "win": won(p), "k": p["k"], "d": p["d"], "a": p["a"] })).collect::<Vec<_>>(),
     })
 }
 
@@ -272,18 +274,22 @@ pub fn on_game(sh: &Arc<Shared>, pid: Option<u32>) {
     SCOUTING.store(true, Ordering::SeqCst);
     let sh = sh.clone();
     crate::spawn_named("scout", move || {
-        scout(&sh);
+        scout(&sh, true);
         SCOUTING.store(false, Ordering::SeqCst);
     });
 }
 
-fn scout(sh: &Arc<Shared>) {
+// The game's ten (as a game loads: in_game), or, where there are none to
+// find (a practice tool or custom game, or no game at all), her alone.
+fn scout(sh: &Arc<Shared>, in_game: bool) {
     let key = sh.setting("riotApiKey").as_str().unwrap_or("").to_string();
     // Shown by itself only while the game loads: one already under way (she
     // started in the middle of it) is not covered over, the key brings it.
     // Told after the game's next look (lol.rs reads it each second), not before.
-    std::thread::sleep(Duration::from_millis(1500));
-    let loading = !crate::lol::in_game();
+    if in_game {
+        std::thread::sleep(Duration::from_millis(1500));
+    }
+    let loading = in_game && !crate::lol::in_game();
     if key.is_empty() {
         status(sh, "nokey");
         if loading {
@@ -297,10 +303,10 @@ fn scout(sh: &Arc<Shared>) {
     }
     // Tests: someone's game on Taiwan's server looked up as if hers
     // (WAKUWAKU_SCOUT_AS=<their PUUID>), no client needed.
-    let as_someone = std::env::var("WAKUWAKU_SCOUT_AS").ok().map(|puuid| (puuid, "tw2", HashMap::new()));
-    let Some((me, platform, names)) = as_someone.or_else(|| {
+    let as_someone = std::env::var("WAKUWAKU_SCOUT_AS").ok().map(|puuid| (puuid, "tw2", HashMap::new(), String::new()));
+    let Some((me, platform, names, my_name)) = as_someone.or_else(|| {
         let (riot_id, platform, names) = crate::lcu::me_platform_names()?;
-        Some((puuid_of(&key, platform, &riot_id)?, platform, names))
+        Some((puuid_of(&key, platform, &riot_id)?, platform, names, riot_id))
     }) else {
         sh.log("scout: the client is not there to say who she is, or Riot's API does not know her");
         status(sh, "noclient");
@@ -309,17 +315,23 @@ fn scout(sh: &Arc<Shared>) {
     let (host, regional) = hosts(platform);
     // Spectator has the game a little after it starts loading.
     let mut live = Err(Miss::None);
-    for _ in 0..12 {
+    for _ in 0..if in_game { 12 } else { 0 } {
         live = riot(&key, &format!("{host}/lol/spectator/v5/active-games/by-summoner/{me}"));
         if live.is_ok() || live == Err(Miss::Key) {
             break;
         }
         std::thread::sleep(Duration::from_secs(5));
     }
-    let live = match live {
-        Ok(v) => v,
+    let (live, solo) = match live {
+        Ok(v) => (v, ""),
         Err(Miss::Key) => return status(sh, "badkey"),
-        Err(_) => return status(sh, "nogame"),
+        // None to find: her alone, on the champion she plays if she is in a
+        // game (the game's own list, by name in the client's language).
+        Err(_) => {
+            let champion = crate::lol::my_champion().and_then(|name| names.iter().find(|(_, n)| **n == name).map(|(id, _)| *id)).unwrap_or(0);
+            let me_alone = json!([{ "puuid": me, "riotId": my_name, "teamId": 100, "championId": champion }]);
+            (json!({ "participants": me_alone }), if crate::lol::in_game() { "nogame" } else { "outside" })
+        }
     };
     let mut players: Vec<Player> = live["participants"]
         .as_array()
@@ -344,7 +356,13 @@ fn scout(sh: &Arc<Shared>) {
     sh.log(&format!("scout: {} players, queue {queue}", players.len()));
     let draw = |players: &[Player], done: usize, total: usize| {
         let team = |mine: bool| players.iter().filter(|p| (p.team == my_team) == mine).map(|p| player_view(p, &names)).collect::<Vec<_>>();
-        publish(sh, json!({ "state": "ready", "key": key_name(sh), "queue": queue, "us": team(true), "them": team(false), "done": done, "total": total }));
+        // Her alone: the names of the champions of her games too.
+        let played: HashMap<String, String> = if solo.is_empty() {
+            HashMap::new()
+        } else {
+            players.iter().flat_map(|p| p.recent["list"].as_array().cloned().unwrap_or_default()).filter_map(|g| g["champion"].as_u64()).filter_map(|id| Some((id.to_string(), names.get(&id)?.clone()))).collect()
+        };
+        publish(sh, json!({ "state": "ready", "key": key_name(sh), "queue": queue, "us": team(true), "them": team(false), "done": done, "total": total, "solo": solo, "names": played }));
     };
     draw(&players, 0, 1);
     // The quick ones first: ranks and mastery.
@@ -357,7 +375,9 @@ fn scout(sh: &Arc<Shared>) {
             }
         }
         let champion = players[i].champion;
-        if let Ok(m) = riot(&key, &format!("{host}/lol/champion-mastery/v4/champion-masteries/by-puuid/{puuid}/by-champion/{champion}")) {
+        if champion == 0 {
+            // No game, no champion: no mastery to tell.
+        } else if let Ok(m) = riot(&key, &format!("{host}/lol/champion-mastery/v4/champion-masteries/by-puuid/{puuid}/by-champion/{champion}")) {
             players[i].mastery = json!({ "level": m["championLevel"], "points": m["championPoints"] });
         } else {
             players[i].mastery = json!({ "level": 0, "points": 0 });
@@ -500,8 +520,15 @@ pub fn toggle(sh: &Arc<Shared>) {
         return;
     }
     let on = !SHOWN.load(Ordering::SeqCst);
-    if on && VIEW.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
-        status(sh, "none");
+    // Nothing of a game to show (none yet, or one that could not be looked
+    // up): her own, looked up now.
+    let has_ten = VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|v| v["state"] == "ready" && v["solo"] == "");
+    if on && !has_ten && !SCOUTING.swap(true, Ordering::SeqCst) {
+        let sh = sh.clone();
+        crate::spawn_named("scout", move || {
+            scout(&sh, false);
+            SCOUTING.store(false, Ordering::SeqCst);
+        });
     }
     show(sh, on);
 }
@@ -589,7 +616,9 @@ mod tests {
         assert_eq!(kept["players"][0], json!({ "puuid": "me", "champion": 103, "win": true, "k": 6, "d": 2, "a": 4 }));
         // Latest first: two won, then a loss; twice on Ahri (103), both won.
         let games: Vec<Value> = [m("a", 1800.0, 103, true, 6), m("b", 1800.0, 103, true, 4), m("c", 1800.0, 64, false, 2)].iter().filter_map(trim_match).collect();
-        let r = recent_of("me", 103, &games);
+        let mut r = recent_of("me", 103, &games);
+        assert_eq!(r["list"][2], json!({ "champion": 64, "win": false, "k": 2, "d": 2, "a": 4 }));
+        r.as_object_mut().unwrap().remove("list");
         assert_eq!(r, json!({ "games": 3, "wins": 2, "k": 4.0, "d": 2.0, "a": 4.0, "champGames": 2, "champWins": 2, "streak": 2 }));
         assert_eq!(recent_of("foe", 1, &games)["streak"], -2);
         assert_eq!(recent_of("nobody", 1, &games), Value::Null);

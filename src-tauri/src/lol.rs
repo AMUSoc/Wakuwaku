@@ -79,6 +79,14 @@ pub fn in_game() -> bool {
     GAME.lock().unwrap_or_else(|e| e.into_inner()).is_some()
 }
 
+// The champion she plays in the game on, as the game names it (its
+// client's language): for her own row when the game's ten cannot be found
+// (scout.rs).
+pub fn my_champion() -> Option<String> {
+    let game = GAME.lock().unwrap_or_else(|e| e.into_inner());
+    game.as_ref()?.allies.iter().find(|a| a["me"] == true)?["champion"].as_str().filter(|c| !c.is_empty()).map(str::to_string)
+}
+
 // What an agent's pet shows of the game now; none out of a game, or for an
 // agent with no part.
 pub fn view(agent: &str) -> Value {

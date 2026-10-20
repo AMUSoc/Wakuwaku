@@ -35,7 +35,7 @@
 
   function playerView(p) {
     const icon = el('div', 'icon')
-    if (p.championId) icon.style.backgroundImage = `url("https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${p.championId}.png")`
+    if (p.championId) icon.style.backgroundImage = `url("${ICON(p.championId)}")`
     const r = p.recent
     const m = p.mastery
     const recent = []
@@ -46,31 +46,54 @@
       if (r.streak >= 3) recent.push(el('span', 'good', T('scout.winStreak', { n: r.streak })))
       if (r.streak <= -3) recent.push(el('span', 'bad', T('scout.loseStreak', { n: -r.streak })))
     }
-    const mastery = m ? (m.level ? el('span', null, T('scout.mastery', { level: m.level, points: points(m.points) })) : el('span', 'bad', T('scout.firstTime'))) : el('span', 'wait', '…')
+    // No champion (her own, out of a game): no mastery to tell.
+    const mastery = !p.championId ? null : m ? (m.level ? el('span', null, T('scout.mastery', { level: m.level, points: points(m.points) })) : el('span', 'bad', T('scout.firstTime'))) : el('span', 'wait', '…')
     return el(
       'div',
-      `player${p.me ? ' me' : ''}`,
-      icon,
+      `player${p.me ? ' me' : ''}${p.championId ? '' : ' no-champ'}`,
+      p.championId ? icon : null,
       el(
         'div',
         null,
         el('div', 'top', el('span', 'champ', p.champion || ''), el('span', 'name', p.me ? `${p.name} · ${T('scout.me')}` : p.name), el('span', 'rank', rankText(p.rank))),
-        el('div', 'line', mastery),
+        mastery ? el('div', 'line', mastery) : null,
         el('div', 'line', recent.length ? recent : el('span', 'wait', '…')),
       ),
     )
   }
 
+  const ICON = id => `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${id}.png`
+
+  // Her alone: her last games one by one, the latest first.
+  function gamesView(list) {
+    return el(
+      'div',
+      'games',
+      (list || []).map(g => {
+        const icon = el('div', 'mini')
+        icon.style.backgroundImage = `url("${ICON(g.champion)}")`
+        return el('div', `game ${g.win ? 'won' : 'lost'}`, icon, el('span', 'result', T(g.win ? 'scout.won' : 'scout.lost')), el('span', 'who', (data.names || {})[g.champion] || ''), el('span', 'kda', `${g.k}/${g.d}/${g.a}`))
+      }),
+    )
+  }
+
   function draw() {
     $('panel').hidden = false
-    $('title').textContent = T('scout.title')
+    const alone = data.state === 'ready' && data.solo
+    $('title').textContent = T(alone ? 'scout.mine' : 'scout.title')
     $('hint').textContent = T('scout.hint', { key: data.key || 'Alt+`' })
     $('us').textContent = T('scout.us')
     $('them').textContent = T('scout.them')
     const ready = data.state === 'ready'
-    $('say').textContent = ready ? '' : T(`scout.${data.state || 'none'}`)
+    // Her alone: why, and no other team.
+    const solo = ready && data.solo
+    $('say').textContent = !ready ? T(`scout.${data.state || 'none'}`) : solo ? T(data.solo === 'nogame' ? 'scout.soloNogame' : 'scout.soloOutside') : ''
+    document.querySelector('.them').hidden = !!solo
+    $('teams').classList.toggle('alone', !!solo)
     $('progress').textContent = ready && data.total > 1 && data.done < data.total ? T('scout.reading', { done: data.done, total: data.total }) : ''
-    document.querySelector('.us .rows').replaceChildren(...(ready ? data.us.map(playerView) : []))
+    $('us').hidden = !!solo
+    const mine = solo ? data.us.find(p => p.me) : null
+    document.querySelector('.us .rows').replaceChildren(...(ready ? data.us.map(playerView) : []), ...(mine && mine.recent ? [gamesView(mine.recent.list)] : []))
     document.querySelector('.them .rows').replaceChildren(...(ready ? data.them.map(playerView) : []))
     $('teams').hidden = !ready
   }
