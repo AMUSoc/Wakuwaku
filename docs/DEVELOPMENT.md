@@ -293,6 +293,7 @@ examples/widgets 里的天气、股票、番茄钟、倒计时、久坐提醒、
 
 - **岛在刘海里**（`notch.rs`）：窗口在屏幕顶部正中、层级高过菜单栏；量出刘海的宽高（`safeAreaInsets`、`auxiliaryTopLeftArea` / `auxiliaryTopRightArea`）用 `island:top` 告诉页面，收起时和刘海一样大、顶边直角，鼠标穿过去（`aside`），刘海留给 Atoll 这类 App。左键点托盘图标（`island:peek`）或双击桌面上的她才展开；只有等你批准会自己弹出；展开的岛和从菜单打开的设置，鼠标进去再离开就收，一直没进来 6 秒后收，打字时不收。她的家在刘海里看不见，双击、拖向岛都不会把她收回去（`notch::in_notch`）。
 - **多屏不同缩放**：Tauri 给的鼠标位置按主屏的缩放，每个窗口的位置按它自己那块屏的，`screen::cursor` 按窗口所在屏换算；拖她时用逻辑坐标摆窗口（`pet.rs` 的 `place`）。
+- **岛在哪块屏**：默认在主屏；有两块以上屏时，托盘和岛的右键菜单多一个「岛在哪个屏幕」，选了记在设置 `islandDisplay`（那块屏左上角的物理坐标 `[x, y]`），`island.rs` 的 `area` 先找它，找不到（屏拔掉、排列改了）就照旧回主屏。
 - **互不影响**：Mac 的东西只在 Mac 上跑，Windows 的只在 Windows 上跑。Rust 用 `cfg(target_os = "macos")` / `cfg(windows)`，Windows 专有的部分（`backplate.rs`、`jump.rs`、`fullscreen.rs`、`island.rs` 的 `os` 等）在别处有空实现；页面上 Mac 的行为只在收到 `island:top`、`island:peek`（只有 Mac 会发）或 `window.pet.mac` 为真时才有（`bridge.js`：`navigator.platform` 以 Mac 开头，Apple Silicon 上也是 `MacIntel`）。例如设置刚打开 0.5 秒内的失焦不算点外面、记录设置有没有被用过的监听，都只在 Mac 上；指针线程在 Windows 上每轮只读一次鼠标位置，和以前一样。只在 Windows 上成立的单元测试标 `cfg(windows)`。
 - **Mac 上还没有的**：点会话跳到窗口、系统通知、监控插件、PowerShell 插件、开机自启、打包和自动更新、跟随系统强调色、WebView 崩溃监视和省电。
 

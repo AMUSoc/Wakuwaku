@@ -83,6 +83,23 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
         _ => "corner".into(),
     };
     menu.append(&MenuItem::with_id(app, corner, t("menu.backToCorner"), true, None::<&str>)?)?;
+    // With more than one display: which the island is on, left to right.
+    let screens = sh.screens();
+    if screens.areas.len() > 1 {
+        let mut areas = screens.areas.clone();
+        areas.sort_by_key(|a| (a.mon.0, a.mon.1));
+        let chosen = settings.get("islandDisplay").and_then(|v| Some((v.get(0)?.as_i64()? as i32, v.get(1)?.as_i64()? as i32)));
+        let chosen = chosen.filter(|at| areas.iter().any(|a| (a.mon.0, a.mon.1) == *at));
+        let displays = Submenu::new(app, t("menu.islandDisplay"), true)?;
+        displays.append(&CheckMenuItem::with_id(app, "display:auto", t("menu.displayAuto"), true, chosen.is_none(), None::<&str>)?)?;
+        for (i, a) in areas.iter().enumerate() {
+            let main = if screens.primary.is_some_and(|p| p.mon == a.mon) { t("menu.displayMain") } else { String::new() };
+            let label = format!("{}{main}", t("menu.displayN").replace("{n}", &(i + 1).to_string()));
+            let at = (a.mon.0, a.mon.1);
+            displays.append(&CheckMenuItem::with_id(app, format!("display:{},{}", at.0, at.1), label, true, chosen == Some(at), None::<&str>)?)?;
+        }
+        menu.append(&displays)?;
+    }
     // On a pet: a new conversation with its agent, in a terminal; its website (launch.rs).
     if let Over::Her(agent) = over {
         menu.append(&PredefinedMenuItem::separator(app)?)?;
@@ -119,6 +136,9 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
                 crate::launch::terminal(sh, agent);
             } else if let Some(agent) = id.strip_prefix("web:") {
                 crate::launch::web(sh, agent);
+            } else if let Some(at) = id.strip_prefix("display:") {
+                let at = at.split_once(',').and_then(|(x, y)| Some(json!([x.parse::<i32>().ok()?, y.parse::<i32>().ok()?])));
+                sh.change(json!({ "islandDisplay": at }));
             } else if let Some(pet_id) = id.strip_prefix("pet:") {
                 sh.change(json!({ "pet": pet_id }));
             } else if let Some(name) = id.strip_prefix("size:") {

@@ -601,6 +601,7 @@ impl Shared {
         let touches_monitor = ["monitor", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
         let touches_desktop = patch.contains_key("desktop");
         let touches_mobile = ["mobile", "mobileBind"].iter().any(|k| patch.contains_key(*k));
+        let touches_island_display = patch.contains_key("islandDisplay");
         {
             let mut settings = self.settings.lock().unwrap();
             settings.extend(patch);
@@ -620,6 +621,9 @@ impl Shared {
         }
         if touches_top {
             island::keep_on_top(self);
+        }
+        if touches_island_display {
+            island::moved(self);
         }
         // Phone access on, off, or at another address: listened for there.
         if touches_mobile {

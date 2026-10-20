@@ -114,9 +114,14 @@ fn set_ignore(sh: &Shared, ignore: Option<bool>) {
     }
 }
 
-// The display it is on: where it is, else the primary one.
+// The display it is on: the one chosen for it (islandDisplay, the top-left
+// corner of a display), while there is such a one; else where it is, else
+// the primary one.
 fn area(sh: &Shared) -> Option<Area> {
     let screens = sh.screens();
+    if let Some(chosen) = chosen(sh).and_then(|at| screens.areas.iter().copied().find(|a| (a.mon.0, a.mon.1) == at)) {
+        return Some(chosen);
+    }
     let at = {
         let isl = sh.island.lock().unwrap();
         (isl.created && isl.size.0 > 0).then(|| (isl.pos.0 + isl.size.0 / 2, isl.pos.1 + isl.size.1 / 2))
@@ -124,6 +129,22 @@ fn area(sh: &Shared) -> Option<Area> {
     match at {
         Some((x, y)) => screens.near(x, y),
         None => screens.primary,
+    }
+}
+
+// The display chosen for it (the menu's Display): its top-left corner.
+fn chosen(sh: &Shared) -> Option<(i32, i32)> {
+    let v = sh.setting("islandDisplay");
+    Some((v.get(0)?.as_i64()? as i32, v.get(1)?.as_i64()? as i32))
+}
+
+// Moved to the display now chosen for it, with the blur under it.
+pub fn moved(sh: &Shared) {
+    let shown = sh.island.lock().unwrap().shown;
+    place(sh);
+    if shown {
+        lay_again(sh, "moved to another display");
+        crate::backplate::again();
     }
 }
 

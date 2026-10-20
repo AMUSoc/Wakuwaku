@@ -117,6 +117,9 @@ fn defaults() -> Map<String, Value> {
         "promptWaitSec": 290,
         "dnd": false,
         "hideInFullscreen": true,
+        // The display the island is on: the top-left corner of one ([x, y],
+        // physical), or none: the main one (island.rs area).
+        "islandDisplay": null,
         // A League of Legends game on: the pets show of it (lol.rs); her own
         // Riot API key, for her rank and her party's in champion select (lcu.rs).
         "lol": true,
