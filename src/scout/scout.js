@@ -125,7 +125,9 @@
           el('div', 'wl', el('span', 'w', T('scout.w', { n: f.wins })), ' ', el('span', 'l', T('scout.l', { n: f.losses })), ` · ${pct(f.wins, f.wins + f.losses)}%`),
         )
       : null
-    return card('claude', said, '', main, flex)
+    const node = card('claude', said, 'opens', main, flex, el('div', 'more', T('scout.more.season')))
+    node.addEventListener('click', () => openPage({ kind: 'season' }))
+    return node
   }
 
   // Her tags, from what is known of her: the facts alone.
@@ -161,7 +163,9 @@
       'mains',
       top.map(m => el('div', 'main', pic('div', 'champ-icon', champIcon(m.champion)), el('div', 'n', champName(m.champion)), el('div', 'pts', `${T('scout.masteryShort', { level: m.level })} · ${points(m.points)}`))),
     )
-    return card('grok', said, '', tags, mains)
+    const node = card('grok', said, 'opens', tags, mains, el('div', 'more', T('scout.more.masteries')))
+    node.addEventListener('click', () => openPage({ kind: 'masteries' }))
+    return node
   }
 
   function rolesCard(p) {
@@ -173,7 +177,9 @@
       const track = el('div', 'track', el('i'))
       track.firstChild.style.width = `${(r.games / max) * 100}%`
       const rate = pct(r.wins, r.games)
-      return el('div', 'role', el('span', null, T(`scout.role.${r.pos}`)), track, el('span', 'n', String(r.games)), el('span', `rate ${rate >= 50 ? 'good' : 'bad'}`, `${rate}%`))
+      const row = el('div', 'role opens', el('span', null, T(`scout.role.${r.pos}`)), track, el('span', 'n', String(r.games)), el('span', `rate ${rate >= 50 ? 'good' : 'bad'}`, `${rate}%`))
+      row.addEventListener('click', () => openPage({ kind: 'role', pos: r.pos }))
+      return row
     })
     return card('agy', said, '', rows, p.rolesTotal ? el('div', 'reading', T('scout.rolesOf', { n: p.rolesOf, total: p.rolesTotal })) : null)
   }
@@ -438,12 +444,106 @@
     return [head, card('codex', said, 'wide grow', el('div', 'board', team(100), team(200)))]
   }
 
+  function openPage(page) {
+    opened.push(page)
+    drawDetail()
+  }
+
+  // Her mastery of a champion, from every one's (the profile's masteries).
+  const masteryOf = id => ((data.profile && data.profile.masteries) || []).find(m => m.champion === Number(id))
+
+  // A table of champions: each row its icon and name, games, won and lost
+  // as a bar, K/D/A, minions a minute, her mastery; a click, its games.
+  function champTable(champs) {
+    const head = el('div', 'c-row c-head', el('span'), el('span', null, T('scout.col.champ')), el('span', null, T('scout.col.games')), el('span', null, T('scout.col.rate')), el('span', null, T('scout.col.kda')), el('span', null, T('scout.col.cs')), el('span', null, T('scout.col.mastery')))
+    const rows = champs.map(c => {
+      const rate = pct(c.wins, c.games)
+      const bar = el('div', 'bar thin', el('i'))
+      bar.firstChild.style.width = `${rate}%`
+      const kda = c.d ? ((c.k + c.a) / c.d).toFixed(2) : '∞'
+      const m = masteryOf(c.champion)
+      const row = el(
+        'div',
+        'c-row opens',
+        pic('div', 'champ-icon', champIcon(c.champion)),
+        el('b', null, champName(c.champion)),
+        el('span', null, String(c.games)),
+        el('div', null, el('div', 'wl', el('span', 'w', T('scout.w', { n: c.wins })), ' ', el('span', 'l', T('scout.l', { n: c.games - c.wins })), ' · ', el('b', rate >= 50 ? 'good' : 'bad', `${rate}%`)), bar),
+        el('div', null, el('b', null, kda), el('div', 'sub', `${(c.k / c.games).toFixed(1)} / ${(c.d / c.games).toFixed(1)} / ${(c.a / c.games).toFixed(1)}`)),
+        el('span', null, (c.cs / Math.max(1, c.minutes)).toFixed(1)),
+        el('span', 'gold-text', m ? `${T('scout.masteryShort', { level: m.level })} · ${points(m.points)}` : '—'),
+      )
+      row.addEventListener('click', () => openPage({ kind: 'champ', champion: c.champion, ids: c.ids, rows: null }))
+      return row
+    })
+    return el('div', 'c-table', head, rows)
+  }
+
+  function seasonPage() {
+    const p = data.profile
+    const s = p.season
+    const champs = (s && s.champs) || []
+    const r = p.solo
+    const said = champs.length ? T('scout.say.season', { games: p.rolesOf, champs: champs.length, champ: champName(champs[0].champion), n: champs[0].games }) : T('scout.say.rolesReading')
+    const reading = p.rolesOf < p.rolesTotal ? el('span', null, T('scout.rolesOf', { n: p.rolesOf, total: p.rolesTotal })) : null
+    return [backBar(el('b', null, T('scout.page.season')), r ? el('span', null, `${tierText(r)} · ${T('scout.w', { n: r.wins })} ${T('scout.l', { n: r.losses })}`) : null, reading), card('claude', said, 'wide grow', champTable(champs))]
+  }
+
+  function rolePage(page) {
+    const p = data.profile
+    const role = (p.roles || []).find(r => r.pos === page.pos) || { games: 0, wins: 0, champs: [] }
+    const said = T('scout.say.role', { role: T(`scout.role.${page.pos}`), games: role.games, rate: pct(role.wins, role.games), champs: (role.champs || []).length })
+    return [backBar(el('b', null, T(`scout.role.${page.pos}`))), card('agy', said, 'wide grow', champTable(role.champs || []))]
+  }
+
+  function masteriesPage() {
+    const p = data.profile
+    const all = p.masteries || []
+    const total = all.reduce((n, m) => n + (m.points || 0), 0)
+    const said = T('scout.say.masteries', { n: all.length, points: points(total) })
+    const champs = ((p.season && p.season.champs) || [])
+    const grid = el(
+      'div',
+      'm-grid',
+      all.map(m => {
+        const c = champs.find(x => x.champion === m.champion)
+        const tile = el(
+          'div',
+          `m-tile${c ? ' opens' : ''}${m.points >= 1e6 ? ' rich' : ''}`,
+          pic('div', 'champ-icon', champIcon(m.champion)),
+          el('div', 'm-name', champName(m.champion)),
+          el('div', 'm-level', T('scout.masteryShort', { level: m.level })),
+          el('div', 'm-points', points(m.points)),
+          c ? el('div', `m-season ${pct(c.wins, c.games) >= 50 ? 'good' : 'bad'}`, `${c.games} · ${pct(c.wins, c.games)}%`) : null,
+        )
+        if (c) tile.addEventListener('click', () => openPage({ kind: 'champ', champion: c.champion, ids: c.ids, rows: null }))
+        return tile
+      }),
+    )
+    return [backBar(el('b', null, T('scout.page.masteries'))), card('grok', said, 'wide grow', grid)]
+  }
+
+  function champPage(page) {
+    const p = data.profile
+    const c = (((p.season && p.season.champs) || []).find(x => x.champion === page.champion)) || null
+    if (!page.rows) {
+      page.rows = []
+      window.pet.scoutRows(page.ids, p.me).then(rows => {
+        page.rows = rows || []
+        if (opened[opened.length - 1] === page) drawDetail()
+      })
+    }
+    const said = c ? T('scout.say.champ', { champ: champName(page.champion), games: c.games, rate: pct(c.wins, c.games), kda: c.d ? ((c.k + c.a) / c.d).toFixed(2) : '∞' }) : '…'
+    return [backBar(pic('div', 'champ-icon', champIcon(page.champion)), el('b', null, champName(page.champion))), card('codex', said, 'wide grow', el('div', 'games', page.rows.map(gameRow)))]
+  }
+
   function drawDetail() {
     const page = opened[opened.length - 1]
     $('detail').hidden = !page
     if (!page) return
     films.length = 0
-    $('detail').replaceChildren(...(page.kind === 'player' ? playerPage(page.player) : gamePage(page)))
+    const pages = { player: () => playerPage(page.player), game: () => gamePage(page), season: seasonPage, role: () => rolePage(page), masteries: masteriesPage, champ: () => champPage(page) }
+    $('detail').replaceChildren(...pages[page.kind]())
   }
 
   $('close').addEventListener('click', () => window.pet.scoutClose())

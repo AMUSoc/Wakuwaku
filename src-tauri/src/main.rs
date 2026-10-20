@@ -944,6 +944,13 @@ async fn scout_game(app: AppHandle, id: String) -> Value {
     scout::kept_game(&shared(&app), &id)
 }
 
+// Rows of these games kept, as hers (who) in them, for a champion's or a
+// position's games opened (scout.rs).
+#[tauri::command]
+async fn scout_rows(app: AppHandle, ids: Vec<String>, who: String) -> Value {
+    scout::rows_of(&shared(&app), &ids, &who)
+}
+
 // The game's ten put away by its close button (scout.rs).
 #[tauri::command]
 async fn scout_close(app: AppHandle) {
@@ -1354,6 +1361,7 @@ fn main() {
             pet_answer,
             scout_close,
             scout_game,
+            scout_rows,
             pet_dismiss,
             pet_keyboard,
             pet_walk,

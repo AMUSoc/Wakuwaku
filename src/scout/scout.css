@@ -1023,3 +1023,125 @@ h2[hidden] {
   color: var(--muted);
   font-size: 14px;
 }
+
+/* --- The season, a position, every mastery, a champion's games ---------------------------- */
+
+.opens {
+  cursor: pointer;
+}
+
+.card.opens:hover {
+  filter: brightness(1.12);
+}
+
+.role.opens:hover {
+  color: var(--agent);
+}
+
+.more {
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 11px;
+  color: var(--agent);
+  text-align: right;
+}
+
+.c-table {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.c-row {
+  display: grid;
+  grid-template-columns: 34px minmax(7em, 1fr) 4em minmax(12em, 1.4fr) 7em 5em 9em;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px 4px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+}
+
+.c-row.opens:hover {
+  filter: brightness(1.25);
+}
+
+.c-head {
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.c-row .sub {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.gold-text {
+  color: var(--gold);
+}
+
+.m-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+
+.m-tile {
+  padding: 8px 6px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  text-align: center;
+  font-size: 11px;
+}
+
+.m-tile.rich {
+  box-shadow: inset 0 0 0 1px rgba(230, 195, 106, 0.6);
+  background: linear-gradient(180deg, rgba(230, 195, 106, 0.12), rgba(0, 0, 0, 0.2));
+}
+
+.m-tile.opens:hover {
+  filter: brightness(1.25);
+}
+
+.m-tile .champ-icon {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 4px;
+}
+
+.m-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m-level {
+  color: var(--muted);
+}
+
+.m-points {
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.m-season {
+  margin-top: 2px;
+}
+
+.detail-bar .champ-icon {
+  width: 32px;
+  height: 32px;
+}

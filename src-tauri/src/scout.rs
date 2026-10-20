@@ -229,21 +229,71 @@ pub fn recent_of(puuid: &str, champion: u64, games: &[Value]) -> Value {
 // Where she plays in ranked Solo/Duo (420), by the games kept: each
 // position, how many and won, the most played first.
 pub fn roles_of(puuid: &str, games: &[Value]) -> Value {
-    let mut by: Vec<(String, u64, u64)> = Vec::new();
+    let mut by: Vec<(String, Vec<&Value>)> = Vec::new();
     for g in games.iter().filter(|g| g["queue"] == 420) {
         let Some(p) = g["players"].as_array().and_then(|ps| ps.iter().find(|p| p["puuid"] == puuid)) else { continue };
         let pos = p["pos"].as_str().filter(|s| !s.is_empty()).unwrap_or("NONE").to_string();
-        let won = p["win"].as_bool().unwrap_or(false) as u64;
-        match by.iter_mut().find(|(r, _, _)| *r == pos) {
-            Some(row) => {
-                row.1 += 1;
-                row.2 += won;
-            }
-            None => by.push((pos, 1, won)),
+        match by.iter_mut().find(|(r, _)| *r == pos) {
+            Some(row) => row.1.push(g),
+            None => by.push((pos, vec![g])),
         }
     }
-    by.sort_by(|a, b| b.1.cmp(&a.1));
-    Value::Array(by.into_iter().map(|(pos, games, wins)| json!({ "pos": pos, "games": games, "wins": wins })).collect())
+    by.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    Value::Array(
+        by.into_iter()
+            .map(|(pos, games)| {
+                let owned: Vec<Value> = games.into_iter().cloned().collect();
+                let season = season_of(puuid, &owned);
+                let wins = season["champs"].as_array().into_iter().flatten().map(|c| c["wins"].as_u64().unwrap_or(0)).sum::<u64>();
+                json!({ "pos": pos, "games": owned.len(), "wins": wins, "champs": season["champs"] })
+            })
+            .collect(),
+    )
+}
+
+// Her games by champion, the most played first: how many and won, her
+// kills, deaths and assists, minions and minutes all told, the positions
+// played it in, and the games' ids (the latest first: games is so).
+pub fn season_of(puuid: &str, games: &[Value]) -> Value {
+    let mut by: Vec<(u64, serde_json::Map<String, Value>)> = Vec::new();
+    for g in games {
+        let Some(p) = g["players"].as_array().and_then(|ps| ps.iter().find(|p| p["puuid"] == puuid)) else { continue };
+        let champion = p["champion"].as_u64().unwrap_or(0);
+        let i = match by.iter().position(|(c, _)| *c == champion) {
+            Some(i) => i,
+            None => {
+                let row = json!({ "champion": champion, "games": 0, "wins": 0, "k": 0, "d": 0, "a": 0, "cs": 0, "minutes": 0.0, "roles": {}, "ids": [] });
+                by.push((champion, row.as_object().cloned().unwrap_or_default()));
+                by.len() - 1
+            }
+        };
+        let row = &mut by[i].1;
+        let add = |row: &mut serde_json::Map<String, Value>, k: &str, n: u64| {
+            let was = row[k].as_u64().unwrap_or(0);
+            row.insert(k.to_string(), json!(was + n));
+        };
+        add(row, "games", 1);
+        add(row, "wins", p["win"].as_bool().unwrap_or(false) as u64);
+        for k in ["k", "d", "a", "cs"] {
+            add(row, k, p[k].as_u64().unwrap_or(0));
+        }
+        let minutes = row["minutes"].as_f64().unwrap_or(0.0) + g["duration"].as_f64().unwrap_or(0.0) / 60.0;
+        row.insert("minutes".into(), json!(minutes));
+        let pos = p["pos"].as_str().filter(|s| !s.is_empty()).unwrap_or("NONE").to_string();
+        let roles = row.get_mut("roles").and_then(Value::as_object_mut).expect("roles");
+        let n = roles.get(&pos).and_then(Value::as_u64).unwrap_or(0);
+        roles.insert(pos, json!(n + 1));
+        row.get_mut("ids").and_then(Value::as_array_mut).expect("ids").push(g["id"].clone());
+    }
+    by.sort_by(|a, b| b.1["games"].as_u64().cmp(&a.1["games"].as_u64()));
+    json!({ "champs": by.into_iter().map(|(_, row)| Value::Object(row)).collect::<Vec<_>>() })
+}
+
+// Her rows (as recent_of lists them) of these games kept, for a
+// champion's or a position's games opened in the page (scout_rows).
+pub fn rows_of(sh: &Shared, ids: &[String], who: &str) -> Value {
+    let games: Vec<Value> = ids.iter().map(|id| kept_game(sh, id)).filter(|g| g.is_object()).collect();
+    recent_of(who, 0, &games)["list"].clone()
 }
 
 // One queue's entry of league-v4's: tier, rank, points, won and lost; none, unranked.
@@ -548,13 +598,15 @@ fn profile(sh: &Arc<Shared>, key: &str, host: &str, regional: &str, me: &str, my
     let why = if crate::lol::in_game() { "nogame" } else { "outside" };
     let summoner = riot(key, &format!("{host}/lol/summoner/v4/summoners/by-puuid/{me}")).unwrap_or(Value::Null);
     let entries = riot(key, &format!("{host}/lol/league/v4/entries/by-puuid/{me}")).unwrap_or(json!([]));
-    let top: Vec<Value> = riot(key, &format!("{host}/lol/champion-mastery/v4/champion-masteries/by-puuid/{me}/top?count=3"))
+    // Every champion's mastery, in one call (the most first); the top three of it.
+    let masteries: Vec<Value> = riot(key, &format!("{host}/lol/champion-mastery/v4/champion-masteries/by-puuid/{me}"))
         .ok()
         .and_then(|v| v.as_array().cloned())
         .unwrap_or_default()
         .iter()
-        .map(|m| json!({ "champion": m["championId"], "level": m["championLevel"], "points": m["championPoints"] }))
+        .map(|m| json!({ "champion": m["championId"], "level": m["championLevel"], "points": m["championPoints"], "last": m["lastPlayTime"] }))
         .collect();
+    let top: Vec<Value> = masteries.iter().take(3).cloned().collect();
     // In a game: the champion she plays (the game's own list, by name in the
     // client's language), and her mastery of it.
     let champion = crate::lol::my_champion().and_then(|name| names.iter().find(|(_, n)| **n == name).map(|(id, _)| *id));
@@ -567,12 +619,13 @@ fn profile(sh: &Arc<Shared>, key: &str, host: &str, regional: &str, me: &str, my
         "profile": {
             "name": my_name, "icon": summoner["profileIconId"], "level": summoner["summonerLevel"],
             "solo": entry_of(&entries, "RANKED_SOLO_5x5"), "flex": entry_of(&entries, "RANKED_FLEX_SR"),
-            "top": top, "now": now, "recent": null, "roles": [], "rolesOf": 0, "rolesTotal": 0,
+            "top": top, "masteries": masteries, "now": now, "recent": null, "roles": [], "rolesOf": 0, "rolesTotal": 0, "season": null, "me": me,
         },
     });
     publish(sh, view.clone());
     let ids = |query: &str| -> Vec<String> {
-        match riot(key, &format!("{regional}/lol/match/v5/matches/by-puuid/{me}/ids?start=0{query}")) {
+        let query = if query.contains("start=") { query.to_string() } else { format!("&start=0{query}") };
+        match riot(key, &format!("{regional}/lol/match/v5/matches/by-puuid/{me}/ids?{}", query.trim_start_matches('&'))) {
             Ok(Value::Array(ids)) => ids.iter().filter_map(|i| i.as_str().map(str::to_string)).collect(),
             _ => Vec::new(),
         }
@@ -585,7 +638,20 @@ fn profile(sh: &Arc<Shared>, key: &str, host: &str, regional: &str, me: &str, my
         view["profile"]["recent"] = recent_of(me, champion.unwrap_or(0), &games);
         publish(sh, view.clone());
     }
-    let solo_ids = ids("&queue=420&count=100");
+    // This season's Solo/Duo games, every one: as many as league-v4 counts
+    // her won and lost (no season's start date needed), a hundred ids a
+    // page; unranked, the last hundred.
+    let season = view["profile"]["solo"].as_object().map_or(100, |r| (r["wins"].as_u64().unwrap_or(0) + r["losses"].as_u64().unwrap_or(0)) as usize).clamp(1, 1000);
+    let mut solo_ids: Vec<String> = Vec::new();
+    while solo_ids.len() < season {
+        let page = ids(&format!("&queue=420&start={}&count=100", solo_ids.len()));
+        let got = page.len();
+        solo_ids.extend(page);
+        if got < 100 {
+            break;
+        }
+    }
+    solo_ids.truncate(season);
     view["profile"]["rolesTotal"] = json!(solo_ids.len());
     let mut solo_games = Vec::new();
     for (i, id) in solo_ids.iter().enumerate() {
@@ -598,6 +664,7 @@ fn profile(sh: &Arc<Shared>, key: &str, host: &str, regional: &str, me: &str, my
         }
         if i % 10 == 9 || i + 1 == solo_ids.len() {
             view["profile"]["roles"] = roles_of(me, &solo_games);
+            view["profile"]["season"] = season_of(me, &solo_games);
             view["profile"]["rolesOf"] = json!(i + 1);
             publish(sh, view.clone());
         }
@@ -922,6 +989,23 @@ mod tests {
         // 4 shares a and b with 0, but plays on the other team: none.
         assert_eq!(groups_of(&all, &[100, 100, 100, 100, 200]), vec![1, 1, 0, 1, 0]);
         assert_eq!(groups_of(&[ids(&["a"]), ids(&["a"])], &[100, 100]), vec![0, 0]);
+    }
+
+    #[test]
+    fn her_season_by_champion_and_position() {
+        let g = |id: &str, champ: u64, win: bool, pos: &str| {
+            json!({ "id": id, "queue": 420, "duration": 1800.0, "players": [{ "puuid": "me", "champion": champ, "win": win, "k": 5, "d": 2, "a": 7, "cs": 180, "pos": pos }] })
+        };
+        let games = vec![g("a", 234, true, "MIDDLE"), g("b", 234, false, "JUNGLE"), g("c", 103, true, "MIDDLE")];
+        let s = season_of("me", &games);
+        let viego = &s["champs"][0];
+        assert_eq!((viego["champion"].as_u64(), viego["games"].as_u64(), viego["wins"].as_u64(), viego["cs"].as_u64()), (Some(234), Some(2), Some(1), Some(360)));
+        assert_eq!(viego["ids"], json!(["a", "b"]));
+        assert_eq!(viego["roles"], json!({ "MIDDLE": 1, "JUNGLE": 1 }));
+        assert_eq!(viego["minutes"].as_f64(), Some(60.0));
+        let roles = roles_of("me", &games);
+        assert_eq!((roles[0]["pos"].as_str(), roles[0]["games"].as_u64(), roles[0]["wins"].as_u64()), (Some("MIDDLE"), Some(2), Some(2)));
+        assert_eq!(roles[0]["champs"].as_array().map(|c| c.len()), Some(2));
     }
 
     #[test]

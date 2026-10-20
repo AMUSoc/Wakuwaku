@@ -59,6 +59,8 @@
     scoutClose: () => send('scout_close'),
     // A game kept, whole (its scoreboard), by its id; none if not kept.
     scoutGame: id => invoke('scout_game', { id: String(id || '') }).catch(() => null),
+    // Her rows of these games kept (a champion's, a position's), as who in them.
+    scoutRows: (ids, who) => invoke('scout_rows', { ids: (ids || []).map(String), who: String(who || '') }).catch(() => []),
     answer: (id, choice) => send('pet_answer', { id, choice }),
     dismiss: id => send('pet_dismiss', { id }),
     keyboard: needs => send('pet_keyboard', { needs: needs === true }),
