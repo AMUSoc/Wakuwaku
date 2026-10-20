@@ -276,18 +276,70 @@ struct Player {
     team: u64,
     champion: u64,
     me: bool,
+    // Spectator's: their two summoner spells, keystone and second tree.
+    spells: Value,
+    keystone: Value,
+    sub: Value,
     rank: Value,
     mastery: Value,
     recent: Value,
     ids: Vec<String>,
 }
 
-fn player_view(p: &Player, names: &HashMap<u64, String>) -> Value {
+fn player_view(p: &Player, names: &HashMap<u64, String>, group: u64) -> Value {
     json!({
         "name": p.name, "me": p.me, "championId": p.champion,
         "champion": names.get(&p.champion).cloned().unwrap_or_default(),
         "rank": p.rank, "mastery": p.mastery, "recent": p.recent,
+        "spells": p.spells, "keystone": p.keystone, "sub": p.sub, "group": group,
     })
+}
+
+// Those on a team who play together: two who share two or more of their
+// last games are one group (and so on, a group joined through any one of
+// them). Groups numbered from 1 by their first player; 0, none.
+// ids: each player's last games; team: each one's team.
+pub fn groups_of(ids: &[Vec<String>], team: &[u64]) -> Vec<u64> {
+    let n = ids.len();
+    let mut root: Vec<usize> = (0..n).collect();
+    fn find(root: &mut Vec<usize>, i: usize) -> usize {
+        let mut i = i;
+        while root[i] != i {
+            root[i] = root[root[i]];
+            i = root[i];
+        }
+        i
+    }
+    for a in 0..n {
+        for b in a + 1..n {
+            if team[a] != team[b] {
+                continue;
+            }
+            let shared = ids[a].iter().filter(|id| ids[b].contains(id)).count();
+            if shared >= 2 {
+                let (ra, rb) = (find(&mut root, a), find(&mut root, b));
+                root[rb] = ra;
+            }
+        }
+    }
+    let roots: Vec<usize> = (0..n).map(|i| find(&mut root, i)).collect();
+    let mut numbers: Vec<(usize, u64)> = Vec::new();
+    (0..n)
+        .map(|i| {
+            let alone = roots.iter().filter(|r| **r == roots[i]).count() < 2;
+            if alone {
+                return 0;
+            }
+            match numbers.iter().find(|(r, _)| *r == roots[i]) {
+                Some((_, g)) => *g,
+                None => {
+                    let g = numbers.len() as u64 + 1;
+                    numbers.push((roots[i], g));
+                    g
+                }
+            }
+        })
+        .collect()
 }
 
 fn publish(sh: &Shared, view: Value) {
@@ -401,6 +453,9 @@ fn scout(sh: &Arc<Shared>, in_game: bool) {
                 team: p["teamId"].as_u64().unwrap_or(100),
                 champion: p["championId"].as_u64().unwrap_or(0),
                 me: p["puuid"] == me.as_str(),
+                spells: json!([p["spell1Id"], p["spell2Id"]]),
+                keystone: p["perks"]["perkIds"][0].clone(),
+                sub: p["perks"]["perkSubStyle"].clone(),
                 rank: Value::Null,
                 mastery: Value::Null,
                 recent: Value::Null,
@@ -412,14 +467,11 @@ fn scout(sh: &Arc<Shared>, in_game: bool) {
     let queue = live["gameQueueConfigId"].clone();
     sh.log(&format!("scout: {} players, queue {queue}", players.len()));
     let draw = |players: &[Player], done: usize, total: usize| {
-        let team = |mine: bool| players.iter().filter(|p| (p.team == my_team) == mine).map(|p| player_view(p, &names)).collect::<Vec<_>>();
-        // Her alone: the names of the champions of her games too.
-        let played: HashMap<String, String> = if solo.is_empty() {
-            HashMap::new()
-        } else {
-            players.iter().flat_map(|p| p.recent["list"].as_array().cloned().unwrap_or_default()).filter_map(|g| g["champion"].as_u64()).filter_map(|id| Some((id.to_string(), names.get(&id)?.clone()))).collect()
-        };
-        publish(sh, json!({ "state": "ready", "key": key_name(sh), "queue": queue, "us": team(true), "them": team(false), "done": done, "total": total, "solo": solo, "names": played }));
+        let ids: Vec<Vec<String>> = players.iter().map(|p| p.ids.clone()).collect();
+        let teams: Vec<u64> = players.iter().map(|p| p.team).collect();
+        let groups = groups_of(&ids, &teams);
+        let team = |mine: bool| players.iter().zip(&groups).filter(|(p, _)| (p.team == my_team) == mine).map(|(p, g)| player_view(p, &names, *g)).collect::<Vec<_>>();
+        publish(sh, json!({ "state": "ready", "key": key_name(sh), "queue": queue, "us": team(true), "them": team(false), "done": done, "total": total, "solo": solo, "names": names_json(&names) }));
     };
     draw(&players, 0, 1);
     // The quick ones first: ranks and mastery.
@@ -844,6 +896,16 @@ mod tests {
         assert_eq!(r, json!({ "games": 3, "wins": 2, "k": 4.0, "d": 2.0, "a": 4.0, "champGames": 2, "champWins": 2, "streak": 2 }));
         assert_eq!(recent_of("foe", 1, &games)["streak"], -2);
         assert_eq!(recent_of("nobody", 1, &games), Value::Null);
+    }
+
+    #[test]
+    fn those_who_play_together_are_found_by_their_games() {
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let all = vec![ids(&["a", "b", "c"]), ids(&["b", "c", "x"]), ids(&["y"]), ids(&["c", "x", "z"]), ids(&["a", "b"])];
+        // 0 and 1 share b and c; 1 and 3 share c and x: one group of three.
+        // 4 shares a and b with 0, but plays on the other team: none.
+        assert_eq!(groups_of(&all, &[100, 100, 100, 100, 200]), vec![1, 1, 0, 1, 0]);
+        assert_eq!(groups_of(&[ids(&["a"]), ids(&["a"])], &[100, 100]), vec![0, 0]);
     }
 
     #[test]

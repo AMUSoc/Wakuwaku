@@ -215,43 +215,117 @@
 
   // --- The game's ten ----------------------------------------------------------------------
 
-  function rankText(r) {
-    if (!r) return el('span', 'wait', '…')
-    if (r.unranked) return el('span', null, T('lol.unranked'))
+  const TIERS = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER']
+  const DIVS = ['IV', 'III', 'II', 'I']
+
+  // A rank as a number (each tier four divisions), and back: for a team's average.
+  const scoreOf = r => TIERS.indexOf(r.tier) * 4 + (isApex(r.tier) ? 0 : DIVS.indexOf(r.rank))
+  function averageOf(players) {
+    const ranked = players.map(p => p.rank).filter(r => r && !r.unranked && TIERS.includes(r.tier))
+    if (!ranked.length) return null
+    const n = Math.round(ranked.reduce((sum, r) => sum + scoreOf(r), 0) / ranked.length)
+    const tier = TIERS[Math.min(TIERS.length - 1, Math.floor(n / 4))]
+    return { tier, rank: DIVS[n % 4] }
+  }
+
+  // Each player's tags: the facts of their last games and their mastery.
+  function playerTags(p) {
+    const tags = []
+    const r = p.recent
+    const m = p.mastery
+    if (m && m.level === 0) tags.push(['cold', T('scout.firstTime')])
+    if (m && m.points >= 1e6) tags.push(['gold', T('scout.tag.millionaire', { champ: champName(p.championId) })])
+    if (r && r.list) {
+      const on = r.list.filter(g => g.champion === p.championId).length
+      if (on >= 6) tags.push(['gold', T('scout.tag.otp')])
+      if (r.streak >= 3) tags.push(['hot', T('scout.winStreak', { n: r.streak })])
+      if (r.streak <= -3) tags.push(['cold', T('scout.loseStreak', { n: -r.streak })])
+      const roles = {}
+      for (const g of r.list) if (g.pos) roles[g.pos] = (roles[g.pos] || 0) + 1
+      const main = Object.entries(roles).sort((a, b) => b[1] - a[1])[0]
+      if (main && main[1] >= Math.ceil(r.list.length / 2)) tags.push(['', T('scout.tag.mainRole', { role: T(`scout.role.${main[0]}`) })])
+    }
+    return tags
+  }
+
+  function rankBlock(r) {
+    if (!r) return el('div', 'p-rank', el('span', 'wait', '…'))
+    if (r.unranked) return el('div', 'p-rank', el('div', 'p-tier muted', T('scout.unrankedShort')))
     const n = r.wins + r.losses
     const rate = pct(r.wins, n)
-    return el('span', null, `${tierText(r)} ${r.lp} LP · `, el('span', rate >= 50 ? 'good' : 'bad', T('scout.season', { wins: r.wins, losses: r.losses, rate })))
+    const bar = el('div', 'bar thin', el('i'))
+    bar.firstChild.style.width = `${rate}%`
+    return el(
+      'div',
+      'p-rank',
+      pic('div', 'emblem tiny', emblem(r.tier)),
+      el('div', null, el('div', 'p-tier', `${tierText(r)} · ${r.lp} LP`), bar, el('div', 'wl', el('span', 'w', T('scout.w', { n: r.wins })), ' ', el('span', 'l', T('scout.l', { n: r.losses })), ` · ${rate}%`)),
+    )
   }
 
   function playerView(p) {
     const r = p.recent
     const m = p.mastery
-    const recent = []
-    if (r) {
-      recent.push(el('span', pct(r.wins, r.games) >= 50 ? 'good' : 'bad', T('scout.recent', { games: r.games, wins: r.wins })))
-      recent.push(el('span', null, T('scout.kda', { k: r.k, d: r.d, a: r.a })))
-      if (r.champGames) recent.push(el('span', null, T('scout.champ', { games: r.champGames, wins: r.champWins })))
-      if (r.streak >= 3) recent.push(el('span', 'good', T('scout.winStreak', { n: r.streak })))
-      if (r.streak <= -3) recent.push(el('span', 'bad', T('scout.loseStreak', { n: -r.streak })))
-    }
-    const mastery = m ? (m.level ? el('span', null, T('scout.mastery', { level: m.level, points: points(m.points) })) : el('span', 'bad', T('scout.firstTime'))) : el('span', 'wait', '…')
-    return el(
+    const dots = el(
       'div',
-      `player${p.me ? ' me' : ''}`,
-      pic('div', 'icon', champIcon(p.championId)),
+      'dots',
+      ((r && r.list) || []).map(g => el('i', g.win ? 'w' : 'l')),
+    )
+    const facts = []
+    if (m) facts.push(m.level ? el('span', null, T('scout.mastery', { level: m.level, points: points(m.points) })) : null)
+    if (r) {
+      facts.push(el('span', null, T('scout.kda', { k: r.k, d: r.d, a: r.a })))
+      if (r.champGames) facts.push(el('span', null, T('scout.champ', { games: r.champGames, wins: r.champWins })))
+    }
+    const icon = pic('div', 'p-icon', champIcon(p.championId))
+    if (p.group) icon.append(el('span', `party g${p.group}`, String(p.group)))
+    const node = el(
+      'div',
+      `player${p.me ? ' me' : ''}${p.group ? ` in-party g${p.group}` : ''}`,
+      icon,
+      el('div', 'loadout', (p.spells || []).map(id => pic('i', null, spell(id))), pic('i', null, perk(p.keystone)), pic('i', null, perk(p.sub))),
       el(
         'div',
-        null,
-        el('div', 'top', el('span', 'champ', champName(p.championId) || p.champion || ''), el('span', 'name', p.me ? `${p.name} · ${T('scout.me')}` : p.name), el('span', 'rank', rankText(p.rank))),
-        el('div', 'line', mastery),
-        el('div', 'line', recent.length ? recent : el('span', 'wait', '…')),
+        'p-main',
+        el('div', 'p-name', el('b', null, champName(p.championId) || p.champion || ''), el('span', null, p.me ? `${p.name} · ${T('scout.me')}` : p.name)),
+        el('div', 'tags small', playerTags(p).map(([cls, text]) => el('span', `tag ${cls}`, text))),
+        el('div', 'p-facts', r ? dots : el('span', 'wait', '…'), facts),
       ),
+      rankBlock(p.rank),
     )
+    if (p.group) node.title = T('scout.group', { n: p.group })
+    return node
+  }
+
+  // The four pets' lines over the two teams.
+  function hostsOfTen() {
+    const all = [...data.us, ...data.them]
+    const us = averageOf(data.us)
+    const them = averageOf(data.them)
+    const claude = us && them ? T('scout.ten.claude', { us: tierText(us), them: tierText(them) }) : T('scout.ten.claudeWait')
+    let grok = T('scout.ten.grokNone')
+    const who = p => ({ champ: champName(p.championId) || p.champion, name: (p.name || '').split('#')[0] })
+    const streaker = all.filter(p => p.recent && p.recent.streak >= 3).sort((a, b) => b.recent.streak - a.recent.streak)[0]
+    const master = all.filter(p => p.mastery && p.mastery.points).sort((a, b) => b.mastery.points - a.mastery.points)[0]
+    const first = all.find(p => p.mastery && p.mastery.level === 0)
+    if (streaker) grok = T('scout.ten.grokStreak', { ...who(streaker), n: streaker.recent.streak })
+    else if (master && master.mastery.points >= 100000) grok = T('scout.ten.grokMastery', { ...who(master), points: points(master.mastery.points) })
+    else if (first) grok = T('scout.ten.grokFirst', who(first))
+    const read = all.some(p => p.recent)
+    const parties = list => new Set(list.filter(p => p.group).map(p => p.group)).size
+    const agy = !read ? T('scout.ten.agyWait') : parties(all) ? T('scout.ten.agy', { us: parties(data.us), them: parties(data.them) }) : T('scout.ten.agyNone')
+    const codex = data.total > 1 && data.done < data.total ? T('scout.ten.codex', { done: data.done, total: data.total }) : T('scout.ten.codexDone')
+    return ['claude', 'grok', 'agy', 'codex'].map((agent, i) => {
+      const node = el('div', 'mini-host', head(agent), el('div', 'speech', el('b', null, T(`scout.part.${agent}`).split(' · ')[0]), [claude, grok, agy, codex][i]))
+      node.style.setProperty('--agent', ((data.pets || {})[agent] || {}).color || AGENT_COLOR[agent])
+      return node
+    })
   }
 
   function drawTen() {
     films.length = 0
     $('who').replaceChildren(el('div', null, T('scout.title')))
+    $('hosts').replaceChildren(...hostsOfTen())
     $('us').textContent = T('scout.us')
     $('them').textContent = T('scout.them')
     document.querySelector('.us .rows').replaceChildren(...data.us.map(playerView))
@@ -265,9 +339,10 @@
     const own = ready && !!data.profile
     $('say').textContent = ready ? '' : T(`scout.${data.state || 'none'}`)
     if (!ready) $('who').replaceChildren(el('div', null, T('scout.title')))
-    $('progress').textContent = ready && !own && data.total > 1 && data.done < data.total ? T('scout.reading', { done: data.done, total: data.total }) : ''
+    $('progress').textContent = ''
     $('profile').hidden = !own
     $('teams').hidden = !ready || own
+    $('hosts').hidden = !ready || own
     if (own) drawProfile()
     else if (ready) drawTen()
   }
