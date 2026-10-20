@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use crate::Shared;
 
 const MCP: &str = r#"{ "mcpServers": { "opgg": { "type": "http", "url": "https://mcp-api.op.gg/mcp" } } }"#;
-const TOOLS: [&str; 2] = ["mcp__opgg__lol_get_champion_analysis", "mcp__opgg__lol_get_lane_matchup_guide"];
+const TOOLS: [&str; 3] = ["mcp__opgg__lol_get_champion_analysis", "mcp__opgg__lol_get_lane_matchup_guide", "mcp__opgg__lol_list_lane_meta_champions"];
 const TIMEOUT: Duration = Duration::from_secs(180);
 const KEPT_MS: u64 = 24 * 60 * 60 * 1000;
 
@@ -42,14 +42,44 @@ pub fn position_of(pos: &str) -> &'static str {
 pub fn prompt_of(champion: &str, position: &str, opponent: Option<&str>) -> String {
     let vs = opponent.map_or(String::new(), |o| format!("，對面同位置是 {o}"));
     let position = if position.is_empty() { "用 OP.GG 上它最常見的位置" } else { position };
-    let vs_field = opponent.map_or("null".to_string(), |o| format!("{champion} 對 {o} 的勝率(0~1，查不到用 null)"));
+    let vs_field = opponent.map_or("null".to_string(), |o| format!("{champion} 對 {o} 的勝率0~1"));
     let tips = opponent.map_or("這隻英雄這個位置的重點".to_string(), |o| format!("對上 {o} 的重點"));
     format!(
-        "用 opgg 的工具查：我玩 {champion}，位置 {position}{vs}。只回一行 JSON，不要其他文字：\
-         {{\"patch\":\"版本\",\"position\":\"TOP/JUNGLE/MID/ADC/SUPPORT 之一\",\"winrate\":{champion} 這個位置的勝率(0~1),\"vs\":{vs_field},\
-         \"core\":[核心裝備 item id 三件],\"boots\":鞋子 item id,\"keystone\":主符文 id,\"sub\":副系符文樹 id,\
-         \"spells\":[召喚師技能 id],\"skills\":\"如 Q>E>W\",\"counters\":[最難打的 3 隻英雄英文名],\
-         \"tips\":[\"{tips}，繁體中文台灣用語，一句 25 字內\",\"第二句\"]}}。查不到就回 {{\"error\":\"原因\"}}。"
+        "用 opgg 的工具查：我玩 {champion}，位置 {position}{vs}。只回一行 JSON，不要其他文字，數字照工具給的，沒有就用 null：\n\
+         {{\"patch\":\"版本\",\"position\":\"TOP/JUNGLE/MID/ADC/SUPPORT 之一\",\"tier\":梯隊數字1~5,\"winrate\":0~1,\"pickrate\":0~1,\"banrate\":0~1,\"vs\":{vs_field},\n\
+         \"starting\":[出門裝 item id],\"core\":[核心三件 item id],\"boots\":鞋子 item id,\"fourth\":[第四件常見選擇 item id 最多3個],\"fifth\":[第五件 最多3個],\"sixth\":[第六件 最多3個],\n\
+         \"runes\":{{\"primary\":主系樹 id,\"keystone\":主符文 id,\"primaries\":[主系其餘三顆 id],\"secondary\":副系樹 id,\"secondaries\":[副系兩顆 id],\"shards\":[屬性碎片三個 id]}},\n\
+         \"spells\":[召喚師技能 id],\"skills\":\"主升如 Q>E>W\",\"skillOrder\":\"前 6 級加點如 Q,E,W,Q,Q,R\",\n\
+         \"counters\":[{{\"name\":\"最難打的英文名\",\"winrate\":我對牠的勝率0~1}}],\"easy\":[{{\"name\":\"最好打的英文名\",\"winrate\":0~1}}],\n\
+         \"tips\":[\"{tips}，繁體中文台灣用語，一句 25 字內\",\"第二句\"]}}\n\
+         counters 和 easy 各 3 隻。查不到就回 {{\"error\":\"原因\"}}。"
+    )
+}
+
+// The champions strongest in a position now, for champion select.
+pub fn meta_prompt(position: &str) -> String {
+    format!(
+        "用 opgg 的 lol_list_lane_meta_champions 查 {position} 這一路現在的英雄梯隊。只回一行 JSON，不要其他文字：\
+         {{\"patch\":\"版本\",\"champs\":[{{\"name\":\"英文名\",\"tier\":梯隊數字,\"winrate\":0~1,\"pickrate\":0~1,\"banrate\":0~1}}]}}，\
+         照梯隊和勝率排，取前 10 隻。查不到就回 {{\"error\":\"原因\"}}。"
+    )
+}
+
+// Champions named in English (OP.GG's answer) given their ids too, in
+// lists of names or of { name, … }.
+fn with_ids(list: &Value, en: &std::collections::HashMap<u64, String>) -> Value {
+    let by_name = |n: &str| en.iter().find(|(_, v)| v.eq_ignore_ascii_case(n)).map(|(id, _)| *id);
+    Value::Array(
+        list.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| {
+                let name = c.as_str().or_else(|| c["name"].as_str())?;
+                let mut row = if c.is_object() { c.clone() } else { json!({ "name": name }) };
+                row["id"] = json!(by_name(name)?);
+                Some(row)
+            })
+            .collect(),
     )
 }
 
@@ -85,10 +115,84 @@ pub fn ask(sh: &Shared, champion: u64, pos: &str, opponent: Option<u64>) -> Valu
     sh.log(&format!("opgg: {name} {position}{}: {}", rival.as_ref().map_or(String::new(), |r| format!(" vs {r}")), if answer["error"].is_null() { "found" } else { "not found" }));
     let mut answer = answer;
     if answer["error"].is_null() {
-        // The counters by id, as the page draws champions.
-        let by_name = |n: &str| en.iter().find(|(_, v)| v.eq_ignore_ascii_case(n)).map(|(id, _)| *id);
-        let ids: Vec<Value> = answer["counters"].as_array().into_iter().flatten().filter_map(|n| n.as_str().and_then(by_name)).map(|id| json!(id)).collect();
-        answer["counterIds"] = json!(ids);
+        // The champions by id, as the page draws them.
+        answer["counters"] = with_ids(&answer["counters"], &en);
+        answer["easy"] = with_ids(&answer["easy"], &en);
+        answer["at"] = json!(crate::now_ms());
+        let _ = std::fs::create_dir_all(dir(sh));
+        let _ = std::fs::write(&kept, answer.to_string());
+    }
+    answer
+}
+
+// Her own champions against an opponent: how each of these (her most
+// played, by mastery) does in a position against it, by OP.GG's lane
+// matchups, one lookup each in the one Claude run (about 45 s for ten).
+// OP.GG's champion analysis names only six matchups, too few to pick from
+// her pool (2026-10-21). Kept a day for the same opponent, position and pool.
+pub fn picks_prompt(opponent: &str, position: &str, candidates: &[String]) -> String {
+    format!(
+        "用 opgg 的 lol_get_lane_matchup_guide 查：位置 {position}，對面是 {opponent}。我的候選英雄：{}。\n\
+         對每一隻候選英雄查牠在 {position} 對上 {opponent} 的勝率和場數。只回一行 JSON，不要其他文字：\
+         {{\"patch\":\"版本\",\"picks\":[{{\"name\":\"候選英文名\",\"winrate\":牠對 {opponent} 的勝率0~1,\"games\":場數}}]}}。\
+         查不到某隻就給 winrate null。數字照工具給的。",
+        candidates.join(", ")
+    )
+}
+
+pub fn picks(sh: &Shared, opponent: u64, pos: &str, candidates: &[u64]) -> Value {
+    let en = crate::scout::champion_names_en();
+    let Some(rival) = en.get(&opponent).cloned() else { return json!({ "error": "unknown champion" }) };
+    let position = match position_of(pos) {
+        "" => "MID",
+        p => p,
+    };
+    let names: Vec<String> = candidates.iter().filter_map(|c| en.get(c).cloned()).take(12).collect();
+    if names.is_empty() {
+        return json!({ "error": "no champions" });
+    }
+    let mut ids: Vec<u64> = candidates.to_vec();
+    ids.sort_unstable();
+    let pool = ids.iter().map(u64::to_string).collect::<Vec<_>>().join("_");
+    let kept = dir(sh).join(format!("picks-{opponent}-{position}-{pool}.json"));
+    let fresh = |v: &Value| v["at"].as_u64().is_some_and(|at| crate::now_ms().saturating_sub(at) < KEPT_MS);
+    if let Some(v) = std::fs::read_to_string(&kept).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(fresh) {
+        return v;
+    }
+    let _one = ASKING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut answer = match run(sh, &picks_prompt(&rival, position, &names)) {
+        Ok(text) => json_in(&text).unwrap_or_else(|| json!({ "error": text.chars().take(120).collect::<String>() })),
+        Err(why) => json!({ "error": why }),
+    };
+    sh.log(&format!("opgg: her picks against {rival} {position}: {}", answer["picks"].as_array().map_or("none".to_string(), |m| m.len().to_string())));
+    if answer["error"].is_null() {
+        answer["picks"] = with_ids(&answer["picks"], &en);
+        answer["at"] = json!(crate::now_ms());
+        let _ = std::fs::create_dir_all(dir(sh));
+        let _ = std::fs::write(&kept, answer.to_string());
+    }
+    answer
+}
+
+// The strongest champions in a position now (champion select): kept a day.
+pub fn meta(sh: &Shared, pos: &str) -> Value {
+    let position = match position_of(pos) {
+        "" => "MID",
+        p => p,
+    };
+    let kept = dir(sh).join(format!("meta-{position}.json"));
+    let fresh = |v: &Value| v["at"].as_u64().is_some_and(|at| crate::now_ms().saturating_sub(at) < KEPT_MS);
+    if let Some(v) = std::fs::read_to_string(&kept).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(fresh) {
+        return v;
+    }
+    let _one = ASKING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut answer = match run(sh, &meta_prompt(position)) {
+        Ok(text) => json_in(&text).unwrap_or_else(|| json!({ "error": text.chars().take(120).collect::<String>() })),
+        Err(why) => json!({ "error": why }),
+    };
+    sh.log(&format!("opgg: {position}'s strongest: {}", if answer["error"].is_null() { "found" } else { "not found" }));
+    if answer["error"].is_null() {
+        answer["champs"] = with_ids(&answer["champs"], &crate::scout::champion_names_en());
         answer["at"] = json!(crate::now_ms());
         let _ = std::fs::create_dir_all(dir(sh));
         let _ = std::fs::write(&kept, answer.to_string());
@@ -158,6 +262,12 @@ mod tests {
         let p = prompt_of("Viego", "JUNGLE", Some("Pantheon"));
         assert!(p.contains("對面同位置是 Pantheon") && p.contains("Viego 對 Pantheon 的勝率"));
         assert!(prompt_of("Viego", "JUNGLE", None).contains("\"vs\":null"));
+        assert!(meta_prompt("JUNGLE").contains("JUNGLE 這一路"));
+        let p = picks_prompt("Ahri", "MID", &["Viego".into(), "Irelia".into()]);
+        assert!(p.contains("對面是 Ahri") && p.contains("Viego, Irelia"));
+        let en: std::collections::HashMap<u64, String> = [(234, "Viego".to_string()), (421, "Rek'Sai".to_string())].into_iter().collect();
+        assert_eq!(with_ids(&json!([{ "name": "rek'sai", "winrate": 0.45 }, { "name": "Nobody" }]), &en), json!([{ "name": "rek'sai", "winrate": 0.45, "id": 421 }]));
+        assert_eq!(with_ids(&json!(["Viego"]), &en), json!([{ "name": "Viego", "id": 234 }]));
         assert_eq!(position_of("UTILITY"), "SUPPORT");
         assert_eq!(position_of("MIDDLE"), "MID");
         assert_eq!(position_of(""), "");

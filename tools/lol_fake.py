@@ -77,8 +77,8 @@ PLAYERS = [
 ME = {'riotId': 'Me#TW1', 'summonerName': 'Me#TW1', 'currentGold': 1250.0, 'level': 6}
 CLIENT = {'phase': 'None'}
 LOBBY = {'members': [{'puuid': 'client-puuid-me', 'gameName': 'Me', 'gameTag': 'TW1'}, {'puuid': 'client-puuid-duo', 'gameName': 'Duo', 'gameTag': 'TW1'}]}
-SESSION = {'myTeam': [
-    {'puuid': 'client-puuid-me', 'assignedPosition': 'middle'}, {'puuid': 'client-puuid-duo', 'assignedPosition': 'utility'},
+SESSION = {'localPlayerCellId': 0, 'theirTeam': [{'cellId': 5, 'championId': 103}, {'cellId': 6, 'championId': 0}], 'myTeam': [
+    {'cellId': 0, 'championId': 0, 'championPickIntent': 234, 'puuid': 'client-puuid-me', 'assignedPosition': 'middle'}, {'cellId': 1, 'championId': 0, 'puuid': 'client-puuid-duo', 'assignedPosition': 'utility'},
     {'puuid': '', 'assignedPosition': 'top'}, {'puuid': '', 'assignedPosition': 'jungle'}, {'puuid': '', 'assignedPosition': 'bottom'},
 ]}
 RANKS = {
@@ -156,6 +156,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send({'status': {'status_code': 404}}, 404)
                 return self.send({'gameId': 1, 'gameQueueConfigId': 420, 'participants': [
                     {'puuid': p, 'riotId': n, 'teamId': t, 'championId': c} for p, n, t, c in TEN]})
+            if path.startswith('/lol/champion-mastery/v4/champion-masteries/by-puuid/') and 'by-champion' not in path and '/top' not in path:
+                # Every champion's mastery, the most first (real ids: OP.GG is asked of them).
+                pool = [234, 39, 92, 82, 875, 59, 157, 2, 11, 897, 64]
+                return self.send([{'championId': c, 'championLevel': 40 - i * 3, 'championPoints': 2400000 // (i + 1)} for i, c in enumerate(pool)])
             if path.startswith('/lol/champion-mastery/v4/champion-masteries/by-puuid/'):
                 puuid = path.split('/')[6]
                 if puuid == 'puuid-adc':
@@ -198,6 +202,13 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == '/fake/gold':
                 ME['currentGold'] = float(body['currentGold'])
                 return self.send(ME)
+            if self.path == '/fake/select':
+                # Her pick in champion select: {"championId": 234}, and theirs: {"enemies": [103, 122]}.
+                if 'championId' in body:
+                    SESSION['myTeam'][0]['championId'] = body['championId']
+                if 'enemies' in body:
+                    SESSION['theirTeam'] = [{'cellId': 5 + i, 'championId': c} for i, c in enumerate(body['enemies'])]
+                return self.send(SESSION)
             if self.path == '/fake/phase':
                 CLIENT['phase'] = body['phase']
                 return self.send(CLIENT)

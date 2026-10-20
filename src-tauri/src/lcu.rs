@@ -93,6 +93,30 @@ pub fn to_look_up(session: &Value, me: &str, party: &HashMap<String, String>) ->
         .collect()
 }
 
+// Champion select as she sees it: her position (Riot's names), the champion
+// she locked in (0 none) and the one she hovers, the champions of her team
+// and of the other as picked so far (0s left out).
+pub fn select_of(session: &Value) -> Value {
+    let me = session["localPlayerCellId"].clone();
+    let mine = session["myTeam"].as_array().into_iter().flatten().find(|p| p["cellId"] == me);
+    let pos = match mine.and_then(|p| p["assignedPosition"].as_str()).unwrap_or("").to_lowercase().as_str() {
+        "top" => "TOP",
+        "jungle" => "JUNGLE",
+        "middle" | "mid" => "MIDDLE",
+        "bottom" | "bot" => "BOTTOM",
+        "utility" | "support" => "UTILITY",
+        _ => "",
+    };
+    let picked = |team: &str| session[team].as_array().into_iter().flatten().filter_map(|p| p["championId"].as_u64().filter(|c| *c > 0)).collect::<Vec<_>>();
+    json!({
+        "pos": pos,
+        "champion": mine.and_then(|p| p["championId"].as_u64()).unwrap_or(0),
+        "intent": mine.and_then(|p| p["championPickIntent"].as_u64()).unwrap_or(0),
+        "allies": picked("myTeam"),
+        "enemies": picked("theirTeam"),
+    })
+}
+
 // "riot:password", as Basic auth wants it.
 fn base64(bytes: &[u8]) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -196,7 +220,7 @@ pub struct Looking {
 }
 
 // One look at the client (every 5 s while it runs and no game is on).
-pub fn look(sh: &Shared, l: &mut Looking) {
+pub fn look(sh: &std::sync::Arc<Shared>, l: &mut Looking) {
     let shown = match client() {
         Some(c) => look_at(sh, l, &c),
         None => {
@@ -215,7 +239,7 @@ pub fn look(sh: &Shared, l: &mut Looking) {
     }
 }
 
-fn look_at(sh: &Shared, l: &mut Looking, c: &(String, String)) -> Option<Value> {
+fn look_at(sh: &std::sync::Arc<Shared>, l: &mut Looking, c: &(String, String)) -> Option<Value> {
     let agent = local();
     let phase = lcu(&agent, c, "/lol-gameflow/v1/gameflow-phase")?;
     let phase = phase.as_str().unwrap_or("");
@@ -244,9 +268,13 @@ fn look_at(sh: &Shared, l: &mut Looking, c: &(String, String)) -> Option<Value> 
         l.party.clear();
     }
     if phase != "ChampSelect" {
+        crate::scout::on_select_end(sh);
         return None;
     }
     let session = lcu(&agent, c, "/lol-champ-select/v1/session")?;
+    // Her own pick, her position and the champions picked (the other team's
+    // as they show them): for OP.GG's builds in champion select (scout.rs).
+    crate::scout::on_select(sh, &select_of(&session));
     let key = sh.setting("riotApiKey").as_str().unwrap_or("").to_string();
     let mut players = Vec::new();
     for (puuid, position) in to_look_up(&session, &l.me.0, &l.party) {
@@ -278,6 +306,14 @@ fn ranks(key: &str, platform: Option<&str>, puuid: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn champion_select_as_she_sees_it() {
+        let session = json!({ "localPlayerCellId": 2,
+            "myTeam": [{ "cellId": 1, "championId": 64 }, { "cellId": 2, "championId": 0, "championPickIntent": 234, "assignedPosition": "middle" }],
+            "theirTeam": [{ "cellId": 5, "championId": 103 }, { "cellId": 6, "championId": 0 }] });
+        assert_eq!(select_of(&session), json!({ "pos": "MIDDLE", "champion": 0, "intent": 234, "allies": [64], "enemies": [103] }));
+    }
 
     #[test]
     fn the_lockfile_and_the_region() {

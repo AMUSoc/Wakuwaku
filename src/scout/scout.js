@@ -381,6 +381,18 @@
   function draw() {
     $('panel').hidden = false
     $('hint').textContent = T('scout.hint2', { key: data.key || 'Alt+X' })
+    if (data.state === 'select') {
+      $('say').textContent = ''
+      $('progress').textContent = ''
+      $('profile').hidden = false
+      $('profile').classList.add('select')
+      $('teams').hidden = true
+      $('hosts').hidden = true
+      drawSelect()
+      if (opened.length) drawDetail()
+      return
+    }
+    $('profile').classList.remove('select')
     const ready = data.state === 'ready'
     const own = ready && !!data.profile
     $('say').textContent = ready ? '' : T(`scout.${data.state || 'none'}`)
@@ -773,27 +785,41 @@
     openPage({ kind: 'opgg', champion, pos, opponent, enemies, result: undefined })
   }
 
+  // An OP.GG lookup (page: { champion, pos, opponent, enemies, result,
+  // redraw }): asked once for each opponent; drawn again when it comes.
   function askOpgg(page) {
     page.result = null
     const asked = page.opponent
     window.pet.scoutOpgg(page.champion, page.pos || '', page.opponent).then(r => {
       if (page.opponent !== asked) return
       page.result = r || { error: 'no answer' }
-      if (opened[opened.length - 1] === page) drawDetail()
+      ;(page.redraw || drawDetail)()
     })
   }
 
-  function opggPage(page) {
+  const OPGG_ROLE = { TOP: 'TOP', JUNGLE: 'JUNGLE', MID: 'MIDDLE', ADC: 'BOTTOM', SUPPORT: 'UTILITY' }
+  const pct1 = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—')
+  const shard = id => (data.dd && data.dd.shards && data.dd.shards[id]) || ''
+
+  // The position looked up: the one asked, or the one OP.GG took.
+  function roleOfPage(page) {
+    const r = page.result
+    return page.pos || (r && OPGG_ROLE[String(r.position || '').toUpperCase()]) || ''
+  }
+
+  // What OP.GG has of a champion, as much as it gives: its standing, the
+  // whole build, the whole rune page, spells and skills, the hardest and the
+  // easiest matchups (a click looks one up), tips. [the other team to pick
+  // from, the card].
+  function opggCard(page) {
     if (page.result === undefined) askOpgg(page)
     const r = page.result
-    const pct1 = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—')
     const vsName = page.opponent ? champName(page.opponent) : ''
     const setOpponent = id => {
       page.opponent = page.opponent === id ? null : id
       askOpgg(page)
-      drawDetail()
+      ;(page.redraw || drawDetail)()
     }
-    // The other team, to pick the opponent from.
     const pick = (page.enemies || []).length
       ? el(
           'div',
@@ -807,31 +833,200 @@
           }),
         )
       : null
-    // None known: the one OP.GG took (its names back to Riot's).
-    const OPGG_ROLE = { TOP: 'TOP', JUNGLE: 'JUNGLE', MID: 'MIDDLE', ADC: 'BOTTOM', SUPPORT: 'UTILITY' }
-    const role = page.pos || (r && OPGG_ROLE[String(r.position || '').toUpperCase()]) || ''
-    const roleName = role ? T(`scout.role.${role}`) : ''
-    const head = backBar(pic('div', 'champ-icon', champIcon(page.champion)), el('b', null, champName(page.champion)), roleName ? el('span', null, roleName) : null, vsName ? el('span', null, `vs ${vsName}`) : null)
-    if (r === null) return [head, pick, card('claude:og', T('scout.og.asking'), 'wide')].filter(Boolean)
-    if (!r || r.error) return [head, pick, card('claude:og', T('scout.og.none', { why: (r && r.error) || '' }), 'wide')].filter(Boolean)
+    if (r === null || r === undefined) return [pick, card('claude:og', T('scout.og.asking'), 'wide')]
+    if (r.error) return [pick, card('claude:og', T('scout.og.none', { why: r.error }), 'wide')]
+    const roleName = roleOfPage(page) ? T(`scout.role.${roleOfPage(page)}`) : ''
     const said = T(r.vs != null && vsName ? 'scout.og.sayVs' : 'scout.og.say', { champ: champName(page.champion), role: roleName, wr: pct1(r.winrate), vs: vsName, vwr: pct1(r.vs), patch: r.patch || '' })
     const block = (title, ...kids) => el('div', 'og-block', el('h4', null, title), el('div', 'og-row', ...kids))
-    const icons = (ids, f) => (ids || []).map(id => pic('i', 'og-icon', f(id)))
-    const counters = (r.counterIds || []).map(id => {
-      const node = el('div', `og-counter${id === page.opponent ? ' on' : ''}`, pic('i', 'og-icon', champIcon(id)), el('span', null, champName(id)))
-      node.addEventListener('click', () => setOpponent(id))
-      return node
-    })
-    const body = el(
+    const icons = (ids, f, cls = 'og-icon') => (ids || []).filter(id => id != null).map(id => pic('i', cls, f(id)))
+    const stat = (label, value) => el('div', 'og-stat', el('span', null, label), el('b', null, value))
+    const stats = el(
       'div',
-      'og-grid',
-      block(T('scout.og.core'), icons(r.core, item), el('span', 'og-plus', '+'), icons([r.boots], item)),
-      block(T('scout.og.runes'), icons([r.keystone, r.sub], perk), el('span', 'og-sep'), icons(r.spells, spell)),
-      block(T('scout.og.skills'), el('b', 'og-skills', r.skills || '—')),
-      block(T('scout.og.counters'), counters.length ? counters : el('span', 'muted', '—')),
+      'og-stats',
+      r.tier ? stat(T('scout.og.tier'), `T${r.tier}`) : null,
+      stat(T('scout.col.rate'), pct1(r.winrate)),
+      stat(T('scout.og.pick'), pct1(r.pickrate)),
+      stat(T('scout.og.ban'), pct1(r.banrate)),
+      vsName ? stat(T('scout.og.vsStat', { vs: vsName }), pct1(r.vs)) : null,
+    )
+    const arrow = () => el('span', 'og-plus', '→')
+    const options = (label, ids) => ((ids || []).length ? el('div', 'og-option', el('span', null, label), icons(ids, item, 'og-icon small')) : null)
+    const build = el(
+      'div',
+      'og-block wide',
+      el('h4', null, T('scout.og.build')),
+      el('div', 'og-row', icons(r.starting, item, 'og-icon small'), (r.starting || []).length ? arrow() : null, icons(r.core, item), el('span', 'og-plus', '+'), icons([r.boots], item)),
+      el('div', 'og-options', options(T('scout.og.fourth'), r.fourth), options(T('scout.og.fifth'), r.fifth), options(T('scout.og.sixth'), r.sixth)),
+    )
+    const runes = r.runes || { keystone: r.keystone, secondary: r.sub }
+    const runeBlock = el(
+      'div',
+      'og-block',
+      el('h4', null, T('scout.og.runes')),
+      el(
+        'div',
+        'og-runes',
+        el('div', 'og-tree', icons([runes.primary], perk, 'og-icon tiny'), icons([runes.keystone], perk, 'og-icon big'), icons(runes.primaries, perk, 'og-icon small')),
+        el('div', 'og-tree', icons([runes.secondary], perk, 'og-icon tiny'), icons(runes.secondaries, perk, 'og-icon small')),
+        el('div', 'og-tree', icons(runes.shards, shard, 'og-icon tiny round')),
+      ),
+    )
+    const order = String(r.skillOrder || '').split(/[,，\s>]+/).filter(Boolean)
+    const skillBlock = el(
+      'div',
+      'og-block',
+      el('h4', null, T('scout.og.spellsSkills')),
+      el('div', 'og-row', icons(r.spells, spell), el('span', 'og-sep'), el('b', 'og-skills', r.skills || '—')),
+      order.length ? el('div', 'og-order', order.map((k, n) => el('span', `k-${k.toLowerCase()}`, el('i', null, String(n + 1)), k))) : null,
+    )
+    const champs = (list, cls) =>
+      (list || []).map(c => {
+        // Earlier lookups kept names alone (counterIds beside them).
+        const id = typeof c === 'object' ? c.id : null
+        if (!id) return null
+        const node = el('div', `og-counter ${cls}${id === page.opponent ? ' on' : ''}`, pic('i', 'og-icon', champIcon(id)), el('span', null, champName(id)), typeof c.winrate === 'number' ? el('b', null, pct1(c.winrate)) : null)
+        node.addEventListener('click', () => setOpponent(id))
+        return node
+      })
+    const old = (r.counterIds || []).map(id => ({ id }))
+    const matchups = el(
+      'div',
+      'og-block wide',
+      el('div', 'og-two', el('div', null, el('h4', null, T('scout.og.counters')), el('div', 'og-row', champs((r.counters || []).some(c => typeof c === 'object') ? r.counters : old, 'hard'))), el('div', null, el('h4', null, T('scout.og.easy')), el('div', 'og-row', champs(r.easy, 'easy')))),
     )
     const tips = (r.tips || []).length ? el('div', 'og-tips', el('h4', null, vsName ? T('scout.og.tipsVs', { vs: vsName }) : T('scout.og.tips')), (r.tips || []).map(t => el('div', 'og-tip', t))) : null
-    return [head, pick, card('claude:og', said, 'wide', body, tips, el('div', 'og-source', T('scout.og.source')))].filter(Boolean)
+    return [pick, card('claude:og', said, 'wide', stats, el('div', 'og-grid', build, runeBlock, skillBlock, matchups), tips, el('div', 'og-source', T('scout.og.source')))]
+  }
+
+  function opggPage(page) {
+    const roleName = roleOfPage(page) ? T(`scout.role.${roleOfPage(page)}`) : ''
+    const vsName = page.opponent ? champName(page.opponent) : ''
+    const head = backBar(pic('div', 'champ-icon', champIcon(page.champion)), el('b', null, champName(page.champion)), roleName ? el('span', null, roleName) : null, vsName ? el('span', null, `vs ${vsName}`) : null)
+    return [head, ...opggCard(page)].filter(Boolean)
+  }
+
+  // --- Champion select -------------------------------------------------------------------------
+
+  // What is kept of this champion select: the build of her champion, the
+  // picks against an opponent, the position's strongest; for as long as it lasts.
+  let sel = null
+
+  function selectState(s) {
+    if (!sel || sel.pos !== s.pos) sel = { pos: s.pos, build: null, picks: null, meta: undefined }
+    const redraw = () => draw()
+    // Her champion locked in: OP.GG's build for it, by itself.
+    if (s.champion && (!sel.build || sel.build.champion !== s.champion)) sel.build = { champion: s.champion, pos: s.pos, opponent: null, enemies: [], result: undefined, redraw }
+    if (sel.build) sel.build.enemies = s.enemies
+    // The position's strongest, once.
+    if (sel.meta === undefined && s.pos) {
+      sel.meta = null
+      window.pet.scoutOpggMeta(s.pos).then(r => {
+        sel.meta = r || { error: 'no answer' }
+        draw()
+      })
+    }
+    return redraw
+  }
+
+  // Her champions, the most mastered first, none picked or taken yet.
+  function candidatesOf(s) {
+    const taken = new Set([...(s.allies || []), ...(s.enemies || [])])
+    return ((data.pool || []).filter(m => !taken.has(m.champion)) || []).slice(0, 10)
+  }
+
+  function askPicks(s, opponent) {
+    const candidates = candidatesOf(s)
+    sel.picks = { opponent, result: null, pool: candidates }
+    window.pet.scoutOpggPicks(opponent, s.pos, candidates.map(m => m.champion)).then(r => {
+      if (!sel.picks || sel.picks.opponent !== opponent) return
+      sel.picks.result = r || { error: 'no answer' }
+      draw()
+    })
+    draw()
+  }
+
+  function picksCard(s) {
+    const enemies = s.enemies || []
+    const p = sel.picks
+    const row = el(
+      'div',
+      'og-pick',
+      el('span', null, T('scout.sel.against')),
+      enemies.length
+        ? enemies.map(id => {
+            const i = pic('i', `og-enemy${p && p.opponent === id ? ' on' : ''}`, champIcon(id))
+            i.title = champName(id)
+            i.addEventListener('click', () => askPicks(s, id))
+            return i
+          })
+        : el('span', 'muted', T('scout.sel.noEnemies')),
+    )
+    if (!data.pool) return card('grok:sel', T('scout.sel.pool'), '', row)
+    if (!p) return card('grok:sel', T('scout.sel.pickOne'), '', row)
+    const vs = champName(p.opponent)
+    if (!p.result) return card('grok:sel', T('scout.sel.asking', { vs, n: p.pool.length }), '', row)
+    if (p.result.error) return card('grok:sel', T('scout.og.none', { why: p.result.error }), '', row)
+    const mastery = id => (data.pool || []).find(m => m.champion === id) || {}
+    // Those with games enough to tell (100 or more) first, by win rate; the few after.
+    const few = x => (x.games || 0) < 100
+    const ranked = (p.result.picks || []).filter(x => typeof x.winrate === 'number' && x.id).sort((a, b) => few(a) - few(b) || b.winrate - a.winrate).slice(0, 5)
+    const said = ranked.length ? T('scout.sel.best', { vs, champ: champName(ranked[0].id), wr: pct1(ranked[0].winrate) }) : T('scout.sel.nothing', { vs })
+    const list = el(
+      'div',
+      'sel-picks',
+      ranked.map((x, n) => {
+        const m = mastery(x.id)
+        const isFew = few(x)
+        const node = el(
+          'div',
+          'sel-pick opens',
+          el('span', 'sel-n', String(n + 1)),
+          pic('i', 'og-icon', champIcon(x.id)),
+          el('div', 'sel-name', el('b', null, champName(x.id)), el('span', null, m.level ? `${T('scout.masteryShort', { level: m.level })} · ${points(m.points)}` : '')),
+          el('div', 'sel-wr', el('b', x.winrate >= 0.5 ? 'good' : 'bad', pct1(x.winrate)), el('span', isFew ? 'few' : null, isFew ? T('scout.sel.few', { n: x.games || 0 }) : T('scout.sel.games', { n: x.games }))),
+        )
+        node.addEventListener('click', () => openOpgg(x.id, s.pos, p.opponent, enemies))
+        return node
+      }),
+    )
+    return card('grok:sel', said, '', row, list)
+  }
+
+  function metaCard(s) {
+    const m = sel.meta
+    if (!s.pos) return card('agy:sel', T('scout.sel.noPos'), '')
+    if (!m) return card('agy:sel', T('scout.sel.metaAsking', { role: T(`scout.role.${s.pos}`) }), '')
+    if (m.error) return card('agy:sel', T('scout.og.none', { why: m.error }), '')
+    const mine = id => (data.pool || []).find(x => x.champion === id)
+    const rows = (m.champs || []).filter(c => c.id).slice(0, 10).map(c => {
+      const own = mine(c.id)
+      const node = el(
+        'div',
+        'meta-row opens',
+        el('span', `meta-tier t${c.tier}`, `T${c.tier}`),
+        pic('i', 'og-icon small', champIcon(c.id)),
+        el('b', null, champName(c.id)),
+        el('span', 'good', pct1(c.winrate)),
+        el('span', 'muted', `${T('scout.og.pick')} ${pct1(c.pickrate)}`),
+        el('span', 'gold-text', own && own.level ? T('scout.masteryShort', { level: own.level }) : ''),
+      )
+      node.addEventListener('click', () => openOpgg(c.id, s.pos, null, s.enemies || []))
+      return node
+    })
+    return card('agy:sel', T('scout.sel.meta', { role: T(`scout.role.${s.pos}`) }), '', el('div', 'meta-list', rows))
+  }
+
+  function drawSelect() {
+    films.length = 0
+    const s = data.select || {}
+    selectState(s)
+    const role = s.pos ? T(`scout.role.${s.pos}`) : ''
+    $('who').replaceChildren(el('div', null, T('scout.sel.title'), el('span', 'sub', role ? T('scout.sel.your', { role }) : T('scout.sel.noPos'))))
+    const mine = s.champion || s.intent
+    const buildPart = sel.build
+      ? opggCard(sel.build)
+      : [card('claude:og', mine ? T('scout.sel.hover', { champ: champName(mine) }) : T('scout.sel.lockIn'), 'wide')]
+    $('profile').replaceChildren(el('div', 'sel-side', picksCard(s), metaCard(s)), el('div', 'sel-main', ...buildPart.filter(Boolean)))
   }
 
   function drawDetail() {

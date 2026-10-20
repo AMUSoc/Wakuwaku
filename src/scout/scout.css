@@ -1544,3 +1544,225 @@ h2[hidden] {
 .muted {
   color: var(--muted);
 }
+
+/* --- OP.GG, as much as it gives ---------------------------------------------------------- */
+
+.og-stats {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.og-stat {
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.og-stat b {
+  display: block;
+  font-size: 16px;
+  color: var(--fg);
+}
+
+.og-block.wide {
+  grid-column: 1 / -1;
+}
+
+.og-icon.small {
+  width: 30px;
+  height: 30px;
+}
+
+.og-icon.tiny {
+  width: 22px;
+  height: 22px;
+}
+
+.og-icon.big {
+  width: 48px;
+  height: 48px;
+}
+
+.og-icon.round {
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.4);
+}
+
+.og-options {
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+.og-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.og-runes {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.og-tree {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.og-order {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.og-order span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 34px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.og-order i {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.og-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.og-counter b {
+  font-size: 11px;
+}
+
+.og-counter.hard b {
+  color: var(--bad);
+}
+
+.og-counter.easy b {
+  color: var(--good);
+}
+
+/* --- Champion select ------------------------------------------------------------------------- */
+
+#profile.select {
+  grid-template-columns: 0.9fr 1.4fr;
+  grid-template-rows: 1fr;
+}
+
+.sel-side,
+.sel-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sel-picks,
+.meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.sel-pick {
+  display: grid;
+  grid-template-columns: 18px 40px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.sel-pick:hover,
+.meta-row:hover {
+  filter: brightness(1.25);
+}
+
+.sel-n {
+  font-weight: 800;
+  color: var(--agent);
+}
+
+.sel-name b,
+.sel-name span {
+  display: block;
+}
+
+.sel-name span {
+  font-size: 11px;
+  color: var(--gold);
+}
+
+.sel-wr {
+  text-align: right;
+}
+
+.sel-wr b {
+  display: block;
+  font-size: 16px;
+}
+
+.sel-wr span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sel-wr .few {
+  color: #ffb35c;
+}
+
+.meta-row {
+  display: grid;
+  grid-template-columns: 30px 30px 1fr 4em 6em 4em;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+}
+
+.meta-tier {
+  font-weight: 800;
+  text-align: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.meta-tier.t1 {
+  color: #ff6b6b;
+}
+
+.meta-tier.t2 {
+  color: #ffb35c;
+}
+
+.meta-tier.t3 {
+  color: #e6c36a;
+}
+
+/* Each part as tall as it is: the side rolls instead of them overlapping. */
+.sel-side > .card,
+.sel-main > .card {
+  flex: none;
+}

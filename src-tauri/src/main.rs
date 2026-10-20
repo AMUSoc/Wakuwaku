@@ -983,6 +983,22 @@ async fn scout_opgg(app: AppHandle, champion: u64, position: String, opponent: O
     tauri::async_runtime::spawn_blocking(move || opgg::ask(&sh, champion, &position, opponent.filter(|o| *o > 0))).await.unwrap_or(Value::Null)
 }
 
+// A position's strongest champions from OP.GG, through Claude, for
+// champion select (opgg.rs): kept a day.
+#[tauri::command]
+async fn scout_opgg_meta(app: AppHandle, position: String) -> Value {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || opgg::meta(&sh, &position)).await.unwrap_or(Value::Null)
+}
+
+// Her own champions against an opponent in champion select, by OP.GG's
+// lane matchups through Claude (opgg.rs): kept a day.
+#[tauri::command]
+async fn scout_opgg_picks(app: AppHandle, opponent: u64, position: String, candidates: Vec<u64>) -> Value {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || opgg::picks(&sh, opponent, &position, &candidates)).await.unwrap_or(Value::Null)
+}
+
 // The game's ten put away by its close button (scout.rs).
 #[tauri::command]
 async fn scout_close(app: AppHandle) {
@@ -1398,6 +1414,8 @@ fn main() {
             scout_review_start,
             scout_review,
             scout_opgg,
+            scout_opgg_meta,
+            scout_opgg_picks,
             pet_dismiss,
             pet_keyboard,
             pet_walk,

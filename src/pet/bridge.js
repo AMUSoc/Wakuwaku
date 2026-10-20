@@ -67,6 +67,9 @@
     scoutReview: id => invoke('scout_review', { id: String(id || '') }).catch(() => null),
     // A champion's build and matchup from OP.GG, through Claude (kept a day).
     scoutOpgg: (champion, position, opponent) => invoke('scout_opgg', { champion: Number(champion) || 0, position: String(position || ''), opponent: Number(opponent) || null }).catch(() => null),
+    // Champion select: a position's strongest champions; her own against an opponent (OP.GG, through Claude).
+    scoutOpggMeta: position => invoke('scout_opgg_meta', { position: String(position || '') }).catch(() => null),
+    scoutOpggPicks: (opponent, position, candidates) => invoke('scout_opgg_picks', { opponent: Number(opponent) || 0, position: String(position || ''), candidates: (candidates || []).map(Number) }).catch(() => null),
     scoutRows: (ids, who) => invoke('scout_rows', { ids: (ids || []).map(String), who: String(who || '') }).catch(() => []),
     answer: (id, choice) => send('pet_answer', { id, choice }),
     dismiss: id => send('pet_dismiss', { id }),

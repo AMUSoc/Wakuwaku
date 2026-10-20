@@ -779,6 +779,18 @@ fn load_ddragon(lang: &str) {
         .values()
         .filter_map(|c| Some((c["key"].as_str()?.to_string(), json!(c["name"].as_str()?))))
         .collect();
+    // The stat shards' icons (Data Dragon's runes have none): CommunityDragon's.
+    let cdragon = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default";
+    let shards: serde_json::Map<String, Value> = get(&format!("{cdragon}/v1/perks.json"))
+        .and_then(|p| p.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter(|p| p["id"].as_u64().is_some_and(|id| (5000..6000).contains(&id)))
+        .filter_map(|p| {
+            let path = p["iconPath"].as_str()?.to_lowercase().replace("/lol-game-data/assets/", "/");
+            Some((p["id"].to_string(), json!(format!("{cdragon}{path}"))))
+        })
+        .collect();
     let champions: serde_json::Map<String, Value> = get(&format!("{base}/cdn/{v}/data/{locale}/champion.json"))
         .and_then(|c| c["data"].as_object().cloned())
         .unwrap_or_default()
@@ -793,7 +805,7 @@ fn load_ddragon(lang: &str) {
         .into_iter()
         .filter_map(|(id, item)| Some((id, json!(item["name"].as_str()?))))
         .collect();
-    *DDRAGON.lock().unwrap_or_else(|e| e.into_inner()) = Some(json!({ "v": v, "locale": locale, "spells": spells, "perks": perks, "champions": champions, "championsEn": champions_en, "items": items }));
+    *DDRAGON.lock().unwrap_or_else(|e| e.into_inner()) = Some(json!({ "v": v, "locale": locale, "spells": spells, "perks": perks, "champions": champions, "championsEn": champions_en, "items": items, "shards": shards }));
 }
 
 // The champions' names in her language, by id (Data Dragon's, once read):
@@ -833,6 +845,77 @@ fn pets_of(sh: &Shared) -> Value {
             })
             .collect(),
     )
+}
+
+// --- Champion select ----------------------------------------------------------------------------
+
+// In champion select now (the panel shown once as it begins).
+static SELECTING: AtomicBool = AtomicBool::new(false);
+
+// Champion select as the client says it, every five seconds (lcu.rs): the
+// panel's select page, shown as select begins.
+pub fn on_select(sh: &Arc<Shared>, select: &Value) {
+    let first = !SELECTING.swap(true, Ordering::SeqCst);
+    let unchanged = VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|v| v["state"] == "select" && v["select"] == *select);
+    if unchanged {
+        return;
+    }
+    // The icons' names (Data Dragon) and her champions' mastery, on a
+    // thread: never in the way of the client's look.
+    if first {
+        *POOL.lock().unwrap_or_else(|e| e.into_inner()) = Value::Null;
+        let sh = sh.clone();
+        std::thread::spawn(move || {
+            load_ddragon(sh.lang());
+            let pool = pool_of(&sh);
+            *POOL.lock().unwrap_or_else(|e| e.into_inner()) = pool;
+            let select = VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|v| v["state"] == "select").map(|v| v["select"].clone());
+            if let Some(select) = select {
+                publish(&sh, select_view(&sh, &select));
+            }
+        });
+    }
+    publish(sh, select_view(sh, select));
+    if first && sh.setting("riotApiKey").as_str().is_some() {
+        show(sh, true);
+    }
+}
+
+// Out of champion select: its page goes (the panel with it, if it showed it).
+pub fn on_select_end(sh: &Arc<Shared>) {
+    if !SELECTING.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    let was_select = VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|v| v["state"] == "select");
+    if was_select {
+        *VIEW.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        if !crate::lol::in_game() {
+            show(sh, false);
+        }
+    }
+}
+
+// Her champions by mastery (every one, the most first), read as champion
+// select begins: the ones she plays well, for the picks against the other
+// team's (scout.js). Null until read.
+static POOL: Mutex<Value> = Mutex::new(Value::Null);
+
+fn pool_of(sh: &Shared) -> Value {
+    let key = sh.setting("riotApiKey").as_str().unwrap_or("").to_string();
+    let Some((riot_id, platform, _)) = crate::lcu::me_platform_names() else { return Value::Null };
+    let Some(me) = puuid_of(&key, platform, &riot_id) else { return Value::Null };
+    let (host, regional) = hosts(platform);
+    remember_hosts(&key, &regional);
+    riot(&key, &format!("{host}/lol/champion-mastery/v4/champion-masteries/by-puuid/{me}"))
+        .ok()
+        .and_then(|v| v.as_array().cloned())
+        .map(|all| Value::Array(all.iter().map(|m| json!({ "champion": m["championId"], "level": m["championLevel"], "points": m["championPoints"] })).collect()))
+        .unwrap_or(Value::Null)
+}
+
+fn select_view(sh: &Shared, select: &Value) -> Value {
+    let pool = POOL.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    json!({ "state": "select", "key": key_name(sh), "select": select, "pool": pool })
 }
 
 // --- Its window ---------------------------------------------------------------------------------
@@ -971,7 +1054,7 @@ pub fn toggle(sh: &Arc<Shared>) {
     sh.log(&format!("scout: its key pressed, the panel {}", if on { "up" } else { "away" }));
     // Nothing of a game to show (none yet, or one that could not be looked
     // up): her own, looked up now.
-    let has_ten = VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|v| v["state"] == "ready" && v["solo"] == "");
+    let has_ten = VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|v| (v["state"] == "ready" && v["solo"] == "") || v["state"] == "select");
     if on && !has_ten && !SCOUTING.swap(true, Ordering::SeqCst) {
         let sh = sh.clone();
         crate::spawn_named("scout", move || {
