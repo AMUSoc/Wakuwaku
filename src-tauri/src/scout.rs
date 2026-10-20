@@ -549,9 +549,21 @@ fn scout(sh: &Arc<Shared>, in_game: bool) {
     };
     let (host, regional) = hosts(platform);
     remember_hosts(&key, &regional);
-    // Spectator has the game a little after it starts loading.
+    // Spectator has the game a little after it starts loading; a custom
+    // game (the practice tool) never: her own at once, not a minute later.
+    let custom = in_game && crate::lcu::is_custom_game() == Some(true);
+    // Its own page wants the champion she plays: once the game has loaded
+    // (the game's own data up, lol.rs), at most a minute.
+    if custom {
+        for _ in 0..30 {
+            if crate::lol::in_game() {
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    }
     let mut live = Err(Miss::None);
-    for _ in 0..if in_game { 12 } else { 0 } {
+    for _ in 0..if in_game && !custom { 12 } else { 0 } {
         live = riot(&key, &format!("{host}/lol/spectator/v5/active-games/by-summoner/{me}"));
         if live.is_ok() || live == Err(Miss::Key) {
             break;
@@ -677,6 +689,7 @@ fn profile(sh: &Arc<Shared>, key: &str, host: &str, regional: &str, me: &str, my
             "name": my_name, "icon": summoner["profileIconId"], "level": summoner["summonerLevel"],
             "solo": entry_of(&entries, "RANKED_SOLO_5x5"), "flex": entry_of(&entries, "RANKED_FLEX_SR"),
             "top": top, "masteries": masteries, "now": now, "recent": null, "roles": [], "rolesOf": 0, "rolesTotal": 0, "season": null, "me": me,
+            "pos": LAST_POS.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         },
     });
     publish(sh, view.clone());
@@ -851,11 +864,15 @@ fn pets_of(sh: &Shared) -> Value {
 
 // In champion select now (the panel shown once as it begins).
 static SELECTING: AtomicBool = AtomicBool::new(false);
+// Her position in the last champion select: the game's page looks her
+// champion's build up for it.
+static LAST_POS: Mutex<String> = Mutex::new(String::new());
 
 // Champion select as the client says it, every five seconds (lcu.rs): the
 // panel's select page, shown as select begins.
 pub fn on_select(sh: &Arc<Shared>, select: &Value) {
     let first = !SELECTING.swap(true, Ordering::SeqCst);
+    *LAST_POS.lock().unwrap_or_else(|e| e.into_inner()) = select["pos"].as_str().unwrap_or("").to_string();
     let unchanged = VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|v| v["state"] == "select" && v["select"] == *select);
     if unchanged {
         return;
@@ -925,11 +942,67 @@ fn window(sh: &Shared) -> Option<WebviewWindow> {
 }
 
 // The middle of the display the island is on.
+// The middle of the display the game is on (its window's middle), else of
+// the island's: on another display it was never seen (2026-10-21).
 fn rect(sh: &Shared) -> Option<((i32, i32), (i32, i32), f64)> {
-    let a = crate::island::area(sh)?;
+    let a = game_window().and_then(|(x, y)| sh.screens().near(x, y)).or_else(|| crate::island::area(sh))?;
     let w = ((SIZE.0 * a.sf).round() as i32).min(a.w);
     let h = ((SIZE.1 * a.sf).round() as i32).min(a.h);
     Some(((a.x + (a.w - w) / 2, a.y + (a.h - h) / 2), (w, h), a.sf))
+}
+
+// The middle of the game's own window (its largest one shown), physical; none without a game.
+#[cfg(windows)]
+fn game_window() -> Option<(i32, i32)> {
+    let pid = crate::lol::pid_of("league of legends.exe")?;
+    #[repr(C)]
+    #[derive(Default)]
+    struct Rect {
+        l: i32,
+        t: i32,
+        r: i32,
+        b: i32,
+    }
+    type EnumProc = unsafe extern "system" fn(isize, isize) -> i32;
+    // island.rs and detach.rs declare these with their own types: the same ABI.
+    #[allow(clashing_extern_declarations)]
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(f: EnumProc, l: isize) -> i32;
+        fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
+        fn IsWindowVisible(hwnd: isize) -> i32;
+        fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
+    }
+    struct Search {
+        pid: u32,
+        best: Option<(i64, (i32, i32))>,
+    }
+    unsafe extern "system" fn each(hwnd: isize, l: isize) -> i32 {
+        // SAFETY: l is the Search below, alive for the enumeration.
+        let search = unsafe { &mut *(l as *mut Search) };
+        let mut pid = 0;
+        let mut r = Rect::default();
+        // SAFETY: reads of a window's process and place into our own values.
+        unsafe {
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == search.pid && IsWindowVisible(hwnd) != 0 && GetWindowRect(hwnd, &mut r) != 0 {
+                let size = (r.r - r.l) as i64 * (r.b - r.t) as i64;
+                if search.best.is_none_or(|(s, _)| size > s) {
+                    search.best = Some((size, ((r.l + r.r) / 2, (r.t + r.b) / 2)));
+                }
+            }
+        }
+        1
+    }
+    let mut search = Search { pid, best: None };
+    // SAFETY: the callback is given our Search, which outlives the call.
+    unsafe { EnumWindows(each, &mut search as *mut Search as isize) };
+    search.best.map(|(_, at)| at)
+}
+
+#[cfg(not(windows))]
+fn game_window() -> Option<(i32, i32)> {
+    None
 }
 
 fn lay(win: &WebviewWindow, (x, y): (i32, i32), (w, h): (i32, i32)) {
@@ -1074,12 +1147,85 @@ pub fn on_game_started(sh: &Arc<Shared>) {
 
 // --- Its key -----------------------------------------------------------------------------------
 
-// The key (scoutKey) taken for her while she runs: pressed anywhere, in the
-// game too, the panel comes or goes. Read as she starts.
+// The key (scoutKey), heard wherever it is pressed, the game in front too:
+// the panel comes or goes. Read as she starts.
+//
+// Not a hotkey of Windows' (RegisterHotKey): pressed in the game, none ever
+// came (2026-10-21), the game keeping the keyboard's hotkeys from Windows
+// (raw input's RIDEV_NOHOTKEYS). A low-level keyboard hook sees every key
+// before any program does, as a push-to-talk key does; it only looks, every
+// key goes on where it was going.
+#[cfg(windows)]
+mod key {
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::sync::{Arc, OnceLock};
+
+    use crate::Shared;
+
+    pub static SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
+    pub static MODS: AtomicU32 = AtomicU32::new(0);
+    pub static VK: AtomicU32 = AtomicU32::new(0);
+    // Held: its repeats are not presses.
+    static DOWN: AtomicBool = AtomicBool::new(false);
+
+    #[repr(C)]
+    struct KeyEvent {
+        vk: u32,
+        scan: u32,
+        flags: u32,
+        time: u32,
+        extra: usize,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn CallNextHookEx(hook: isize, code: i32, w: usize, l: isize) -> isize;
+        fn GetAsyncKeyState(vk: i32) -> i16;
+    }
+
+    fn held(vk: i32) -> bool {
+        // SAFETY: a read of the keyboard's state.
+        unsafe { GetAsyncKeyState(vk) < 0 }
+    }
+
+    // The modifiers held now, as parse_key names them (Alt 1, Ctrl 2, Shift 4, Win 8).
+    fn mods_now() -> u32 {
+        (held(0x12) as u32) | (held(0x11) as u32) << 1 | (held(0x10) as u32) << 2 | ((held(0x5B) || held(0x5C)) as u32) << 3
+    }
+
+    pub unsafe extern "system" fn on_key(code: i32, w: usize, l: isize) -> isize {
+        const WM_KEYDOWN: usize = 0x100;
+        const WM_KEYUP: usize = 0x101;
+        const WM_SYSKEYDOWN: usize = 0x104;
+        const WM_SYSKEYUP: usize = 0x105;
+        if code >= 0 && l != 0 {
+            // SAFETY: Windows hands a KBDLLHOOKSTRUCT for a low-level keyboard hook.
+            let event = unsafe { &*(l as *const KeyEvent) };
+            if event.vk == VK.load(Ordering::Relaxed) {
+                match w {
+                    WM_KEYDOWN | WM_SYSKEYDOWN if mods_now() == MODS.load(Ordering::Relaxed) && !DOWN.swap(true, Ordering::SeqCst) => {
+                        // Off the hook's own thread: Windows gives it a moment only.
+                        if let Some(sh) = SHARED.get().cloned() {
+                            std::thread::spawn(move || super::toggle(&sh));
+                        }
+                    }
+                    WM_KEYUP | WM_SYSKEYUP => DOWN.store(false, Ordering::SeqCst),
+                    _ => {}
+                }
+            }
+        }
+        // SAFETY: the key goes on, as it was going.
+        unsafe { CallNextHookEx(0, code, w, l) }
+    }
+}
+
 #[cfg(windows)]
 pub fn listen_key(sh: &Arc<Shared>) {
     let name = key_name(sh);
     let Some((mods, vk)) = parse_key(&name) else { return };
+    key::MODS.store(mods, Ordering::SeqCst);
+    key::VK.store(vk, Ordering::SeqCst);
+    let _ = key::SHARED.set(sh.clone());
     let sh = sh.clone();
     crate::spawn_named("scout-key", move || {
         #[repr(C)]
@@ -1092,28 +1238,29 @@ pub fn listen_key(sh: &Arc<Shared>) {
             pt: [i32; 2],
             private: u32,
         }
+        type HookProc = unsafe extern "system" fn(i32, usize, isize) -> isize;
         // backplate.rs declares GetMessageW with its own MSG: the same layout.
         #[allow(clashing_extern_declarations)]
         #[link(name = "user32")]
         extern "system" {
-            fn RegisterHotKey(hwnd: isize, id: i32, mods: u32, vk: u32) -> i32;
+            fn SetWindowsHookExW(id: i32, hook: HookProc, module: isize, thread: u32) -> isize;
             fn GetMessageW(msg: *mut Msg, hwnd: isize, min: u32, max: u32) -> i32;
         }
-        const MOD_NOREPEAT: u32 = 0x4000;
-        const WM_HOTKEY: u32 = 0x0312;
-        // SAFETY: a hotkey of this thread's, and its messages into our own struct.
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetModuleHandleW(name: *const u16) -> isize;
+        }
+        const WH_KEYBOARD_LL: i32 = 13;
+        // SAFETY: a hook of this thread's, its messages pumped here (a
+        // low-level hook is called on the thread that set it, through its loop).
         unsafe {
-            if RegisterHotKey(0, 1, mods | MOD_NOREPEAT, vk) == 0 {
-                sh.log(&format!("scout: the key {name} is taken by another program"));
+            if SetWindowsHookExW(WH_KEYBOARD_LL, key::on_key, GetModuleHandleW(std::ptr::null()), 0) == 0 {
+                sh.log(&format!("scout: the key {name} could not be listened for"));
                 return;
             }
-            sh.log(&format!("scout: the key {name} is hers"));
+            sh.log(&format!("scout: the key {name} is heard (low-level hook)"));
             let mut msg: Msg = std::mem::zeroed();
-            while GetMessageW(&mut msg, 0, 0, 0) > 0 {
-                if msg.message == WM_HOTKEY {
-                    toggle(&sh);
-                }
-            }
+            while GetMessageW(&mut msg, 0, 0, 0) > 0 {}
         }
     });
 }

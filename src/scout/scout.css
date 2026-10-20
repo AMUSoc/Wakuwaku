@@ -1766,3 +1766,20 @@ h2[hidden] {
 .sel-main > .card {
   flex: none;
 }
+
+/* --- In a game without the ten ----------------------------------------------------------- */
+
+#profile.ingame {
+  display: block;
+  overflow-y: auto;
+}
+
+.ig {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ig > .card {
+  flex: none;
+}

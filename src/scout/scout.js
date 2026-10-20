@@ -395,6 +395,19 @@
     $('profile').classList.remove('select')
     const ready = data.state === 'ready'
     const own = ready && !!data.profile
+    // In a game without the ten (a practice tool, a custom game): the game's page.
+    if (own && data.solo === 'nogame' && data.profile.now && data.profile.now.champion) {
+      $('say').textContent = ''
+      $('progress').textContent = ''
+      $('profile').hidden = false
+      $('profile').classList.add('ingame')
+      $('teams').hidden = true
+      $('hosts').hidden = true
+      drawInGame()
+      if (opened.length) drawDetail()
+      return
+    }
+    $('profile').classList.remove('ingame')
     $('say').textContent = ready ? '' : T(`scout.${data.state || 'none'}`)
     if (!ready) $('who').replaceChildren(el('div', null, T('scout.title')))
     $('progress').textContent = ''
@@ -903,6 +916,29 @@
     const vsName = page.opponent ? champName(page.opponent) : ''
     const head = backBar(pic('div', 'champ-icon', champIcon(page.champion)), el('b', null, champName(page.champion)), roleName ? el('span', null, roleName) : null, vsName ? el('span', null, `vs ${vsName}`) : null)
     return [head, ...opggCard(page)].filter(Boolean)
+  }
+
+  // --- In a game where the ten cannot be found (a practice tool, a custom game) ----------
+
+  // Her champion's build, kept while it is the same champion.
+  let inGame = null
+
+  function drawInGame() {
+    films.length = 0
+    const p = data.profile
+    const champion = p.now.champion
+    if (!inGame || inGame.champion !== champion) inGame = { champion, pos: p.pos || '', opponent: null, enemies: [], result: undefined, redraw: () => draw() }
+    const avatar = pic('div', 'avatar', champIcon(champion))
+    $('who').replaceChildren(avatar, el('div', null, T('scout.ig.title', { champ: champName(champion) }), el('span', 'sub', T('scout.ig.sub'))))
+    // Hers on it: mastery, this season's games on it, her rank.
+    const s = ((p.season && p.season.champs) || []).find(c => c.champion === champion)
+    const facts = [
+      p.now.level ? T('scout.mastery', { level: p.now.level, points: points(p.now.points) }) : T('scout.firstTime'),
+      s ? T('scout.ig.season', { games: s.games, rate: pct(s.wins, s.games), kda: s.d ? ((s.k + s.a) / s.d).toFixed(2) : '∞' }) : null,
+      p.solo ? `${tierText(p.solo)} ${p.solo.lp} LP` : null,
+    ].filter(Boolean)
+    const mine = card('grok:ig', T('scout.ig.mine', { champ: champName(champion) }), '', el('div', 'tags', facts.map(f => el('span', 'tag', f))))
+    $('profile').replaceChildren(el('div', 'ig', mine, ...opggCard(inGame).filter(Boolean)))
   }
 
   // --- Champion select -------------------------------------------------------------------------

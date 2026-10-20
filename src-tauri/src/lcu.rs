@@ -93,6 +93,14 @@ pub fn to_look_up(session: &Value, me: &str, party: &HashMap<String, String>) ->
         .collect()
 }
 
+// Whether the game on is a custom one (the practice tool among them): not
+// in spectator-v5, so no ten to look for (scout.rs). None without the client.
+pub fn is_custom_game() -> Option<bool> {
+    let c = client()?;
+    let session = lcu(&local(), &c, "/lol-gameflow/v1/session")?;
+    session["gameData"]["isCustomGame"].as_bool()
+}
+
 // Champion select as she sees it: her position (Riot's names), the champion
 // she locked in (0 none) and the one she hovers, the champions of her team
 // and of the other as picked so far (0s left out).
