@@ -872,6 +872,9 @@ h2[hidden] {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 160, 210, 0.4) transparent;
   padding: 18px 20px;
   border-radius: 20px;
   background: var(--bg);
@@ -1144,4 +1147,275 @@ h2[hidden] {
 .detail-bar .champ-icon {
   width: 32px;
   height: 32px;
+}
+
+/* --- A game's timeline ------------------------------------------------------------------- */
+
+#detail > .card {
+  flex: none;
+}
+
+#detail > .card.grow {
+  flex: 1;
+}
+
+.tl-block h4 {
+  margin: 4px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tl-block + .tl-block,
+.tl-pair {
+  margin-top: 12px;
+}
+
+.tl-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.chart .grid {
+  stroke: rgba(255, 255, 255, 0.06);
+}
+
+.chart .zero {
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-dasharray: 4 4;
+}
+
+.chart .axis {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.chart .mark {
+  fill: #0b1020;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.legend {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.legend i {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  margin-right: 5px;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+.build {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.buy {
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.buy i {
+  display: block;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 2px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06) center / cover no-repeat;
+}
+
+.skills {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.skill-row {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.skill-row b {
+  width: 18px;
+  font-size: 12px;
+  color: var(--agent);
+}
+
+.skill-row i {
+  width: 20px;
+  height: 18px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 18px;
+  text-align: center;
+}
+
+.skill-row i.on {
+  background: color-mix(in srgb, var(--agent) 70%, transparent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.minimap {
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.map-bg {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3) center / cover no-repeat;
+  filter: saturate(0.6) brightness(0.8);
+}
+
+.minimap .dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 0, 0, 0.6);
+}
+
+.dot.kill {
+  background: #4fd88f;
+}
+
+.dot.death {
+  background: #ff6b6b;
+}
+
+.dot.assist {
+  background: #5aa2ff;
+}
+
+/* --- The four agents' review -------------------------------------------------------------- */
+
+.rv-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.rv {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--agent) 14%, transparent), transparent 70%), rgba(0, 0, 0, 0.2);
+  border: 1px solid color-mix(in srgb, var(--agent) 30%, transparent);
+}
+
+.rv-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.rv-pick input {
+  accent-color: var(--agent);
+}
+
+.rv .speech {
+  flex: 1;
+  background: none;
+  padding: 0;
+}
+
+.rv .speech::before {
+  display: none;
+}
+
+.rv-text {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.rv.idle .rv-text,
+.rv.running .rv-text {
+  color: var(--muted);
+}
+
+.rv.running .rv-text::after {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  animation: dots 1.2s steps(4) infinite;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+@keyframes dots {
+  0% {
+    width: 0;
+  }
+  100% {
+    width: 1em;
+  }
+}
+
+.rv.failed .rv-text {
+  color: var(--bad);
+}
+
+.rv-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rv-go {
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e8732a, #d9a441);
+  color: #10131f;
+  font: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rv-go:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rv-text strong {
+  color: var(--agent);
 }

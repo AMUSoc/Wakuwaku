@@ -94,9 +94,11 @@
   const AGENT_COLOR = { claude: '#E8732A', codex: '#8B7CD8', agy: '#4A8FE7', grok: '#D9A441' }
 
   // A part of the war room: its agent's colour, its pet, what it says, and the rest.
-  function card(agent, said, cls, ...body) {
+  // agent may name its part too: 'agy:tl' is Antigravity on the timeline.
+  function card(who, said, cls, ...body) {
+    const [agent, part] = who.split(':')
     const pet = (data.pets || {})[agent] || {}
-    const node = el('section', `card ${cls || ''}`, el('div', 'host', head(agent), el('div', 'speech', el('b', null, T(`scout.part.${agent}`)), said)), ...body)
+    const node = el('section', `card ${cls || ''}`, el('div', 'host', head(agent), el('div', 'speech', el('b', null, T(`scout.part.${part ? `${agent}.${part}` : agent}`)), said)), ...body)
     node.style.setProperty('--agent', pet.color || AGENT_COLOR[agent])
     return node
   }
@@ -441,7 +443,201 @@
       const kills = list.reduce((n, q) => n + (q.k || 0), 0)
       return el('div', `board-team ${won ? 'won' : 'lost'}`, el('h3', null, `${T(won ? 'scout.win' : 'scout.loss')} · ${T('scout.board.kills', { n: kills })}`), list.map(q => boardRow(q, game, g, best)))
     }
-    return [head, card('codex', said, 'wide grow', el('div', 'board', team(100), team(200)))]
+    if (page.timeline === undefined) {
+      page.timeline = null
+      window.pet.scoutTimeline(g.id).then(t => {
+        page.timeline = t || false
+        if (opened[opened.length - 1] === page) drawDetail()
+      })
+    }
+    // Her own games are reviewed (not another player's: her tokens).
+    const own = data.profile && g.who === data.profile.me
+    return [head, card('codex', said, 'wide', el('div', 'board', team(100), team(200))), own ? reviewCard(page) : null, timelineCard(game, g, page.timeline)].filter(Boolean)
+  }
+
+  // --- The four agents' review of a game ----------------------------------------------------
+
+  const REVIEWERS = ['claude', 'codex', 'agy', 'grok']
+
+  function pollReview(page) {
+    if (page.polling) return
+    page.polling = true
+    const look = () =>
+      window.pet.scoutReview(page.row.id).then(r => {
+        page.review = r || {}
+        if (opened[opened.length - 1] === page) drawDetail()
+        const busy = REVIEWERS.some(a => page.review[a] && page.review[a].state === 'running')
+        if (busy && opened.includes(page)) setTimeout(look, 2000)
+        else page.polling = false
+      })
+    look()
+  }
+
+  function reviewCard(page) {
+    if (page.review === undefined) {
+      page.review = null
+      page.chosen = new Set(REVIEWERS)
+      pollReview(page)
+    }
+    const r = page.review || {}
+    const rows = REVIEWERS.map(agent => {
+      const done = r[agent] || {}
+      const box = el('input')
+      box.type = 'checkbox'
+      box.checked = page.chosen.has(agent)
+      box.disabled = done.state === 'done' || done.state === 'running'
+      box.addEventListener('click', e => e.stopPropagation())
+      box.addEventListener('change', () => (box.checked ? page.chosen.add(agent) : page.chosen.delete(agent)))
+      const text =
+        done.state === 'done' ? done.text : done.state === 'running' ? T('scout.rv.thinking') : done.state === 'failed' ? T('scout.rv.failed', { why: done.why || '' }) : T('scout.rv.idle')
+      // **bold** as the agents write it, bold; the rest as text.
+      const words = String(text).split('**').map((part, i) => (i % 2 ? el('strong', null, part) : part))
+      const node = el('div', `rv ${done.state || 'idle'}`, el('label', 'rv-pick', box, head(agent)), el('div', 'speech', el('b', null, T(`scout.rv.part.${agent}`)), el('div', 'rv-text', words)))
+      node.style.setProperty('--agent', ((data.pets || {})[agent] || {}).color || AGENT_COLOR[agent])
+      return node
+    })
+    const todo = REVIEWERS.filter(a => page.chosen.has(a) && !['done', 'running'].includes((r[a] || {}).state))
+    const go = el('button', 'rv-go', T('scout.rv.go', { n: todo.length }))
+    go.disabled = !todo.length
+    go.addEventListener('click', () => {
+      go.disabled = true
+      window.pet.scoutReviewStart(page.row.id, page.row.who, todo).then(now => {
+        page.review = now || page.review
+        page.polling = false
+        pollReview(page)
+      })
+    })
+    const all = REVIEWERS.every(a => (r[a] || {}).state === 'done')
+    return card('claude:rv', T(all ? 'scout.rv.allDone' : 'scout.rv.say'), 'wide', el('div', 'rv-list', rows), all ? null : el('div', 'rv-foot', go, el('span', null, T('scout.rv.cost'))))
+  }
+
+  // --- A game's timeline: its curves, her build, skills and kills --------------------------
+
+  const SVG = 'http://www.w3.org/2000/svg'
+  function svg(tag, attrs, ...kids) {
+    const node = document.createElementNS(SVG, tag)
+    for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v)
+    for (const kid of kids.flat()) if (kid) node.append(kid)
+    return node
+  }
+
+  // A line chart: series [{ values, color, width, dash, fill }] over minutes, a zero line if asked.
+  function chart(series, { height = 170, zero = false, marks = [] } = {}) {
+    const W = 1000
+    const H = height
+    const pad = { l: 46, r: 10, t: 10, b: 22 }
+    const n = Math.max(...series.map(s => s.values.length))
+    const all = series.flatMap(s => s.values)
+    let lo = Math.min(0, ...all)
+    let hi = Math.max(0, ...all)
+    if (zero) {
+      const m = Math.max(Math.abs(lo), Math.abs(hi), 1)
+      lo = -m
+      hi = m
+    }
+    if (hi === lo) hi = lo + 1
+    const x = i => pad.l + (i / Math.max(1, n - 1)) * (W - pad.l - pad.r)
+    const y = v => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b)
+    const grid = []
+    for (let i = 0; i < n; i += 5) grid.push(svg('line', { x1: x(i), x2: x(i), y1: pad.t, y2: H - pad.b, class: 'grid' }), svg('text', { x: x(i), y: H - 6, class: 'axis', 'text-anchor': 'middle' }, document.createTextNode(String(i))))
+    for (const v of zero ? [lo, 0, hi] : [lo, (lo + hi) / 2, hi]) grid.push(svg('text', { x: pad.l - 6, y: y(v) + 4, class: 'axis', 'text-anchor': 'end' }, document.createTextNode(Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)))))
+    if (zero) grid.push(svg('line', { x1: pad.l, x2: W - pad.r, y1: y(0), y2: y(0), class: 'zero' }))
+    const lines = series.map(s => {
+      const d = s.values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')
+      return svg('path', { d, fill: 'none', stroke: s.color, 'stroke-width': s.width || 2.5, 'stroke-dasharray': s.dash || '', 'stroke-linejoin': 'round' })
+    })
+    // Ahead and behind, filled to the zero line.
+    const fills = series
+      .filter(s => s.fill)
+      .flatMap(s => {
+        const path = `M${x(0)},${y(0)}` + s.values.map((v, i) => `L${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('') + `L${x(s.values.length - 1)},${y(0)}Z`
+        const id = `clip${Math.random().toString(36).slice(2)}`
+        return [
+          svg('defs', null, svg('clipPath', { id: `${id}a` }, svg('rect', { x: 0, y: 0, width: W, height: y(0) })), svg('clipPath', { id: `${id}b` }, svg('rect', { x: 0, y: y(0), width: W, height: H }))),
+          svg('path', { d: path, fill: s.fill[0], 'clip-path': `url(#${id}a)` }),
+          svg('path', { d: path, fill: s.fill[1], 'clip-path': `url(#${id}b)` }),
+        ]
+      })
+    const dots = marks.map(m => svg('g', null, svg('circle', { cx: x(m.t / 60), cy: H - pad.b - 6, r: 6, fill: m.color }), svg('text', { x: x(m.t / 60), y: H - pad.b - 2.5, class: 'mark', 'text-anchor': 'middle' }, document.createTextNode(m.label))))
+    return svg('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart' }, grid, fills, lines, dots)
+  }
+
+  const CONSUMABLES = new Set([2003, 2031, 2033, 2055, 2138, 2139, 2140, 3340, 3363, 3364, 3330, 2010, 2009, 2052, 3513])
+
+  function timelineCard(game, row, t) {
+    const legend = (...items) => el('div', 'legend', items.map(([color, text]) => el('span', null, el('i', null), text)).map((node, i) => ((node.firstChild.style.background = items[i][0]), node)))
+    if (t === null || t === undefined) return card('agy:tl', T('scout.tl.loading'), 'wide')
+    if (!t || !t.frames) return card('agy:tl', T('scout.tl.none'), 'wide')
+    // Each of the ten by their place in the timeline (1 to 10).
+    const who = t.puuids.map(puuid => game.players.find(q => q.puuid === puuid) || {})
+    const mine = who.findIndex(q => q.puuid === row.who)
+    if (mine < 0) return card('agy:tl', T('scout.tl.none'), 'wide')
+    const myTeam = who[mine].team
+    const ours = i => who[i].team === myTeam
+    const diff = t.frames.map(f => f.gold.reduce((s, g, i) => s + (ours(i) ? g : -g), 0))
+    const biggest = diff.reduce((b, v, i) => (Math.abs(v) > Math.abs(diff[b]) ? i : b), 0)
+    const said = T('scout.tl.say', { m: biggest, who: diff[biggest] >= 0 ? T('scout.tl.us') : T('scout.tl.them'), gold: Math.abs(diff[biggest]).toLocaleString() })
+    const marks = t.monsters.map(m => ({
+      t: m.t,
+      color: m.team === myTeam ? 'rgba(79,216,143,0.9)' : 'rgba(255,107,107,0.9)',
+      label: T(`scout.tl.${m.type === 'DRAGON' ? 'dragon' : m.type === 'BARON_NASHOR' ? 'baron' : m.type === 'RIFTHERALD' ? 'herald' : 'other'}`),
+    }))
+    const goldDiff = el('div', 'tl-block', el('h4', null, T('scout.tl.goldDiff')), chart([{ values: diff, color: '#cfd8ff', width: 2, fill: ['rgba(79,216,143,0.35)', 'rgba(255,107,107,0.35)'] }], { zero: true, marks }))
+    // Her lane opponent: the other team's player in her position.
+    const opp = who.findIndex((q, i) => !ours(i) && q.pos && q.pos === who[mine].pos)
+    const meGold = t.frames.map(f => f.gold[mine])
+    const meCs = t.frames.map(f => f.cs[mine])
+    const vs = [{ values: meGold, color: '#e6c36a', width: 3 }]
+    const vsCs = [{ values: meCs, color: '#e6c36a', width: 3 }]
+    if (opp >= 0) {
+      vs.push({ values: t.frames.map(f => f.gold[opp]), color: '#ff6b6b', width: 2.5, dash: '6 4' })
+      vsCs.push({ values: t.frames.map(f => f.cs[opp]), color: '#ff6b6b', width: 2.5, dash: '6 4' })
+    }
+    const oppName = opp >= 0 ? T('scout.tl.opp', { champ: champName(who[opp].champion) }) : null
+    const lane = el(
+      'div',
+      'tl-pair',
+      el('div', 'tl-block', el('h4', null, T('scout.tl.vsGold')), legend(['#e6c36a', T('scout.tl.me')], ...(oppName ? [['#ff6b6b', oppName]] : [])), chart(vs, { height: 150 })),
+      el('div', 'tl-block', el('h4', null, T('scout.tl.vsCs')), legend(['#e6c36a', T('scout.tl.me')], ...(oppName ? [['#ff6b6b', oppName]] : [])), chart(vsCs, { height: 150 })),
+    )
+    // Her build: items bought, each with its minute; potions and wards left out.
+    const bought = t.items.filter(e => e.p === mine + 1 && !CONSUMABLES.has(e.item))
+    const build = el(
+      'div',
+      'tl-block',
+      el('h4', null, T('scout.tl.build')),
+      el(
+        'div',
+        'build',
+        bought.map(e => el('div', 'buy', pic('i', null, item(e.item)), el('span', null, `${Math.floor(e.t / 60)}:${String(Math.round(e.t % 60)).padStart(2, '0')}`))),
+      ),
+    )
+    // Her skills: which of Q W E R at each level.
+    const order = t.skills.filter(e => e.p === mine + 1).map(e => e.slot)
+    const skills = el(
+      'div',
+      'tl-block',
+      el('h4', null, T('scout.tl.skills')),
+      el(
+        'div',
+        'skills',
+        ['Q', 'W', 'E', 'R'].map((key, slot) => el('div', 'skill-row', el('b', null, key), order.map((s, lv) => el('i', s === slot + 1 ? 'on' : '', s === slot + 1 ? String(lv + 1) : '')))),
+      ),
+    )
+    // Her kills, deaths and assists where they were.
+    const MAP = 15000
+    const map = el('div', 'minimap', pic('div', 'map-bg', data.dd ? `${DDRAGON}/${data.dd.v}/img/map/map11.png` : ''))
+    for (const k of t.kills) {
+      const kind = k.killer === mine + 1 ? 'kill' : k.victim === mine + 1 ? 'death' : (k.assists || []).includes(mine + 1) ? 'assist' : null
+      if (!kind) continue
+      const dot = el('i', `dot ${kind}`)
+      dot.style.left = `${(k.x / MAP) * 100}%`
+      dot.style.top = `${(1 - k.y / MAP) * 100}%`
+      dot.title = `${Math.floor(k.t / 60)}:${String(Math.round(k.t % 60)).padStart(2, '0')}`
+      map.append(dot)
+    }
+    const mapBlock = el('div', 'tl-block', el('h4', null, T('scout.tl.map')), legend(['#4fd88f', T('scout.tl.kill')], ['#ff6b6b', T('scout.tl.death')], ['#5aa2ff', T('scout.tl.assist')]), map)
+    return card('agy:tl', said, 'wide', goldDiff, lane, el('div', 'tl-pair', el('div', null, build, skills), mapBlock))
   }
 
   function openPage(page) {

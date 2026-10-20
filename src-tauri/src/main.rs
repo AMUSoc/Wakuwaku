@@ -61,6 +61,7 @@ mod pointer;
 mod power;
 mod proxy;
 mod reply;
+mod review;
 mod run;
 mod screen;
 mod scout;
@@ -951,6 +952,28 @@ async fn scout_rows(app: AppHandle, ids: Vec<String>, who: String) -> Value {
     scout::rows_of(&shared(&app), &ids, &who)
 }
 
+// A game's timeline (each minute's gold of the ten, kills, items, skills),
+// for its scoreboard's curves: one request the first time (scout.rs).
+#[tauri::command]
+async fn scout_timeline(app: AppHandle, id: String) -> Value {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || scout::timeline(&sh, &id)).await.unwrap_or(Value::Null)
+}
+
+// A game reviewed by the agents asked (review.rs): those not yet done
+// started, each once; the reviews as they are.
+#[tauri::command]
+async fn scout_review_start(app: AppHandle, id: String, who: String, agents: Vec<String>) -> Value {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || review::start(&sh, &id, &who, &agents)).await.unwrap_or(Value::Null)
+}
+
+// A game's reviews as they are (review.rs).
+#[tauri::command]
+async fn scout_review(app: AppHandle, id: String) -> Value {
+    review::status(&shared(&app), &id)
+}
+
 // The game's ten put away by its close button (scout.rs).
 #[tauri::command]
 async fn scout_close(app: AppHandle) {
@@ -1362,6 +1385,9 @@ fn main() {
             scout_close,
             scout_game,
             scout_rows,
+            scout_timeline,
+            scout_review_start,
+            scout_review,
             pet_dismiss,
             pet_keyboard,
             pet_walk,

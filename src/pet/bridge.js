@@ -60,6 +60,11 @@
     // A game kept, whole (its scoreboard), by its id; none if not kept.
     scoutGame: id => invoke('scout_game', { id: String(id || '') }).catch(() => null),
     // Her rows of these games kept (a champion's, a position's), as who in them.
+    // A game's timeline (each minute's gold of the ten, kills, items, skills).
+    scoutTimeline: id => invoke('scout_timeline', { id: String(id || '') }).catch(() => null),
+    // A game reviewed by the agents asked (once each), and its reviews as they are.
+    scoutReviewStart: (id, who, agents) => invoke('scout_review_start', { id: String(id || ''), who: String(who || ''), agents: (agents || []).map(String) }).catch(() => null),
+    scoutReview: id => invoke('scout_review', { id: String(id || '') }).catch(() => null),
     scoutRows: (ids, who) => invoke('scout_rows', { ids: (ids || []).map(String), who: String(who || '') }).catch(() => []),
     answer: (id, choice) => send('pet_answer', { id, choice }),
     dismiss: id => send('pet_dismiss', { id }),

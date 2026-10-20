@@ -415,6 +415,61 @@ fn matches_dir(sh: &Shared) -> PathBuf {
     sh.dir.join("lol").join("matches")
 }
 
+// The key and match-v5's host the last look used: a game's timeline is
+// asked for later, as its scoreboard opens (scout_timeline).
+static LAST: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+fn remember_hosts(key: &str, regional: &str) {
+    *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((key.to_string(), regional.to_string()));
+}
+
+// A game's timeline as kept: each minute's gold, experience, minions and
+// level of the ten (by their place, 1 to 10, as the game's players are
+// listed), and what happened: kills (who, whom, who helped, where), items
+// bought, skills levelled, Dragons, Heralds and Barons, buildings lost.
+pub fn trim_timeline(t: &Value) -> Option<Value> {
+    let info = &t["info"];
+    let puuids: Vec<Value> = (1..=10).map(|i| info["participants"].as_array().and_then(|ps| ps.iter().find(|p| p["participantId"] == i)).map_or(Value::Null, |p| p["puuid"].clone())).collect();
+    let mut frames = Vec::new();
+    let (mut kills, mut items, mut skills, mut monsters, mut buildings) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for f in info["frames"].as_array()? {
+        let of = |k: &dyn Fn(&Value) -> u64| (1..=10).map(|i| k(&f["participantFrames"][i.to_string()])).collect::<Vec<_>>();
+        frames.push(json!({
+            "t": (f["timestamp"].as_f64().unwrap_or(0.0) / 60000.0).round(),
+            "gold": of(&|p| p["totalGold"].as_u64().unwrap_or(0)),
+            "xp": of(&|p| p["xp"].as_u64().unwrap_or(0)),
+            "cs": of(&|p| p["minionsKilled"].as_u64().unwrap_or(0) + p["jungleMinionsKilled"].as_u64().unwrap_or(0)),
+            "level": of(&|p| p["level"].as_u64().unwrap_or(0)),
+        }));
+        for e in f["events"].as_array().into_iter().flatten() {
+            let t = (e["timestamp"].as_f64().unwrap_or(0.0) / 1000.0).round();
+            match e["type"].as_str().unwrap_or("") {
+                "CHAMPION_KILL" => kills.push(json!({ "t": t, "killer": e["killerId"], "victim": e["victimId"], "assists": e["assistingParticipantIds"].as_array().cloned().unwrap_or_default(), "x": e["position"]["x"], "y": e["position"]["y"] })),
+                "ITEM_PURCHASED" => items.push(json!({ "t": t, "p": e["participantId"], "item": e["itemId"] })),
+                "SKILL_LEVEL_UP" if e["levelUpType"] == "NORMAL" => skills.push(json!({ "t": t, "p": e["participantId"], "slot": e["skillSlot"] })),
+                "ELITE_MONSTER_KILL" => monsters.push(json!({ "t": t, "team": e["killerTeamId"], "type": e["monsterType"], "sub": e["monsterSubType"] })),
+                "BUILDING_KILL" => buildings.push(json!({ "t": t, "lost": e["teamId"], "type": e["buildingType"], "lane": e["laneType"] })),
+                _ => {}
+            }
+        }
+    }
+    Some(json!({ "v": 1, "puuids": puuids, "frames": frames, "kills": kills, "items": items, "skills": skills, "monsters": monsters, "buildings": buildings }))
+}
+
+// A game's timeline, kept on disk or read once from Riot (one request) and
+// kept; none without a look having been made yet (no key, no host).
+pub fn timeline(sh: &Shared, id: &str) -> Value {
+    let path = sh.dir.join("lol").join("timelines").join(format!("{}.json", id.replace(['/', '\\', '.'], "_")));
+    if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        return kept;
+    }
+    let Some((key, regional)) = LAST.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return Value::Null };
+    let Some(kept) = riot(&key, &format!("{regional}/lol/match/v5/matches/{id}/timeline")).ok().as_ref().and_then(trim_timeline) else { return Value::Null };
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));
+    let _ = std::fs::write(&path, kept.to_string());
+    kept
+}
+
 fn game_path(sh: &Shared, id: &str) -> PathBuf {
     matches_dir(sh).join(format!("{}.json", id.replace(['/', '\\', '.'], "_")))
 }
@@ -493,6 +548,7 @@ fn scout(sh: &Arc<Shared>, in_game: bool) {
         return;
     };
     let (host, regional) = hosts(platform);
+    remember_hosts(&key, &regional);
     // Spectator has the game a little after it starts loading.
     let mut live = Err(Miss::None);
     for _ in 0..if in_game { 12 } else { 0 } {
@@ -595,6 +651,7 @@ fn scout(sh: &Arc<Shared>, in_game: bool) {
 // the next only the new ones). Each part told by one of the agents' pets
 // (src/scout/).
 fn profile(sh: &Arc<Shared>, key: &str, host: &str, regional: &str, me: &str, my_name: &str, names: &HashMap<u64, String>) {
+    remember_hosts(key, regional);
     let why = if crate::lol::in_game() { "nogame" } else { "outside" };
     let summoner = riot(key, &format!("{host}/lol/summoner/v4/summoners/by-puuid/{me}")).unwrap_or(Value::Null);
     let entries = riot(key, &format!("{host}/lol/league/v4/entries/by-puuid/{me}")).unwrap_or(json!([]));
@@ -721,7 +778,28 @@ fn load_ddragon(lang: &str) {
         .values()
         .filter_map(|c| Some((c["key"].as_str()?.to_string(), json!(c["name"].as_str()?))))
         .collect();
-    *DDRAGON.lock().unwrap_or_else(|e| e.into_inner()) = Some(json!({ "v": v, "locale": locale, "spells": spells, "perks": perks, "champions": champions }));
+    // The items' names too, for a review's summary (review.rs): an agent
+    // given only ids went looking them up (Grok, past four minutes, 2026-10-21).
+    let items: serde_json::Map<String, Value> = get(&format!("{base}/cdn/{v}/data/{locale}/item.json"))
+        .and_then(|c| c["data"].as_object().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(id, item)| Some((id, json!(item["name"].as_str()?))))
+        .collect();
+    *DDRAGON.lock().unwrap_or_else(|e| e.into_inner()) = Some(json!({ "v": v, "locale": locale, "spells": spells, "perks": perks, "champions": champions, "items": items }));
+}
+
+// The champions' names in her language, by id (Data Dragon's, once read):
+// for a review's summary (review.rs). None read yet, none.
+pub fn champion_names() -> HashMap<u64, String> {
+    let dd = DDRAGON.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or(Value::Null);
+    dd["champions"].as_object().into_iter().flatten().filter_map(|(id, n)| Some((id.parse().ok()?, n.as_str()?.to_string()))).collect()
+}
+
+// The items' names in her language, by id (Data Dragon's, once read).
+pub fn item_names() -> HashMap<u64, String> {
+    let dd = DDRAGON.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or(Value::Null);
+    dd["items"].as_object().into_iter().flatten().filter_map(|(id, n)| Some((id.parse().ok()?, n.as_str()?.to_string()))).collect()
 }
 
 // Each agent's pet, drawn beside the part it tells: its sheet and colour.
@@ -819,6 +897,9 @@ fn push(sh: &Shared) {
         view["lang"] = json!(sh.lang());
         view["key"] = json!(key_name(sh));
         view["dd"] = DDRAGON.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or(Value::Null);
+        if let Some(dd) = view["dd"].as_object_mut() {
+            dd.remove("items");
+        }
         view["pets"] = pets_of(sh);
         let _ = sh.app.emit_to(LABEL, "scout:update", view);
     }
@@ -1006,6 +1087,30 @@ mod tests {
         let roles = roles_of("me", &games);
         assert_eq!((roles[0]["pos"].as_str(), roles[0]["games"].as_u64(), roles[0]["wins"].as_u64()), (Some("MIDDLE"), Some(2), Some(2)));
         assert_eq!(roles[0]["champs"].as_array().map(|c| c.len()), Some(2));
+    }
+
+    #[test]
+    fn a_timeline_kept() {
+        let pf = |gold: u64| json!({ "totalGold": gold, "xp": 100, "minionsKilled": 10, "jungleMinionsKilled": 2, "level": 2 });
+        let mut frame = json!({ "timestamp": 60000, "participantFrames": {}, "events": [
+            { "type": "CHAMPION_KILL", "timestamp": 61000, "killerId": 1, "victimId": 6, "assistingParticipantIds": [2], "position": { "x": 100, "y": 200 } },
+            { "type": "ITEM_PURCHASED", "timestamp": 62000, "participantId": 1, "itemId": 1055 },
+            { "type": "SKILL_LEVEL_UP", "timestamp": 63000, "participantId": 1, "skillSlot": 1, "levelUpType": "NORMAL" },
+            { "type": "SKILL_LEVEL_UP", "timestamp": 63000, "participantId": 1, "skillSlot": 4, "levelUpType": "EVOLVE" },
+            { "type": "WARD_PLACED", "timestamp": 64000 } ] });
+        for i in 1..=10 {
+            frame["participantFrames"][i.to_string()] = pf(500 + i);
+        }
+        let t = json!({ "info": { "participants": [{ "participantId": 1, "puuid": "me" }], "frames": [frame] } });
+        let kept = trim_timeline(&t).unwrap();
+        assert_eq!(kept["puuids"][0], "me");
+        assert_eq!(kept["frames"][0]["t"], 1.0);
+        assert_eq!(kept["frames"][0]["gold"][0], 501);
+        assert_eq!(kept["frames"][0]["cs"][9], 12);
+        assert_eq!(kept["kills"][0], json!({ "t": 61.0, "killer": 1, "victim": 6, "assists": [2], "x": 100, "y": 200 }));
+        assert_eq!(kept["items"].as_array().map(|a| a.len()), Some(1));
+        // An evolution is no level of a skill.
+        assert_eq!(kept["skills"].as_array().map(|a| a.len()), Some(1));
     }
 
     #[test]
