@@ -81,7 +81,7 @@
     $('panel').hidden = false
     const alone = data.state === 'ready' && data.solo
     $('title').textContent = T(alone ? 'scout.mine' : 'scout.title')
-    $('hint').textContent = T('scout.hint', { key: data.key || 'Alt+`' })
+    $('hint').textContent = T('scout.hint', { key: data.key || 'Alt+X' })
     $('us').textContent = T('scout.us')
     $('them').textContent = T('scout.them')
     const ready = data.state === 'ready'
@@ -97,6 +97,9 @@
     document.querySelector('.them .rows').replaceChildren(...(ready ? data.them.map(playerView) : []))
     $('teams').hidden = !ready
   }
+
+  // A click anywhere on it puts it away.
+  $('panel').addEventListener('click', () => window.pet.scoutClose())
 
   window.pet.onScout(payload => {
     data = payload || { state: 'none' }

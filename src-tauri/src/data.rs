@@ -127,7 +127,7 @@ fn defaults() -> Map<String, Value> {
         "lol": true,
         "riotApiKey": "",
         // The key that brings up the game's ten (scout.rs): read as she starts.
-        "scoutKey": "Alt+`",
+        "scoutKey": "Alt+X",
         // The phone's page from elsewhere (mobile.rs): off, or listened for
         // at Tailscale's address ("tailscale"), at 0.0.0.0, or at one set;
         // asked for with this token (made as she first starts). Its address

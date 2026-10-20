@@ -938,6 +938,14 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
     }
 }
 
+// The game's ten clicked: away (scout.rs).
+#[tauri::command]
+async fn scout_close(app: AppHandle) {
+    let sh = shared(&app);
+    sh.log("scout: clicked away");
+    scout::show(&sh, false);
+}
+
 #[tauri::command]
 async fn pet_answer(app: AppHandle, id: u64, choice: Value) -> bool {
     shared(&app).answer(id, &choice)
@@ -1338,6 +1346,7 @@ fn main() {
             pet_double_click,
             pet_panel,
             pet_answer,
+            scout_close,
             pet_dismiss,
             pet_keyboard,
             pet_walk,

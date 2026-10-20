@@ -2,7 +2,7 @@
 // loads, each one's rank, this season's wins, their mastery of the champion
 // they play and how their last games went, in a panel in the middle of the
 // screen (src/scout/), shown as the game loads and on a key (scoutKey,
-// Alt+` unless set) after.
+// Alt+X unless set) after, or a click on it puts it away.
 //
 // From Riot's API with the person's own key (riotApiKey): spectator-v5 for
 // who is in the game (a game shows its players once it loads: no one hidden
@@ -32,7 +32,10 @@ const GAMES: usize = 10;
 // A personal key's limits, kept a little under.
 const PER_2_MIN: usize = 95;
 const PER_SECOND: usize = 18;
-const DEFAULT_KEY: &str = "Alt+`";
+// Not Alt+`: Microsoft's Japanese IME takes it (half / full width), and
+// pressed in a window with the IME on it never came; nor Alt+Z, NVIDIA's
+// overlay's (2026-10-21).
+const DEFAULT_KEY: &str = "Alt+X";
 
 // What the page draws (view), and whether its window is up.
 static VIEW: Mutex<Option<Value>> = Mutex::new(None);
@@ -460,8 +463,11 @@ fn create(sh: &Arc<Shared>) {
         match built {
             Ok(win) => {
                 lay(&win, pos, size);
-                // Never in the way of the game: every click goes through.
-                let _ = win.set_ignore_cursor_events(true);
+                // A click on it puts it away (scout_close): it is up only
+                // when asked for, and a key may be taken by something else.
+                // Said outright, as the island's and the dock's are: left as
+                // made, the clicks never reached its page (2026-10-21).
+                let _ = win.set_ignore_cursor_events(false);
                 sh.own_window(&win);
             }
             Err(err) => sh.log(&format!("scout: could not make its window: {err}")),
@@ -500,6 +506,21 @@ fn apply(sh: &Arc<Shared>) {
         if want {
             if let Some((pos, size, _)) = rect(sh) {
                 lay(&win, pos, size);
+                // Onto a display of another scale, Windows sizes it again
+                // for that scale a moment later (as the island, #37): it
+                // came out 1100 x 620 for 1650 x 930 on a display at 150 %,
+                // off to one side (2026-10-21). Laid again once it has.
+                let again = win.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..3 {
+                        std::thread::sleep(Duration::from_millis(200));
+                        let now = again.outer_size().map(|s| (s.width as i32, s.height as i32)).unwrap_or(size);
+                        let at = again.outer_position().map(|p| (p.x, p.y)).unwrap_or(pos);
+                        if (now, at) != (size, pos) {
+                            lay(&again, pos, size);
+                        }
+                    }
+                });
             }
             let _ = win.show();
             push(sh);
@@ -517,9 +538,11 @@ pub fn show(sh: &Arc<Shared>, on: bool) {
 // Its key pressed: up, or away.
 pub fn toggle(sh: &Arc<Shared>) {
     if sh.setting("lol") == false {
+        sh.log("scout: its key pressed, the League helper off");
         return;
     }
     let on = !SHOWN.load(Ordering::SeqCst);
+    sh.log(&format!("scout: its key pressed, the panel {}", if on { "up" } else { "away" }));
     // Nothing of a game to show (none yet, or one that could not be looked
     // up): her own, looked up now.
     let has_ten = VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|v| v["state"] == "ready" && v["solo"] == "");
@@ -596,6 +619,7 @@ mod tests {
     #[test]
     fn keys_by_their_names() {
         assert_eq!(parse_key("Alt+`"), Some((1, 0xC0)));
+        assert_eq!(parse_key(DEFAULT_KEY), Some((1, b'X' as u32)));
         assert_eq!(parse_key("Ctrl+Shift+F9"), Some((6, 0x78)));
         assert_eq!(parse_key("alt+z"), Some((1, b'Z' as u32)));
         assert_eq!(parse_key("Alt+Nope"), None);
