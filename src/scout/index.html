@@ -4,15 +4,20 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data: https://raw.communitydragon.org; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      content="default-src 'self'; img-src 'self' data: asset: http://asset.localhost https://raw.communitydragon.org https://ddragon.leagueoflegends.com; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'"
     />
     <title>wakuwaku scout</title>
     <link rel="stylesheet" href="scout.css" />
   </head>
   <body>
     <div id="panel" hidden>
-      <header><span id="title"></span><span id="progress"></span><span id="hint"></span></header>
+      <header>
+        <div id="who"></div>
+        <span id="progress"></span>
+        <span id="hint"></span>
+      </header>
       <div id="say"></div>
+      <div id="profile" hidden></div>
       <div id="teams">
         <section class="team us"><h2 id="us"></h2><div class="rows"></div></section>
         <section class="team them"><h2 id="them"></h2><div class="rows"></div></section>
@@ -20,6 +25,7 @@
     </div>
     <script src="../pet/bridge.js"></script>
     <script src="../shared/i18n.js"></script>
+    <script src="../pet/sprite.js"></script>
     <script src="scout.js"></script>
   </body>
 </html>

@@ -1,13 +1,18 @@
-/* The game's ten (scout.js): two teams side by side, a row for each player. */
+/* The game's ten, and her own games (scout.js): a war room the four agents'
+   pets keep, each part in its agent's colour (--agent), its pet beside what
+   it says of it. */
 :root {
-  --bg: rgba(14, 16, 22, 0.97);
-  --fg: #eef0f4;
-  --muted: #9097a3;
-  --line: rgba(255, 255, 255, 0.08);
+  --bg: #0b1020;
+  --card: rgba(22, 30, 52, 0.92);
+  --card-2: rgba(30, 40, 68, 0.9);
+  --fg: #eef2fb;
+  --muted: #8d97b3;
+  --line: rgba(140, 160, 210, 0.14);
   --us: #4a9eff;
-  --them: #ff5a5a;
-  --good: #6fd38a;
-  --bad: #ff7a6b;
+  --them: #ff5a6a;
+  --good: #4fd88f;
+  --bad: #ff6b6b;
+  --gold: #e6c36a;
 }
 
 html,
@@ -28,33 +33,91 @@ body {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  padding: 14px 16px;
-  border-radius: 16px;
-  background: var(--bg);
-  border: 1px solid var(--line);
+  padding: 18px 20px;
+  border-radius: 20px;
+  background:
+    radial-gradient(900px 400px at 0% 0%, rgba(232, 115, 42, 0.13), transparent 60%),
+    radial-gradient(700px 400px at 100% 0%, rgba(217, 164, 65, 0.1), transparent 60%),
+    radial-gradient(900px 500px at 100% 100%, rgba(139, 124, 216, 0.14), transparent 60%),
+    radial-gradient(700px 500px at 0% 100%, rgba(74, 143, 231, 0.12), transparent 60%),
+    var(--bg);
+  border: 1px solid rgba(160, 180, 230, 0.18);
+}
+
+/* A faint grid, as on a board. */
+#panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+}
+
+#panel > * {
+  position: relative;
 }
 
 header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  gap: 16px;
+}
+
+#who {
+  display: flex;
+  align-items: center;
   gap: 14px;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 700;
 }
 
-#progress,
-#hint {
+.avatar {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--card-2) center / cover no-repeat;
+  box-shadow: 0 0 0 2px rgba(230, 195, 106, 0.6);
+}
+
+.avatar .lv {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  transform: translateX(-50%);
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: #1a2240;
+  border: 1px solid rgba(230, 195, 106, 0.6);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gold);
+}
+
+#who .sub {
+  display: block;
   font-size: 12px;
   font-weight: 400;
   color: var(--muted);
 }
 
+#progress,
+#hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 #hint {
   margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 #say {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   font-size: 14px;
   color: var(--muted);
 }
@@ -63,29 +126,447 @@ header {
   display: none;
 }
 
+/* --- Her own ----------------------------------------------------------------------- */
+
+#profile {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+#profile[hidden],
+#teams[hidden],
+.team[hidden],
+h2[hidden] {
+  display: none;
+}
+
+.card {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--agent) 16%, transparent), transparent 55%), var(--card);
+  border: 1px solid color-mix(in srgb, var(--agent) 35%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.card.wide {
+  grid-column: 1 / -1;
+}
+
+/* Its pet, and what it says. */
+.host {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.head {
+  flex: none;
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 2px var(--agent), 0 0 14px color-mix(in srgb, var(--agent) 55%, transparent);
+}
+
+.head .film {
+  position: absolute;
+  left: -2px;
+  top: 0;
+  width: calc(1536px / 4);
+  height: calc(var(--sheet-h) / 4);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+.head .letter {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: var(--agent);
+}
+
+.speech {
+  position: relative;
+  min-width: 0;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--agent) 20%, rgba(10, 14, 28, 0.85));
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.speech::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 6px solid transparent;
+  border-left: 0;
+  border-right-color: color-mix(in srgb, var(--agent) 20%, rgba(10, 14, 28, 0.85));
+}
+
+.speech b {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--agent);
+}
+
+/* Claude: the ranks. */
+.rank-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Riot's emblems sit small in a wide picture: drawn larger than their box. */
+.emblem {
+  flex: none;
+  width: 120px;
+  height: 120px;
+  background: center / 330% no-repeat;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5));
+}
+
+.emblem.small {
+  width: 48px;
+  height: 48px;
+  background-size: 330%;
+}
+
+.rank-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.tier {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.lp {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.bar {
+  position: relative;
+  height: 8px;
+  margin-top: 8px;
+  border-radius: 99px;
+  background: rgba(255, 107, 107, 0.55);
+  overflow: hidden;
+}
+
+.bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #36c27a, var(--good));
+}
+
+.wl {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.wl .w {
+  color: var(--good);
+}
+
+.wl .l {
+  color: var(--bad);
+}
+
+.flex-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.flex-row .q {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Grok: the tags, and the champions most played. */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+}
+
+.tag.hot {
+  color: #ffb35c;
+  border-color: rgba(255, 179, 92, 0.45);
+  background: rgba(255, 140, 50, 0.12);
+}
+
+.tag.gold {
+  color: var(--gold);
+  border-color: rgba(230, 195, 106, 0.5);
+  background: rgba(230, 195, 106, 0.1);
+}
+
+.tag.cold {
+  color: #8fb7ff;
+  border-color: rgba(143, 183, 255, 0.4);
+}
+
+.mains {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  padding: 8px 4px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.main .champ-icon {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 4px;
+  border-radius: 12px;
+}
+
+.main .n {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.main .pts {
+  font-size: 11px;
+  color: var(--gold);
+}
+
+/* Antigravity: where she plays. */
+.role {
+  display: grid;
+  grid-template-columns: 3.2em 1fr 3.4em 3.6em;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+  font-size: 12px;
+}
+
+.role .track {
+  height: 7px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.role .track i {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--agent);
+}
+
+.role .n {
+  color: var(--muted);
+  text-align: right;
+}
+
+.role .rate {
+  text-align: right;
+}
+
+.reading {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Codex: her games. */
+/* All ten, rolled with the wheel where they do not fit. */
+.games {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(139, 124, 216, 0.5) transparent;
+}
+
+.game {
+  display: grid;
+  grid-template-columns: 4px 34px 30px 5.4em 6.4em 1fr auto auto auto;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-height: 36px;
+  padding: 2px 12px 2px 0;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.game .edge {
+  align-self: stretch;
+  border-radius: 10px 0 0 10px;
+  background: var(--bad);
+}
+
+.game.won .edge {
+  background: var(--good);
+}
+
+.game.won {
+  background: linear-gradient(90deg, rgba(79, 216, 143, 0.12), rgba(0, 0, 0, 0.2) 40%);
+}
+
+.game.lost {
+  background: linear-gradient(90deg, rgba(255, 107, 107, 0.12), rgba(0, 0, 0, 0.2) 40%);
+}
+
+.champ-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06) center / cover no-repeat;
+}
+
+.loadout {
+  display: grid;
+  grid-template-columns: 14px 14px;
+  gap: 2px;
+}
+
+.loadout i,
+.items i,
+.ten i {
+  display: block;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06) center / cover no-repeat;
+}
+
+.loadout i {
+  width: 14px;
+  height: 14px;
+}
+
+.result b {
+  display: block;
+  font-size: 13px;
+}
+
+.won .result b {
+  color: var(--good);
+}
+
+.lost .result b {
+  color: var(--bad);
+}
+
+.result span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.kda b {
+  display: block;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+
+.kda span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.stats {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.items {
+  display: grid;
+  grid-template-columns: repeat(7, 22px);
+  gap: 3px;
+}
+
+.items i {
+  width: 22px;
+  height: 22px;
+}
+
+.ten {
+  display: grid;
+  grid-template-columns: repeat(5, 16px);
+  gap: 2px;
+}
+
+.ten i {
+  width: 16px;
+  height: 16px;
+}
+
+.ten i.me {
+  box-shadow: 0 0 0 1.5px var(--gold);
+}
+
+.ago {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+  min-width: 4.5em;
+}
+
+/* --- The game's ten ------------------------------------------------------------------ */
+
 #teams {
   flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
-  margin-top: 10px;
-}
-
-#teams.alone {
-  grid-template-columns: 1fr;
-}
-
-#teams[hidden] {
-  display: none;
-}
-
-.team[hidden] {
-  display: none;
+  margin-top: 14px;
 }
 
 .team h2 {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-size: 13px;
 }
 
@@ -108,8 +589,8 @@ header {
   grid-template-columns: 56px 1fr;
   gap: 10px;
   padding: 8px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  background: var(--card);
   border-left: 3px solid transparent;
 }
 
@@ -122,67 +603,7 @@ header {
 }
 
 .player.me {
-  background: rgba(74, 158, 255, 0.14);
-}
-
-.player.no-champ {
-  grid-template-columns: 1fr;
-}
-
-h2[hidden] {
-  display: none;
-}
-
-/* Her alone: her last games. */
-.games {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.game {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border-left: 3px solid var(--bad);
-  font-size: 13px;
-}
-
-.game.won {
-  border-left-color: var(--good);
-}
-
-.mini {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06) center / cover no-repeat;
-}
-
-.game .result {
-  font-weight: 700;
-  width: 1.5em;
-}
-
-.game.won .result {
-  color: var(--good);
-}
-
-.game.lost .result {
-  color: var(--bad);
-}
-
-.game .who {
-  flex: 1;
-  color: var(--muted);
-}
-
-.game .kda {
-  font-variant-numeric: tabular-nums;
+  background: rgba(74, 158, 255, 0.16);
 }
 
 .icon {
@@ -213,7 +634,7 @@ h2[hidden] {
   white-space: nowrap;
 }
 
-.rank {
+.player .rank {
   margin-left: auto;
   font-size: 12px;
   white-space: nowrap;

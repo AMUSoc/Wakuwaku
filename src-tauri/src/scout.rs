@@ -26,7 +26,7 @@ use crate::Shared;
 
 pub const LABEL: &str = "scout";
 // The panel, logical; kept inside the work area.
-const SIZE: (f64, f64) = (1100.0, 620.0);
+const SIZE: (f64, f64) = (1240.0, 800.0);
 // Of each player's games, how many are read.
 const GAMES: usize = 10;
 // A personal key's limits, kept a little under.
@@ -148,26 +148,44 @@ fn hosts(platform: &str) -> (String, String) {
 
 // --- What is made of what Riot says (pure: tested) ------------------------------------------------
 
-// A game as kept: who played what, and how it went for each. Remakes (under
-// five minutes) are none.
+// What a kept game holds; one kept with less (an older version) is read again.
+const KEPT: u64 = 2;
+
+// A game as kept: who played what, where, and how it went for each (their
+// kills, deaths, assists, minions, items, spells, keystone and second rune
+// tree, their part in their team's kills). Remakes (under five minutes) are none.
 pub fn trim_match(m: &Value) -> Option<Value> {
     let info = &m["info"];
     if info["gameDuration"].as_f64().unwrap_or(0.0) < 300.0 {
         return None;
     }
+    let kills = |team: &Value| info["teams"].as_array().into_iter().flatten().find(|t| t["teamId"] == *team).and_then(|t| t["objectives"]["champion"]["kills"].as_f64()).unwrap_or(0.0);
     let players: Vec<Value> = info["participants"]
         .as_array()?
         .iter()
-        .map(|p| json!({ "puuid": p["puuid"], "champion": p["championId"], "win": p["win"], "k": p["kills"], "d": p["deaths"], "a": p["assists"] }))
+        .map(|p| {
+            let n = |k: &str| p[k].as_u64().unwrap_or(0);
+            let team_kills = kills(&p["teamId"]);
+            let kp = p["challenges"]["killParticipation"].as_f64().unwrap_or_else(|| if team_kills > 0.0 { (n("kills") + n("assists")) as f64 / team_kills } else { 0.0 });
+            json!({
+                "puuid": p["puuid"], "champion": p["championId"], "team": p["teamId"], "pos": p["teamPosition"], "win": p["win"],
+                "k": p["kills"], "d": p["deaths"], "a": p["assists"], "cs": n("totalMinionsKilled") + n("neutralMinionsKilled"),
+                "items": (0..7).map(|i| n(&format!("item{i}"))).collect::<Vec<_>>(),
+                "spells": [n("summoner1Id"), n("summoner2Id")],
+                "keystone": p["perks"]["styles"][0]["selections"][0]["perk"], "sub": p["perks"]["styles"][1]["style"],
+                "kp": (kp * 100.0).round(), "level": p["champLevel"],
+            })
+        })
         .collect();
-    Some(json!({ "id": m["metadata"]["matchId"], "queue": info["queueId"], "end": info["gameEndTimestamp"], "players": players }))
+    Some(json!({ "v": KEPT, "id": m["metadata"]["matchId"], "queue": info["queueId"], "end": info["gameEndTimestamp"], "duration": info["gameDuration"], "players": players }))
 }
 
 // How one player's last games went: how many, won, their kills, deaths and
 // assists a game, on this champion how many and won, and the streak they are
 // on (+3 three won in a row, -2 two lost). games: as kept, the latest first.
 pub fn recent_of(puuid: &str, champion: u64, games: &[Value]) -> Value {
-    let mine: Vec<&Value> = games.iter().filter_map(|g| g["players"].as_array()?.iter().find(|p| p["puuid"] == puuid)).collect();
+    let both: Vec<(&Value, &Value)> = games.iter().filter_map(|g| Some((g, g["players"].as_array()?.iter().find(|p| p["puuid"] == puuid)?))).collect();
+    let mine: Vec<&Value> = both.iter().map(|(_, p)| *p).collect();
     if mine.is_empty() {
         return Value::Null;
     }
@@ -185,8 +203,47 @@ pub fn recent_of(puuid: &str, champion: u64, games: &[Value]) -> Value {
         "champGames": on.len(),
         "champWins": on.iter().filter(|p| won(p)).count(),
         "streak": if first { run } else { -run },
-        // Each game, the latest first: for her own panel (her alone).
-        "list": mine.iter().map(|p| json!({ "champion": p["champion"], "win": won(p), "k": p["k"], "d": p["d"], "a": p["a"] })).collect::<Vec<_>>(),
+        // Each game, the latest first: for her own panel (her alone): hers,
+        // the game's, and the ten's champions by team.
+        "list": both.iter().map(|(g, p)| {
+            let mut row = (*p).clone();
+            row.as_object_mut().map(|o| o.remove("puuid"));
+            row["win"] = json!(won(p));
+            for k in ["queue", "end", "duration"] {
+                row[k] = g[k].clone();
+            }
+            let side = |team: u64| g["players"].as_array().into_iter().flatten().filter(|q| q["team"].as_u64() == Some(team)).map(|q| q["champion"].clone()).collect::<Vec<_>>();
+            row["blue"] = json!(side(100));
+            row["red"] = json!(side(200));
+            row
+        }).collect::<Vec<_>>(),
+    })
+}
+
+// Where she plays in ranked Solo/Duo (420), by the games kept: each
+// position, how many and won, the most played first.
+pub fn roles_of(puuid: &str, games: &[Value]) -> Value {
+    let mut by: Vec<(String, u64, u64)> = Vec::new();
+    for g in games.iter().filter(|g| g["queue"] == 420) {
+        let Some(p) = g["players"].as_array().and_then(|ps| ps.iter().find(|p| p["puuid"] == puuid)) else { continue };
+        let pos = p["pos"].as_str().filter(|s| !s.is_empty()).unwrap_or("NONE").to_string();
+        let won = p["win"].as_bool().unwrap_or(false) as u64;
+        match by.iter_mut().find(|(r, _, _)| *r == pos) {
+            Some(row) => {
+                row.1 += 1;
+                row.2 += won;
+            }
+            None => by.push((pos, 1, won)),
+        }
+    }
+    by.sort_by(|a, b| b.1.cmp(&a.1));
+    Value::Array(by.into_iter().map(|(pos, games, wins)| json!({ "pos": pos, "games": games, "wins": wins })).collect())
+}
+
+// One queue's entry of league-v4's: tier, rank, points, won and lost; none, unranked.
+pub fn entry_of(entries: &Value, queue: &str) -> Value {
+    entries.as_array().into_iter().flatten().find(|e| e["queueType"] == queue).map_or(Value::Null, |e| {
+        json!({ "tier": e["tier"], "rank": e["rank"], "lp": e["leaguePoints"], "wins": e["wins"], "losses": e["losses"], "hot": e["hotStreak"], "veteran": e["veteran"] })
     })
 }
 
@@ -253,11 +310,11 @@ fn matches_dir(sh: &Shared) -> PathBuf {
 // A game, kept on disk or read once from Riot and kept.
 fn game(sh: &Shared, key: &str, regional: &str, id: &str) -> Option<Value> {
     let path = matches_dir(sh).join(format!("{}.json", id.replace(['/', '\\', '.'], "_")));
-    if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+    if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(|k| k["v"].as_u64() == Some(KEPT)) {
         return Some(kept);
     }
     let whole = riot(key, &format!("{regional}/lol/match/v5/matches/{id}")).ok()?;
-    let kept = trim_match(&whole).unwrap_or_else(|| json!({ "id": id, "remake": true, "players": [] }));
+    let kept = trim_match(&whole).unwrap_or_else(|| json!({ "v": KEPT, "id": id, "remake": true, "players": [] }));
     let _ = std::fs::create_dir_all(matches_dir(sh));
     let _ = std::fs::write(&path, kept.to_string());
     Some(kept)
@@ -286,6 +343,8 @@ pub fn on_game(sh: &Arc<Shared>, pid: Option<u32>) {
 // find (a practice tool or custom game, or no game at all), her alone.
 fn scout(sh: &Arc<Shared>, in_game: bool) {
     let key = sh.setting("riotApiKey").as_str().unwrap_or("").to_string();
+    // The icons' names and the champions' in her language, once (Data Dragon).
+    load_ddragon(&sh.lang());
     // Shown by itself only while the game loads: one already under way (she
     // started in the middle of it) is not covered over, the key brings it.
     // Told after the game's next look (lol.rs reads it each second), not before.
@@ -328,13 +387,8 @@ fn scout(sh: &Arc<Shared>, in_game: bool) {
     let (live, solo) = match live {
         Ok(v) => (v, ""),
         Err(Miss::Key) => return status(sh, "badkey"),
-        // None to find: her alone, on the champion she plays if she is in a
-        // game (the game's own list, by name in the client's language).
-        Err(_) => {
-            let champion = crate::lol::my_champion().and_then(|name| names.iter().find(|(_, n)| **n == name).map(|(id, _)| *id)).unwrap_or(0);
-            let me_alone = json!([{ "puuid": me, "riotId": my_name, "teamId": 100, "championId": champion }]);
-            (json!({ "participants": me_alone }), if crate::lol::in_game() { "nogame" } else { "outside" })
-        }
+        // None to find: her own (profile).
+        Err(_) => return profile(sh, &key, &host, &regional, &me, &my_name, &names),
     };
     let mut players: Vec<Player> = live["participants"]
         .as_array()
@@ -415,6 +469,146 @@ fn scout(sh: &Arc<Shared>, in_game: bool) {
     sh.log(&format!("scout: done, {} games read", kept.len()));
 }
 
+// Her own, where the game's ten cannot be found (a practice tool, a custom
+// game) or out of a game, as Porofessor's profile: her icon and level, both
+// ranked queues, her three most played champions by mastery, her last ten
+// games whole, and where she plays in Solo/Duo (its last 100 games, read on
+// in the background, kept on disk: the first look takes a couple of minutes,
+// the next only the new ones). Each part told by one of the agents' pets
+// (src/scout/).
+fn profile(sh: &Arc<Shared>, key: &str, host: &str, regional: &str, me: &str, my_name: &str, names: &HashMap<u64, String>) {
+    let why = if crate::lol::in_game() { "nogame" } else { "outside" };
+    let summoner = riot(key, &format!("{host}/lol/summoner/v4/summoners/by-puuid/{me}")).unwrap_or(Value::Null);
+    let entries = riot(key, &format!("{host}/lol/league/v4/entries/by-puuid/{me}")).unwrap_or(json!([]));
+    let top: Vec<Value> = riot(key, &format!("{host}/lol/champion-mastery/v4/champion-masteries/by-puuid/{me}/top?count=3"))
+        .ok()
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .map(|m| json!({ "champion": m["championId"], "level": m["championLevel"], "points": m["championPoints"] }))
+        .collect();
+    // In a game: the champion she plays (the game's own list, by name in the
+    // client's language), and her mastery of it.
+    let champion = crate::lol::my_champion().and_then(|name| names.iter().find(|(_, n)| **n == name).map(|(id, _)| *id));
+    let now = champion.map(|c| {
+        let m = riot(key, &format!("{host}/lol/champion-mastery/v4/champion-masteries/by-puuid/{me}/by-champion/{c}")).ok();
+        json!({ "champion": c, "level": m.as_ref().map_or(json!(0), |m| m["championLevel"].clone()), "points": m.as_ref().map_or(json!(0), |m| m["championPoints"].clone()) })
+    });
+    let mut view = json!({
+        "state": "ready", "solo": why, "key": key_name(sh), "names": names_json(names),
+        "profile": {
+            "name": my_name, "icon": summoner["profileIconId"], "level": summoner["summonerLevel"],
+            "solo": entry_of(&entries, "RANKED_SOLO_5x5"), "flex": entry_of(&entries, "RANKED_FLEX_SR"),
+            "top": top, "now": now, "recent": null, "roles": [], "rolesOf": 0, "rolesTotal": 0,
+        },
+    });
+    publish(sh, view.clone());
+    let ids = |query: &str| -> Vec<String> {
+        match riot(key, &format!("{regional}/lol/match/v5/matches/by-puuid/{me}/ids?start=0{query}")) {
+            Ok(Value::Array(ids)) => ids.iter().filter_map(|i| i.as_str().map(str::to_string)).collect(),
+            _ => Vec::new(),
+        }
+    };
+    let mut games = Vec::new();
+    for id in ids(&format!("&count={GAMES}")) {
+        if let Some(g) = game(sh, key, regional, &id) {
+            games.push(g);
+        }
+        view["profile"]["recent"] = recent_of(me, champion.unwrap_or(0), &games);
+        publish(sh, view.clone());
+    }
+    let solo_ids = ids("&queue=420&count=100");
+    view["profile"]["rolesTotal"] = json!(solo_ids.len());
+    let mut solo_games = Vec::new();
+    for (i, id) in solo_ids.iter().enumerate() {
+        // A game begun meanwhile: its ten first.
+        if why == "outside" && crate::lol::in_game() {
+            break;
+        }
+        if let Some(g) = game(sh, key, regional, id) {
+            solo_games.push(g);
+        }
+        if i % 10 == 9 || i + 1 == solo_ids.len() {
+            view["profile"]["roles"] = roles_of(me, &solo_games);
+            view["profile"]["rolesOf"] = json!(i + 1);
+            publish(sh, view.clone());
+        }
+    }
+    sh.log(&format!("scout: her own, {} games and {} of Solo/Duo read", games.len(), solo_games.len()));
+}
+
+fn names_json(names: &HashMap<u64, String>) -> Value {
+    Value::Object(names.iter().map(|(id, n)| (id.to_string(), json!(n))).collect())
+}
+
+// The icons the page draws with, by Riot's Data Dragon: its latest version,
+// the summoner spells' names by their ids, the runes' and rune trees' icon
+// paths by theirs, and the champions' names in her language: Taiwan's in
+// Traditional Chinese, whatever the client's (a Japanese client named them
+// in Japanese, 2026-10-21). Read once a run and language (load_ddragon, on
+// the scouting thread); none until then, or offline: the page draws
+// without them, the champions named as the client names them.
+static DDRAGON: Mutex<Option<Value>> = Mutex::new(None);
+
+fn ddragon_locale(lang: &str) -> &'static str {
+    match lang {
+        "zh-TW" => "zh_TW",
+        "zh" => "zh_CN",
+        _ => "en_US",
+    }
+}
+
+fn load_ddragon(lang: &str) {
+    let locale = ddragon_locale(lang);
+    if DDRAGON.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|d| d["locale"] == locale) {
+        return;
+    }
+    let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().new_agent();
+    let get = |url: &str| agent.get(url).call().ok()?.body_mut().read_json::<Value>().ok();
+    let base = "https://ddragon.leagueoflegends.com";
+    let Some(v) = get(&format!("{base}/api/versions.json")).and_then(|v| v[0].as_str().map(str::to_string)) else { return };
+    let spells: serde_json::Map<String, Value> = get(&format!("{base}/cdn/{v}/data/en_US/summoner.json"))
+        .and_then(|s| s["data"].as_object().cloned())
+        .unwrap_or_default()
+        .values()
+        .filter_map(|s| Some((s["key"].as_str()?.to_string(), json!(s["id"].as_str()?))))
+        .collect();
+    let mut perks = serde_json::Map::new();
+    for style in get(&format!("{base}/cdn/{v}/data/en_US/runesReforged.json")).and_then(|r| r.as_array().cloned()).unwrap_or_default() {
+        perks.insert(style["id"].to_string(), style["icon"].clone());
+        for rune in style["slots"].as_array().into_iter().flatten().flat_map(|s| s["runes"].as_array().cloned().unwrap_or_default()) {
+            perks.insert(rune["id"].to_string(), rune["icon"].clone());
+        }
+    }
+    let champions: serde_json::Map<String, Value> = get(&format!("{base}/cdn/{v}/data/{locale}/champion.json"))
+        .and_then(|c| c["data"].as_object().cloned())
+        .unwrap_or_default()
+        .values()
+        .filter_map(|c| Some((c["key"].as_str()?.to_string(), json!(c["name"].as_str()?))))
+        .collect();
+    *DDRAGON.lock().unwrap_or_else(|e| e.into_inner()) = Some(json!({ "v": v, "locale": locale, "spells": spells, "perks": perks, "champions": champions }));
+}
+
+// Each agent's pet, drawn beside the part it tells: its sheet and colour.
+fn pets_of(sh: &Shared) -> Value {
+    let settings = sh.settings.lock().unwrap().clone();
+    let found = crate::data::pets(&sh.dir);
+    Value::Object(
+        crate::data::AGENTS
+            .iter()
+            .map(|&agent| {
+                let pet = crate::data::pet_of(&settings, Some(agent), &found);
+                let view = json!({
+                    "sprite": pet.map(|p| crate::data::asset_url(&p.sheet)),
+                    "version": pet.map_or(2, |p| p.version),
+                    "color": pet.and_then(|p| p.color.clone()).unwrap_or_else(|| crate::data::agent_color(agent).to_string()),
+                });
+                (agent.to_string(), view)
+            })
+            .collect(),
+    )
+}
+
 // --- Its window ---------------------------------------------------------------------------------
 
 fn window(sh: &Shared) -> Option<WebviewWindow> {
@@ -489,6 +683,8 @@ fn push(sh: &Shared) {
         let mut view = view;
         view["lang"] = json!(sh.lang());
         view["key"] = json!(key_name(sh));
+        view["dd"] = DDRAGON.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or(Value::Null);
+        view["pets"] = pets_of(sh);
         let _ = sh.app.emit_to(LABEL, "scout:update", view);
     }
 }
@@ -637,11 +833,13 @@ mod tests {
         // A remake is none.
         assert_eq!(trim_match(&m("TW2_0", 200.0, 103, true, 0)), None);
         let kept = trim_match(&m("TW2_1", 1800.0, 103, true, 6)).unwrap();
-        assert_eq!(kept["players"][0], json!({ "puuid": "me", "champion": 103, "win": true, "k": 6, "d": 2, "a": 4 }));
+        let me = &kept["players"][0];
+        assert_eq!((me["puuid"].as_str(), me["champion"].as_u64(), me["win"].as_bool(), me["k"].as_u64(), me["d"].as_u64(), me["a"].as_u64()), (Some("me"), Some(103), Some(true), Some(6), Some(2), Some(4)));
+        assert_eq!(kept["v"], KEPT);
         // Latest first: two won, then a loss; twice on Ahri (103), both won.
         let games: Vec<Value> = [m("a", 1800.0, 103, true, 6), m("b", 1800.0, 103, true, 4), m("c", 1800.0, 64, false, 2)].iter().filter_map(trim_match).collect();
         let mut r = recent_of("me", 103, &games);
-        assert_eq!(r["list"][2], json!({ "champion": 64, "win": false, "k": 2, "d": 2, "a": 4 }));
+        assert_eq!((r["list"][2]["champion"].as_u64(), r["list"][2]["win"].as_bool(), r["list"][2]["queue"].as_u64()), (Some(64), Some(false), Some(420)));
         r.as_object_mut().unwrap().remove("list");
         assert_eq!(r, json!({ "games": 3, "wins": 2, "k": 4.0, "d": 2.0, "a": 4.0, "champGames": 2, "champWins": 2, "streak": 2 }));
         assert_eq!(recent_of("foe", 1, &games)["streak"], -2);
