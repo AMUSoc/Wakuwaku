@@ -27,6 +27,8 @@
 //                  scripts.rs the plugins she runs for you
 //   tokens.rs      today's tokens, from Claude Code's, Codex's and Antigravity's own records
 //   crash.rs       crash reports, and her guard; updates.rs her updates
+// The defaults (data.rs) are one json! long enough to need more than 128.
+#![recursion_limit = "256"]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod asks;
@@ -61,6 +63,7 @@ mod proxy;
 mod reply;
 mod run;
 mod screen;
+mod scout;
 mod scripts;
 mod server;
 mod settings;
@@ -847,6 +850,10 @@ fn agent_of(window: &WebviewWindow) -> String {
 #[tauri::command]
 async fn pet_ready(app: AppHandle, window: WebviewWindow) {
     let sh = shared(&app);
+    if window.label() == scout::LABEL {
+        scout::ready(&sh);
+        return;
+    }
     if is_dock(&window) {
         dock::ready(&sh);
         dock::push_asks(&sh);
@@ -1442,6 +1449,8 @@ fn main() {
             crash::start(&sh);
             // A League of Legends game: what the pets show of it (lol.rs).
             lol::start(&sh);
+            // The game's ten, on a key (scout.rs).
+            scout::listen_key(&sh);
 
             // The mouse: click-through, her eyes, drags; for both windows.
             // Quiet (nobody touching it), looked at once a second.

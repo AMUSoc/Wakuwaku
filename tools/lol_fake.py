@@ -20,7 +20,9 @@ Game Client API), the events in the shape of Riot's sample
 It stands for the League client's own API too (WAKUWAKU_LCU_URL: gameflow
 phase, current summoner, region, lobby, champion select: a duo in ranked
 Solo/Duo, the other three hidden) and Riot's (WAKUWAKU_RIOT_API_URL:
-league-v4 entries by PUUID, the key checked).
+league-v4 entries by PUUID, the key checked; for the game's ten, scout.rs:
+spectator-v5, champion-mastery-v4, match-v5 ids and games, and the
+client's champion names).
 Standard library only.
 """
 import argparse
@@ -84,6 +86,22 @@ RANKS = {
 }
 LOOKED_UP = []
 
+# The game's ten as spectator-v5 has them, and a few games each.
+CHAMPS = {103: '阿璃', 86: '蓋倫', 64: '李星', 222: '吉茵珂絲', 117: '露露', 122: '達瑞斯', 104: '格雷夫', 238: '劫', 51: '凱特琳', 412: '瑟雷西'}
+TEN = [('puuid-me', 'Me#TW1', 100, 103), ('puuid-duo', 'Duo#TW1', 100, 117), ('puuid-top', 'Top#TW1', 100, 86),
+       ('puuid-jg', 'Jg#TW1', 100, 64), ('puuid-adc', 'Adc#TW1', 100, 222), ('puuid-f1', 'Foe1#KR1', 200, 122),
+       ('puuid-f2', 'Foe2#KR1', 200, 104), ('puuid-f3', 'Foe3#KR1', 200, 238), ('puuid-f4', 'Foe4#KR1', 200, 51),
+       ('puuid-f5', 'Foe5#KR1', 200, 412)]
+for i, (puuid, _, team, _) in enumerate(TEN):
+    if puuid not in RANKS and i % 3:
+        RANKS[puuid] = [{'queueType': 'RANKED_SOLO_5x5', 'tier': ['SILVER', 'GOLD', 'PLATINUM', 'EMERALD'][i % 4], 'rank': 'III', 'leaguePoints': 10 * i, 'wins': 20 + i, 'losses': 18}]
+
+
+def match(puuid, champ, n):
+    win = (n + len(puuid)) % 3 != 0
+    return {'metadata': {'matchId': f'TW2_{puuid}_{n}'}, 'info': {'gameDuration': 1700, 'queueId': 420, 'gameEndTimestamp': 1000 - n, 'participants': [
+        {'puuid': puuid, 'championId': champ if n % 2 == 0 else 1, 'win': win, 'kills': n % 7, 'deaths': 3, 'assists': 5}]}}
+
 
 def clock():
     return STATE['at'] + (time.time() - STATE['start'])
@@ -128,6 +146,25 @@ class Handler(BaseHTTPRequestHandler):
                 puuid = path.rsplit('/', 1)[1]
                 LOOKED_UP.append(puuid)
                 return self.send(RANKS.get(puuid, []))
+            if path.startswith('/lol/spectator/v5/active-games/by-summoner/'):
+                if CLIENT['phase'] != 'InProgress':
+                    return self.send({'status': {'status_code': 404}}, 404)
+                return self.send({'gameId': 1, 'gameQueueConfigId': 420, 'participants': [
+                    {'puuid': p, 'riotId': n, 'teamId': t, 'championId': c} for p, n, t, c in TEN]})
+            if path.startswith('/lol/champion-mastery/v4/champion-masteries/by-puuid/'):
+                puuid = path.split('/')[6]
+                if puuid == 'puuid-adc':
+                    return self.send({'status': {'status_code': 404}}, 404)
+                return self.send({'championLevel': 7 + len(puuid) % 3, 'championPoints': 12345 * len(puuid)})
+            if path.startswith('/lol/match/v5/matches/by-puuid/'):
+                puuid = path.split('/')[6]
+                return self.send([f'TW2_{puuid}_{n}' for n in range(10)])
+            if path.startswith('/lol/match/v5/matches/'):
+                _, puuid, n = path.rsplit('/', 1)[1].rsplit('_', 2)
+                champ = next(c for p, _, _, c in TEN if p == puuid)
+                return self.send(match(puuid, champ, int(n)))
+            if path == '/lol-game-data/assets/v1/champion-summary.json':
+                return self.send([{'id': k, 'name': v} for k, v in CHAMPS.items()])
             if path == '/fake/looked-up':
                 return self.send(LOOKED_UP)
         self.send({'error': 'not found'}, 404)

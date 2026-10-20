@@ -141,6 +141,8 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "scale" => v.as_f64().is_some_and(|s| data::SCALES.iter().any(|(_, x)| (x - s).abs() < 1e-9)),
         "details" | "walk" | "look" | "sound" | "dnd" | "dock" | "hideInFullscreen" | "lol" | "onboarded" | "out" | "settingsPin" | "settingsTop" | "oledShift" | "autoUpdateCheck" => is_bool,
         // Where an update is downloaded from first (updates.rs gitee_first).
+        // The key for the game's ten (scout.rs): one it can take.
+        "scoutKey" => v.as_str().is_some_and(|k| k.len() <= 30 && crate::scout::parse_key(k).is_some()),
         "updateFrom" => matches!(v.as_str(), Some("auto" | "github" | "gitee")),
         // Crash reports sent by themselves, never, or asked about (crash.rs).
         "crashReports" => matches!(v.as_str(), Some("auto" | "off" | "ask")),

@@ -26,6 +26,7 @@ cd .. && node --test "test/*.test.js"   # 頁面的單元測試（i18n、注視�
 ```
 src/pet/           頁面：她的視窗（?role=pet）和島（?role=island）共用 index.html
 src/dock/          右邊的直立島（dock.rs）：dock.js、dock.css，共用 src/pet/ 的 bridge、sprite、status
+src/scout/         本局十人的面板（scout.rs）
 src/mobile/        手機頁（mobile.rs 用 include_str! 編進 exe）：app.js、style.css、manifest、service worker
 src/shared/qr.js   設定頁的 QR code（byte 模式、糾錯 M、版本 1–10）
 src/shared/i18n.js 簡中（zh）、繁中（zh-TW，預設語言）、英文字串（Rust 端少數字串在 src-tauri/src/i18n.rs）；新字串照 docs/zh-TW-glossary.md 翻
@@ -62,6 +63,7 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 - `launch.rs`：從桌寵開新對話：單擊（那個 agent 沒有工作階段時，或設定 `clickAction` 為 `terminal`）或右鍵「開新對話」用 Windows Terminal 開新分頁在專案資料夾（設定 `agentDirs`，沒設用家目錄）執行 `claude` / `codex` / `grok` / `agy`；右鍵「開網頁版」用預設瀏覽器開各家網站。
 - `lol.rs`、`lcu.rs`：英雄聯盟對局助手。只讀 Riot 官方介面（Live Client Data API、客戶端 LCU、用個人金鑰的 Riot API），對局中各隻桌寵分工顯示（claude 時間、grok 目標倒數和我方召喚師技能、codex 對方關鍵裝備和自己的數據、選角時自己和組隊隊友的段位），只說中性事實、不做敵方計時（Riot 政策）。細節見 `docs/DEVELOPMENT.md` 的「英雄联盟对局助手」。
 - `keep.rs`：重開後記得工作階段：每 10 秒和退出時寫 `sessions.json`，啟動時讀回（行程不在的丟掉）；Grok 另從 `~/.grok/active_sessions.json` 和它的日誌補回開著的工作階段。
+- `scout.rs`：本局十人（像 Porofessor）：對局載入時用 Riot API（spectator、段位、熟練度、最近戰績）查十個人，畫面中間的面板顯示，`Alt+`` 叫出／收起；所有 Riot API 請求在這裡排隊守次數限制。頁面在 `src/scout/`。細節見 `docs/DEVELOPMENT.md` 的「本局十人」。
 - `jump.rs`：點會話跳到它的視窗（行程鏈、找視窗、叫到前面、Claude 桌面版的會話連結）。
 - `widgets.rs`（島上的外掛：腳本送來的、內建的今天 / token / 監控）、`scripts.rs`（她代跑的外掛腳本）、`tokens.rs`（讀三種 agent 自己的紀錄算今天的 token）。
 - `tray.rs`（系統匣圖示與選單）、`notify.rs`（toast 通知）、`updates.rs`（自動更新）、`crash.rs`、`crash/`（當機報告，含守護程序 `guard` / `spawn_guard`）、`proxy.rs`（Windows 系統代理，當機報告送中繼時用）、`power.rs`（省電、EcoQoS）、`gpu.rs`（WebView2 用哪張顯卡）、`detach.rs`（以檔案總管為父行程啟動自己，脫離 agent 的 job）、`fetch.rs`（codex-pets.net 下載寵物）、`i18n.rs`。

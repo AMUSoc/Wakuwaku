@@ -447,8 +447,14 @@ pub fn start(sh: &Arc<Shared>) {
                 std::thread::sleep(Duration::from_secs(5));
                 continue;
             }
+            // The game's ten looked up as it loads, once a game (scout.rs).
+            crate::scout::on_game(&sh, pid_of(GAME_EXE));
             match read(&agent, &base, &mut reading) {
                 Some(game) => {
+                    // Loaded and under way: the panel of the ten goes.
+                    if reading.nth == 0 {
+                        crate::scout::on_game_started(&sh);
+                    }
                     misses = 0;
                     reading.nth += 1;
                     set(&sh, Some(game));

@@ -157,12 +157,25 @@ fn local() -> ureq::Agent {
         .new_agent()
 }
 
-fn remote() -> ureq::Agent {
-    ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().new_agent()
-}
-
 fn lcu(agent: &ureq::Agent, (base, auth): &(String, String), path: &str) -> Option<Value> {
     agent.get(&format!("{base}{path}")).header("Authorization", auth.as_str()).call().ok()?.body_mut().read_json::<Value>().ok()
+}
+
+// Who she is (her PUUID), her platform on Riot's API, and the champions'
+// names in the client's language (its game data: id to name): for the
+// game's ten (scout.rs). None without the client.
+pub fn me_platform_names() -> Option<(String, &'static str, HashMap<u64, String>)> {
+    let c = client()?;
+    let agent = local();
+    let me = lcu(&agent, &c, "/lol-summoner/v1/current-summoner")?["puuid"].as_str()?.to_string();
+    let platform = lcu(&agent, &c, "/riotclient/region-locale").and_then(|r| r["region"].as_str().and_then(platform_of))?;
+    let names = lcu(&agent, &c, "/lol-game-data/assets/v1/champion-summary.json")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| Some((c["id"].as_u64()?, c["name"].as_str()?.to_string())))
+        .collect();
+    Some((me, platform, names))
 }
 
 // What is kept from one look to the next: her party, and the ranks found.
@@ -248,7 +261,8 @@ fn ranks(key: &str, platform: Option<&str>, puuid: &str) -> Option<Value> {
         Ok(url) => url,
         Err(_) => format!("https://{}.api.riotgames.com", platform?),
     };
-    remote().get(&format!("{base}/lol/league/v4/entries/by-puuid/{puuid}")).header("X-Riot-Token", key).call().ok()?.body_mut().read_json::<Value>().ok()
+    // In turn with the game's ten (scout.rs): the same key's limits.
+    crate::scout::riot(key, &format!("{base}/lol/league/v4/entries/by-puuid/{puuid}")).ok()
 }
 
 #[cfg(test)]

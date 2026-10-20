@@ -447,6 +447,16 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 - **设置**：「通用」页「英雄联盟对局助手」开关（`lol`）、「Riot API 金钥」（`riotApiKey`，只送 Riot API，不进日志和崩溃报告）。
 - **测试**：`tools/lol_fake.py` 假装 Live Client、LCU 和 Riot API（`WAKUWAKU_LOL_URL`、`WAKUWAKU_LCU_URL`、`WAKUWAKU_RIOT_API_URL`），可以加事件、改时间、换装备、换 phase；`src-tauri/fixtures/lol/events.json` 是 Riot 官方的事件样本（时间都是 0，测试里另给时间）。2026-10-16 第一场真实对局（日文客户端）测出：维尔戈附身被当成买装、`position` 为 `NONE` 时显示出键名、技能名是客户端的日文，都已改；台服用语（预示者、巴龙、长老龙，在 zh-TW 里）。
 
+## 本局十人（scout.rs、src/scout/）
+
+像 Porofessor 那样：对局载入时，画面中间一块面板，左边我方、右边对方，每人一行：英雄图示和名字（客户端的英雄清单 `/lol-game-data/assets/v1/champion-summary.json`，跟客户端语言；图示走 CommunityDragon `raw.communitydragon.org`）、Riot ID、段位和这季胜败（league-v4，单双排没有就看弹性）、这只英雄的熟练度（champion-mastery-v4，没有就写「第一次玩这只」）、最近 10 场（match-v5）的胜场、平均 KDA、这只英雄几场几胜、3 连胜／连败以上。
+
+- **谁在这局**：spectator-v5 `active-games/by-summoner/{自己的 PUUID}`（PUUID 和平台从 LCU 拿），游戏载入后才有（刚开始载入可能还没有：每 5 秒再问，最多 12 次）。选英雄阶段被隐藏的队友不查（Riot 政策），载入后十个人是游戏自己公开的。
+- **次数限制**：个人金钥每 2 分钟 100 次、每秒 20 次。所有 Riot API 请求（包括选英雄时 `lcu.rs` 查段位）都经过 `scout::riot` 排队（2 分钟 95 次、每秒 18 次），429 等 10 秒再试。顺序：spectator 1 次 → 十人段位和熟练度 20 次（几秒内出来）→ 十人的场次清单 10 次 → 每场细节，一轮一人一场，大家都先有几场。全部约 131 次，第 95 次之后要等到 2 分钟的窗口过去，所以最近战绩全部读完要两分多钟，面板标题旁显示「读最近战绩 n/总数」。读过的对局只留需要的栏位（谁、英雄、胜负、K/D/A），存在资料目录的 `lol/matches/`，同一场里的人共用，不再问第二次；不到 5 分钟的重开局不算。
+- **显示**：视窗 `scout`（已列进 capabilities），放在岛所在那块屏的正中间，1100×620（不超过工作区），所有点击都穿透、不拿焦点，不挡游戏。游戏行程一出现（载入画面）就开始查并显示；Live Client 读得到（载入完、进到游戏）就自动收起。之后按 `Alt+``（设置 `scoutKey`，启动时读，`RegisterHotKey`，被别的程序占用会写进日志）收起／叫出，对局结束后还看得到上一局。没有金钥、金钥无效（401/403，开发金钥 24 小时过期）、查不到这局（自订、练习）、没开客户端，面板上都会直接说。
+- **测试**：`tools/lol_fake.py` 加了 spectator、熟练度、场次清单、对局、英雄清单；`/fake/phase {"phase":"InProgress"}` 之后 spectator 才有这局。2026-10-20 用假的跑过：十人、段位、熟练度、第一次玩、战绩依次出来，`Alt+`` 叫出／收起正常。`WAKUWAKU_SCOUT_AS=<某人的 PUUID>` 把台服别人正在进行的对局当成自己的来查（不用开客户端，英雄名因此是空的），配合 `WAKUWAKU_LOL_URL` 指向假的 Live Client。
+- **真金钥实测**（2026-10-20，开发金钥）：台服的 spectator、段位、熟练度、`sea` 的场次和对局都通；一场 8 人有 puuid 的对局读了 54 场，约 75 秒（另一个查询同时用着额度，碰到 429 等过）；面板上段位、胜率、熟练度、最近战绩、连胜连败都对。踩到的：新产生的金钥要 30 秒到两分钟才在所有服务器生效，期间同一个请求时而 401 `Unknown apikey`、时而 403、时而 200；Riot 挡 Python `urllib` 的默认 User-Agent（403），curl、ureq 不受影响，用 Python 测要自己设 User-Agent。
+
 ## 手机页（mobile.rs、src/mobile/）
 
 `/mobile/` 是给手机看的单页：四个 agent 各一张卡（宠物的图集照 mood 播 `sprite.js` 的 `MOOD_CLIP` 那一行，半尺寸；`status.js` 说会话在做什么；做完／改好／出错时显示 `reply`），有确认在等时最上面是面板，按钮走和宠物一样的 `Shared::answer`（原来 `pet_answer` 的内容）。页面每 2 秒问 `api/state` 和 `api/asks`，页面藏着时不问。`i18n.js`、`status.js`、`sprite.js` 和页面自己的文件都用 `include_str!` 编进 exe，由 `mobile.rs` 直接回（不经 Tauri）。

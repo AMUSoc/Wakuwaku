@@ -126,6 +126,8 @@ fn defaults() -> Map<String, Value> {
         // Riot API key, for her rank and her party's in champion select (lcu.rs).
         "lol": true,
         "riotApiKey": "",
+        // The key that brings up the game's ten (scout.rs): read as she starts.
+        "scoutKey": "Alt+`",
         // The phone's page from elsewhere (mobile.rs): off, or listened for
         // at Tailscale's address ("tailscale"), at 0.0.0.0, or at one set;
         // asked for with this token (made as she first starts). Its address

@@ -1,0 +1,172 @@
+/* The game's ten (scout.js): two teams side by side, a row for each player. */
+:root {
+  --bg: rgba(14, 16, 22, 0.97);
+  --fg: #eef0f4;
+  --muted: #9097a3;
+  --line: rgba(255, 255, 255, 0.08);
+  --us: #4a9eff;
+  --them: #ff5a5a;
+  --good: #6fd38a;
+  --bad: #ff7a6b;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  font-family: 'Microsoft JhengHei UI', 'Microsoft YaHei UI', 'PingFang TC', system-ui, sans-serif;
+  color: var(--fg);
+}
+
+#panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+#progress,
+#hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+#hint {
+  margin-left: auto;
+}
+
+#say {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+#say:empty {
+  display: none;
+}
+
+#teams {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+#teams[hidden] {
+  display: none;
+}
+
+.team h2 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.us h2 {
+  color: var(--us);
+}
+
+.them h2 {
+  color: var(--them);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.player {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid transparent;
+}
+
+.us .player {
+  border-left-color: var(--us);
+}
+
+.them .player {
+  border-left-color: var(--them);
+}
+
+.player.me {
+  background: rgba(74, 158, 255, 0.14);
+}
+
+.icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06) center / cover no-repeat;
+}
+
+.top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.champ {
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.name {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank {
+  margin-left: auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.line {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.good {
+  color: var(--good);
+}
+
+.bad {
+  color: var(--bad);
+}
+
+.wait {
+  opacity: 0.5;
+}
