@@ -1,8 +1,8 @@
 // A game reviewed by the four agents (the game's ten panel, scout.rs): on
 // the person's word only, once for each agent asked (a game reviewed is
-// kept and shown again, never run again), each in its own part and no more
-// than 300 characters, and none of them answering another: no review goes
-// on and on.
+// kept and shown again, never run again), each in its own part, three
+// points in a hundred characters at most (cut to that if longer), and none
+// of them answering another: no review goes on and on.
 //
 // She sums the game up herself (summary_of: the game kept, its timeline):
 // the agents get a page of facts and no tools to fetch more with, so each
@@ -25,11 +25,14 @@ use serde_json::{json, Value};
 
 use crate::Shared;
 
-const LIMIT: usize = 300;
+// Short: three points, a line each, a hundred characters in all. Asked
+// for 300, they wrote 500 to 700, a paper to read every game (2026-10-21).
+const LIMIT: usize = 100;
+const POINTS: usize = 3;
+// A line kept no longer than this, whatever was written.
+const LINE_CHARS: usize = 45;
 // Grok takes longest (a minute for a short page, 2026-10-21).
 const TIMEOUT: Duration = Duration::from_secs(360);
-// What is kept of an answer, at most (it was asked for 300).
-const KEPT_CHARS: usize = 900;
 
 // The reviews under way: (game, agent).
 static RUNNING: Mutex<Option<HashSet<(String, String)>>> = Mutex::new(None);
@@ -45,6 +48,19 @@ fn path(sh: &Shared, id: &str) -> PathBuf {
 // The reviews of a game as they are: { agent: { state: running | done | failed, text } }.
 pub fn status(sh: &Shared, id: &str) -> Value {
     std::fs::read_to_string(path(sh, id)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}))
+}
+
+// As shown: one kept from before they were short, short too.
+pub fn shown(sh: &Shared, id: &str) -> Value {
+    let mut all = status(sh, id);
+    if let Some(all) = all.as_object_mut() {
+        for review in all.values_mut() {
+            if let Some(text) = review["text"].as_str().map(short) {
+                review["text"] = json!(text);
+            }
+        }
+    }
+    all
 }
 
 fn set(sh: &Shared, id: &str, agent: &str, state: Value) {
@@ -174,15 +190,16 @@ pub fn summary_of(game: &Value, timeline: &Value, who: &str, names: &dyn Fn(u64)
 // What each is asked: its part, and the rules (no tools, the limit).
 pub fn prompt_of(agent: &str, summary: &str) -> String {
     let part = match agent {
-        "claude" => "你負責「總評」：找出這場輸贏的 2～3 個關鍵轉折，說清楚發生了什麼、該怎麼做會更好。",
-        "codex" => "你負責「數字」：看補兵、經濟、傷害、出裝時間，指出哪個數字最拖累或最幫助這場，給一個具體的改進目標。",
-        "agy" => "你負責「時間軸」：看陣亡的時間、地點和小龍巴龍的時機，指出最該避免的死亡和錯過的機會。",
-        _ => "你負責「對線和出裝」：看對線對手和出裝順序，說對線哪裡吃虧或佔便宜，出裝有沒有更合適的選擇。",
+        "claude" => "你負責「總評」：這場輸贏的關鍵轉折。",
+        "codex" => "你負責「數字」：最拖累或最幫助這場的數字，和一個具體目標。",
+        "agy" => "你負責「時間軸」：最該避免的死亡和錯過的機會。",
+        _ => "你負責「對線和出裝」：對線哪裡吃虧或佔便宜，出裝哪裡可以更好。",
     };
     format!(
         "你是英雄聯盟教練，正在和另外三位教練一起檢討玩家「我」的一場對局，每人負責一塊。{part}\n\
-         規則：只根據下面的資料回答，不要使用任何工具、不要讀寫檔案、不要上網；用繁體中文和台灣的遊戲用語；\
-         {LIMIT} 字以內，直接講重點，不要開場白、不要重複資料。\n\n=== 對局資料 ===\n{summary}"
+         規則：只根據下面的資料回答，不要使用任何工具、不要讀寫檔案、不要上網；用繁體中文和台灣的遊戲用語。\n\
+         格式：最多 {POINTS} 行，每行一個重點、一句話，全部加起來 {LIMIT} 字以內。\
+         不要開場白、不要小標題、不要粗體、不要重複資料、不要解釋理由。\n\n=== 對局資料 ===\n{summary}"
     )
 }
 
@@ -255,7 +272,27 @@ fn run(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, St
     if !ok {
         return Err(text.lines().next().unwrap_or("").chars().take(120).collect());
     }
-    Ok(text.chars().take(KEPT_CHARS).collect())
+    Ok(short(text))
+}
+
+// What is shown, whatever was written: its first three lines with words,
+// marks of lists and bold taken off, each cut to a line's length.
+pub fn short(text: &str) -> String {
+    text.lines()
+        .map(|l| l.trim().trim_start_matches(['-', '*', '•', '·', ' ']).replace("**", ""))
+        .map(|l| {
+            // A list's number ("1. ") off as well.
+            let digits = l.chars().take_while(|c| c.is_ascii_digit()).count();
+            match l[digits..].chars().next() {
+                Some('.' | '、' | ')') if digits > 0 => l[digits..].chars().skip(1).collect::<String>().trim().to_string(),
+                _ => l,
+            }
+        })
+        .filter(|l| !l.is_empty())
+        .take(POINTS)
+        .map(|l| if l.chars().count() > LINE_CHARS { format!("{}…", l.chars().take(LINE_CHARS).collect::<String>()) } else { l })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // The game reviewed by these agents, those not yet asked (or that failed):
@@ -297,7 +334,7 @@ pub fn start(sh: &Arc<Shared>, id: &str, who: &str, agents: &[String]) -> Value 
             RUNNING.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashSet::new).remove(&(id, agent));
         });
     }
-    status(sh, id)
+    shown(sh, id)
 }
 
 #[cfg(test)]
@@ -340,6 +377,14 @@ mod tests {
         assert!(s.contains("最後的裝備：無盡之刃、裝備1055"));
         assert!(!s.contains("2003"));
         assert!(s.contains("我方拿小龍"));
-        assert!(prompt_of("codex", &s).contains("300 字以內"));
+        assert!(prompt_of("codex", &s).contains("100 字以內"));
+    }
+
+    #[test]
+    fn what_is_shown_is_short_whatever_was_written() {
+        let long = "**轉折一：前期蟲子全丟**\n\n1. 8 分多敵方連拿三隻虛空蟲\n- 25:23 你單獨進敵方野區被抓\n3. 31:59 巴龍翻盤\n4. 第四點不要";
+        assert_eq!(short(long), "轉折一：前期蟲子全丟\n8 分多敵方連拿三隻虛空蟲\n25:23 你單獨進敵方野區被抓");
+        let one = "很".repeat(60);
+        assert_eq!(short(&one).chars().count(), LINE_CHARS + 1);
     }
 }

@@ -971,7 +971,7 @@ async fn scout_review_start(app: AppHandle, id: String, who: String, agents: Vec
 // A game's reviews as they are (review.rs).
 #[tauri::command]
 async fn scout_review(app: AppHandle, id: String) -> Value {
-    review::status(&shared(&app), &id)
+    review::shown(&shared(&app), &id)
 }
 
 // The game's ten put away by its close button (scout.rs).
