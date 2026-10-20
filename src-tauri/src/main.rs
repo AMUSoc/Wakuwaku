@@ -47,6 +47,7 @@ mod gpu;
 mod i18n;
 mod island;
 mod jump;
+mod keep;
 mod launch;
 mod lcu;
 mod lol;
@@ -712,6 +713,8 @@ impl Shared {
             return;
         }
         self.log("quitting");
+        // Her sessions kept for when she is up again (keep.rs).
+        keep::save(self);
         let watched = self.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(8));
@@ -1415,6 +1418,8 @@ fn main() {
             app.manage(sh.clone());
             sh.log(&format!("up on port {}, data in {}", sh.port, sh.dir.display()));
             sh.log(&format!("displays: {}", sh.screens().describe()));
+            // The sessions from before she restarted, and Grok's open ones (keep.rs).
+            keep::restore(&sh);
 
             // The pets out on the desktop: their windows (the others' are
             // made as they are let out).
@@ -1565,6 +1570,8 @@ fn main() {
                         let hide = ticker.idle_hide_ms();
                         let mut changed = ticker.pet.lock().unwrap().tick(now, hold);
                         if n % 120 == 0 {
+                            // A Grok turn still under way by its own log is not stale (keep.rs).
+                            keep::keep_grok_busy(&ticker);
                             changed |= ticker.pet.lock().unwrap().check_stale(now, hold);
                         }
                         changed |= ticker.pet.lock().unwrap().hide_quiet(now, hide);
@@ -1581,6 +1588,10 @@ fn main() {
                             }
                             ticker.push_asks();
                         }
+                    }
+                    // Her sessions to disk every 10 s, when they changed (keep.rs).
+                    if n % 20 == 0 {
+                        keep::save(&ticker);
                     }
                     if n % 4 == 0 {
                         let screens = screen::read(&ticker.app);

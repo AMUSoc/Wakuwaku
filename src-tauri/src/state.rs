@@ -32,6 +32,7 @@
 // tick() settles the endings that only stay a while.
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::jump;
@@ -122,12 +123,14 @@ pub struct Outcome {
 }
 
 // A tool running now, and what it does.
+#[derive(Serialize, Deserialize)]
 struct Running {
     id: String,
     step: Value,
     since: u64,
 }
 
+#[derive(Serialize, Deserialize)]
 struct Todo {
     id: String,
     text: String,
@@ -135,6 +138,10 @@ struct Todo {
     status: String,
 }
 
+// Kept on disk as she quits or restarts, and read back as she starts
+// (Pet::snapshot, restore): what was missing filled in as new.
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
 struct Session {
     id: String,
     project: String,
@@ -178,6 +185,12 @@ struct Session {
     event_at: u64,
     seen_at: Option<u64>,
     hidden: bool,
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Session::new(String::new(), 0)
+    }
 }
 
 impl Session {
@@ -622,6 +635,54 @@ impl Pet {
             }
         }
         changed
+    }
+
+    // Every session, for the disk (sessions.json): she restarted (a new
+    // version, a crash) forgot them all, and one that sent nothing since (a
+    // Grok turn waiting on a task of its own, 2026-10-20) was gone from her
+    // until its next event.
+    pub fn snapshot(&self) -> Value {
+        Value::Array(self.sessions.values().filter_map(|s| serde_json::to_value(s).ok()).collect())
+    }
+
+    // The sessions kept, read back as she starts: those whose agent's
+    // process is gone (alive says, of the first in its chain) or that are
+    // older than she would remember are dropped; the rest go on as they were,
+    // and check_stale settles them as it would have. Returns how many came back.
+    pub fn restore(&mut self, kept: &Value, now: u64, alive: impl Fn(u32, u64) -> bool) -> usize {
+        let Some(all) = kept.as_array() else { return 0 };
+        let mut n = 0;
+        for v in all {
+            let Ok(s) = serde_json::from_value::<Session>(v.clone()) else { continue };
+            let is_gone = s.chain.first().is_some_and(|&(pid, at)| !alive(pid, at));
+            if s.id.is_empty() || is_gone || now.saturating_sub(s.at) > FORGET_MS || self.sessions.contains_key(&s.id) {
+                continue;
+            }
+            self.sessions.insert(s.id.clone(), s);
+            n += 1;
+        }
+        n
+    }
+
+    // The Grok sessions at work or waiting: their agent's own log may say
+    // they still are, though they sent nothing for a while (keep.rs).
+    pub fn grok_busy(&self) -> Vec<String> {
+        self.sessions.values().filter(|s| agent_key(&s.agent) == "grok" && matches!(s.mood.as_str(), "working" | "waiting")).map(|s| s.id.clone()).collect()
+    }
+
+    // Still at work, by their agent's word: not stale (check_stale) for
+    // another STALE_MS from now.
+    pub fn still_busy(&mut self, ids: &[String], now: u64) {
+        for id in ids {
+            if let Some(s) = self.sessions.get_mut(id).filter(|s| matches!(s.mood.as_str(), "working" | "waiting")) {
+                s.at = now;
+            }
+        }
+    }
+
+    // Whether a session of this id is known.
+    pub fn knows(&self, id: &str) -> bool {
+        self.sessions.contains_key(id)
     }
 
     pub fn check_stale(&mut self, now: u64, hold: Hold) -> bool {
@@ -1102,6 +1163,39 @@ mod tests {
         // The next turn works as ever.
         pet.apply(&codex("t4", json!({ "mood": "working", "event": "turn-start" })), 30, Hold::Seen);
         assert_eq!(pet.get(31)["mood"], "working");
+    }
+
+    // Kept on disk and read back as she starts again: as they were, but
+    // those whose agent's process is gone, or too old to remember.
+    #[test]
+    fn sessions_come_back_after_a_restart() {
+        let mut pet = Pet::default();
+        pet.apply(&msg(json!({ "session": "a", "mood": "working", "project": "pet", "agent": "grok", "chain": [[10, 5]] })), 100, Hold::Seen);
+        pet.apply(&msg(json!({ "session": "b", "mood": "working", "project": "gone", "chain": [[11, 6]] })), 100, Hold::Seen);
+        pet.apply(&msg(json!({ "session": "c", "mood": "idle", "project": "old" })), 100, Hold::Seen);
+        let kept = serde_json::from_str::<Value>(&pet.snapshot().to_string()).unwrap();
+        let mut again = Pet::default();
+        let back = again.restore(&kept, 200, |pid, _| pid == 10);
+        assert_eq!(back, 2);
+        let a = again.get_for("grok", 200);
+        assert_eq!((a["id"].as_str(), a["mood"].as_str(), a["project"].as_str()), (Some("a"), Some("working"), Some("pet")));
+        assert!(!again.knows("b"), "its process is gone");
+        assert!(again.knows("c"));
+        // Too long ago: not remembered.
+        assert_eq!(Pet::default().restore(&kept, 100 + FORGET_MS + 1, |_, _| true), 0);
+    }
+
+    // A Grok turn its log says is still under way is not given up on.
+    #[test]
+    fn a_grok_turn_still_under_way_is_not_stale() {
+        let mut pet = Pet::default();
+        pet.apply(&msg(json!({ "session": "g", "mood": "working", "agent": "grok" })), 0, Hold::Seen);
+        pet.apply(&msg(json!({ "session": "c", "mood": "working" })), 0, Hold::Seen);
+        assert_eq!(pet.grok_busy(), vec!["g".to_string()]);
+        pet.still_busy(&["g".to_string()], STALE_MS);
+        pet.check_stale(STALE_MS + 1, Hold::Seen);
+        assert_eq!(pet.get_for("grok", STALE_MS + 1)["mood"], "working");
+        assert_eq!(pet.get_for("claude", STALE_MS + 1)["mood"], "idle");
     }
 
     #[test]

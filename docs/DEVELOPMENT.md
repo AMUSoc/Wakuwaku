@@ -509,6 +509,15 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 - 跟着岛换屏（`islandDisplay`），屏幕变化时和岛一起 `keep_on_screen`；勿扰、隐藏、全屏时跟着她藏起来。
 - 实测（2026-10-20，左边 150% 的屏）：四格位置正确，点 Codex 那格会展开；鼠标在格子上时窗口接住鼠标，移到窗口里的空白处、格子之间就恢复穿透。
 
+## 重启后记得会话（keep.rs）
+
+会话原本只在内存里：她一重启（换新版、崩溃、退出再开）就全忘了，之后没再送 hook 的会话一直不见，直到它的下一个事件。实测（2026-10-20）：Grok 一轮在等自己的后台任务（它的日志写 `waiting_task_output`），二十多分钟没送任何事件，这期间她重启过，右边的竖岛就一直说 Grok 没有会话。
+
+- 每 10 秒（有变化才写）和退出时把会话写到资料目录的 `sessions.json`（`state.rs` 的 `snapshot`，`Session` 用 serde，缺的字段当新的），启动时读回（`restore`）：行程链第一个行程已经不在（`jump::is_alive`）、或超过 2 小时（`FORGET_MS`）的丢掉，其余照原样，之后照常由 `check_stale` 收。
+- Grok 再补一层：读 `~/.grok/active_sessions.json`（`GROK_HOME`），行程还在、她又不认得的会话加回来，项目名照 `cwd`；日志 `logs/unified.jsonl` 的最后 4 MB 里，那个会话（同一个 pid）最后是 `prompt received` 而不是 `turn.complete`，就当成工作中。
+- Grok 等自己的后台任务时可以很久不送事件：每分钟（`check_stale` 前）对工作中的 Grok 会话再看一次它的日志，那一轮还没结束就把 `at` 更新成现在（`keep_grok_busy`、`still_busy`），不会在 15 分钟时被当成结束。
+- 实测：换新版重启后日志写 `sessions: 0 kept from before, 1 of Grok's open found`，竖岛的 Grok 那格显示「思考中」；10 秒后 `sessions.json` 写出来了。
+
 ## 踩过的坑
 
 - **藏窗口不等于藏页面**：`WebviewWindow::hide` 只藏窗口，WebView2 照样当页面可见，定时器和动画都在跑；要连 WebView 一起藏（`win.as_ref().hide()`，即 `SetIsVisible(false)`），`document.hidden` 才是真。
