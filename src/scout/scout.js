@@ -2,7 +2,9 @@
 // a war room the four agents' pets keep. Her own: Claude tells her ranks,
 // Grok her tags and the champions she plays most, Antigravity where she
 // plays, Codex her last games; each part in its agent's colour, its pet
-// beside a line of what it found. A click anywhere puts it away.
+// beside a line of what it found. A game clicked opens its scoreboard; a
+// player of the ten clicked, their last games. Its close button or its key
+// puts it away.
 ;(function () {
   const { t } = window.I18n
   const { CELL_W, CELL_H, CLIPS } = window.Sprite
@@ -183,7 +185,7 @@
       'ten',
       [...(g.blue || []), ...(g.red || [])].map(id => pic('i', id === g.champion ? 'me' : '', champIcon(id))),
     )
-    return el(
+    const row = el(
       'div',
       `game ${g.win ? 'won' : 'lost'}`,
       el('div', 'edge'),
@@ -196,6 +198,8 @@
       ten,
       el('div', 'ago', el('div', null, ago(g.end)), el('div', null, clock(g.duration || 0))),
     )
+    row.addEventListener('click', () => openGame(g))
+    return row
   }
 
   function gamesCard(p) {
@@ -294,6 +298,7 @@
       rankBlock(p.rank),
     )
     if (p.group) node.title = T('scout.group', { n: p.group })
+    node.addEventListener('click', () => openPlayer(p))
     return node
   }
 
@@ -334,7 +339,7 @@
 
   function draw() {
     $('panel').hidden = false
-    $('hint').textContent = T('scout.hint', { key: data.key || 'Alt+X' })
+    $('hint').textContent = T('scout.hint2', { key: data.key || 'Alt+X' })
     const ready = data.state === 'ready'
     const own = ready && !!data.profile
     $('say').textContent = ready ? '' : T(`scout.${data.state || 'none'}`)
@@ -345,13 +350,112 @@
     $('hosts').hidden = !ready || own
     if (own) drawProfile()
     else if (ready) drawTen()
+    // The page opened over them is drawn again too, its pets moving.
+    if (opened.length) drawDetail()
   }
 
-  // A click anywhere on it puts it away.
-  $('panel').addEventListener('click', () => window.pet.scoutClose())
+  // --- Opened: a player's games, a game's scoreboard ----------------------------------------
+
+  // What is open, the latest last: { kind: 'player' | 'game', ... }.
+  const opened = []
+
+  function back() {
+    opened.pop()
+    drawDetail()
+  }
+
+  function openPlayer(p) {
+    opened.push({ kind: 'player', player: p })
+    drawDetail()
+  }
+
+  function openGame(g) {
+    const page = { kind: 'game', row: g, game: null }
+    opened.push(page)
+    drawDetail()
+    window.pet.scoutGame(g.id).then(game => {
+      page.game = game
+      if (opened[opened.length - 1] === page) drawDetail()
+    })
+  }
+
+  function backBar(...rest) {
+    const button = el('button', 'back', T('scout.back'))
+    button.addEventListener('click', back)
+    // Its own close button: the page covers the panel's.
+    const close = el('button', 'close', '✕')
+    close.id = ''
+    close.addEventListener('click', () => window.pet.scoutClose())
+    return el('div', 'detail-bar', button, ...rest, close)
+  }
+
+  function playerPage(opened) {
+    // As now read: their games keep coming in while the ten are looked up.
+    const p = (data.us && [...data.us, ...data.them].find(x => x.name === opened.name)) || opened
+    const r = p.recent
+    const said = r ? T('scout.say.recent', { games: r.games, wins: r.wins, kda: `${r.k}/${r.d}/${r.a}` }) : T('scout.say.recentReading')
+    const top = el(
+      'div',
+      'who-card',
+      pic('div', 'p-icon big', champIcon(p.championId)),
+      el('div', 'p-main', el('div', 'p-name', el('b', null, champName(p.championId) || p.champion || ''), el('span', null, p.name)), el('div', 'tags small', playerTags(p).map(([cls, text]) => el('span', `tag ${cls}`, text)))),
+      rankBlock(p.rank),
+    )
+    return [backBar(), top, card('codex', said, 'wide grow', el('div', 'games', ((r && r.list) || []).map(gameRow)))]
+  }
+
+  function boardRow(q, game, row, best) {
+    const dmg = el('div', 'track dmg', el('i'))
+    dmg.firstChild.style.width = `${best ? (q.dmg / best) * 100 : 0}%`
+    const minutes = Math.max(1, (game.duration || 0) / 60)
+    return el(
+      'div',
+      `board-row${q.puuid === row.who ? ' me' : ''}`,
+      pic('div', 'champ-icon', champIcon(q.champion)),
+      el('div', 'loadout', (q.spells || []).map(id => pic('i', null, spell(id))), pic('i', null, perk(q.keystone)), pic('i', null, perk(q.sub))),
+      el('div', 'b-name', el('b', null, (q.name || '').split('#')[0] || champName(q.champion)), el('span', null, `${champName(q.champion)}${q.pos ? ` · ${T(`scout.role.${q.pos}`)}` : ''}`)),
+      el('div', 'kda', el('b', null, `${q.k} / ${q.d} / ${q.a}`), el('span', null, T('scout.kp', { kp: q.kp }))),
+      el('div', 'b-dmg', el('span', null, (q.dmg || 0).toLocaleString()), dmg),
+      el('div', 'stats', el('div', null, T('scout.board.gold', { gold: ((q.gold || 0) / 1000).toFixed(1) })), el('div', null, T('scout.cs', { cs: q.cs, per: (q.cs / minutes).toFixed(1) }))),
+      el('div', 'items', (q.items || []).map(id => pic('i', null, item(id)))),
+    )
+  }
+
+  function gamePage(page) {
+    const g = page.row
+    const head = backBar(el('b', `res ${g.win ? 'good' : 'bad'}`, T(g.win ? 'scout.win' : 'scout.loss')), el('span', null, `${queueName(g.queue)} · ${clock(g.duration || 0)} · ${ago(g.end)}`))
+    const game = page.game
+    if (!game || !game.players) return [head, el('div', 'say', game === null ? '…' : T('scout.board.none'))]
+    const best = Math.max(1, ...game.players.map(q => q.dmg || 0))
+    const top = game.players.reduce((a, b) => ((b.dmg || 0) > (a.dmg || 0) ? b : a))
+    const said = T('scout.board.say', { champ: champName(top.champion), name: (top.name || '').split('#')[0], dmg: (top.dmg || 0).toLocaleString() })
+    const team = id => {
+      const list = game.players.filter(q => q.team === id)
+      const won = list.length && list[0].win
+      const kills = list.reduce((n, q) => n + (q.k || 0), 0)
+      return el('div', `board-team ${won ? 'won' : 'lost'}`, el('h3', null, `${T(won ? 'scout.win' : 'scout.loss')} · ${T('scout.board.kills', { n: kills })}`), list.map(q => boardRow(q, game, g, best)))
+    }
+    return [head, card('codex', said, 'wide grow', el('div', 'board', team(100), team(200)))]
+  }
+
+  function drawDetail() {
+    const page = opened[opened.length - 1]
+    $('detail').hidden = !page
+    if (!page) return
+    films.length = 0
+    $('detail').replaceChildren(...(page.kind === 'player' ? playerPage(page.player) : gamePage(page)))
+  }
+
+  $('close').addEventListener('click', () => window.pet.scoutClose())
 
   window.pet.onScout(payload => {
+    const before = data
     data = payload || { state: 'none' }
+    // Another game, or her own instead of the ten: what was open goes.
+    if (!!before.profile !== !!data.profile || before.state !== data.state) {
+      opened.length = 0
+      drawDetail()
+    }
     document.documentElement.lang = data.lang || 'zh-TW'
     draw()
   })

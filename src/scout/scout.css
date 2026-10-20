@@ -27,7 +27,6 @@ body {
 }
 
 #panel {
-  cursor: pointer;
   position: absolute;
   inset: 0;
   display: flex;
@@ -107,6 +106,23 @@ header {
 #hint {
   font-size: 12px;
   color: var(--muted);
+}
+
+#close,
+.detail-bar .close {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--fg);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#close:hover,
+.detail-bar .close:hover {
+  background: rgba(255, 107, 107, 0.35);
 }
 
 #hint {
@@ -834,4 +850,176 @@ h2[hidden] {
 
 .wait {
   opacity: 0.5;
+}
+
+/* --- Opened: a player's games, a game's scoreboard ------------------------------------- */
+
+.game,
+.player {
+  cursor: pointer;
+  transition: filter 0.12s, transform 0.12s;
+}
+
+.game:hover,
+.player:hover {
+  filter: brightness(1.25);
+}
+
+#detail {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  background: var(--bg);
+}
+
+#detail[hidden] {
+  display: none;
+}
+
+.detail-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.detail-bar .res {
+  font-size: 18px;
+}
+
+.back {
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.back:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.card.grow {
+  flex: 1;
+}
+
+.who-card {
+  display: grid;
+  grid-template-columns: 64px 1fr 15em;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+
+.p-icon.big {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+
+.board {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.board-team h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.board-team.won h3 {
+  color: var(--good);
+}
+
+.board-team.lost h3 {
+  color: var(--bad);
+}
+
+.board-row {
+  display: grid;
+  grid-template-columns: 34px 30px minmax(9em, 1fr) 7em minmax(8em, 1fr) 11em auto;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 10px 3px 6px;
+  margin-top: 4px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+}
+
+.board-team.won .board-row {
+  background: linear-gradient(90deg, rgba(79, 216, 143, 0.08), rgba(0, 0, 0, 0.2) 40%);
+}
+
+.board-team.lost .board-row {
+  background: linear-gradient(90deg, rgba(255, 107, 107, 0.08), rgba(0, 0, 0, 0.2) 40%);
+}
+
+.board-row.me {
+  box-shadow: inset 0 0 0 1px rgba(230, 195, 106, 0.7);
+}
+
+.b-name {
+  min-width: 0;
+}
+
+.board-row .stats {
+  white-space: nowrap;
+}
+
+.detail-bar .close {
+  margin-left: auto;
+}
+
+.b-name b,
+.b-name span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.b-name span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.b-dmg span {
+  font-size: 11px;
+}
+
+.track.dmg {
+  height: 6px;
+  margin-top: 3px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.track.dmg i {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #e8732a, #ff9f43);
+}
+
+.say {
+  color: var(--muted);
+  font-size: 14px;
 }

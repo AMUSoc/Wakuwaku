@@ -148,8 +148,10 @@ fn hosts(platform: &str) -> (String, String) {
 
 // --- What is made of what Riot says (pure: tested) ------------------------------------------------
 
-// What a kept game holds; one kept with less (an older version) is read again.
-const KEPT: u64 = 2;
+// What a kept game holds; one kept with less (an older version) is read
+// again. 3: each player's Riot ID, damage to champions, gold and vision,
+// for a game's whole scoreboard (scout_game).
+const KEPT: u64 = 3;
 
 // A game as kept: who played what, where, and how it went for each (their
 // kills, deaths, assists, minions, items, spells, keystone and second rune
@@ -174,6 +176,8 @@ pub fn trim_match(m: &Value) -> Option<Value> {
                 "spells": [n("summoner1Id"), n("summoner2Id")],
                 "keystone": p["perks"]["styles"][0]["selections"][0]["perk"], "sub": p["perks"]["styles"][1]["style"],
                 "kp": (kp * 100.0).round(), "level": p["champLevel"],
+                "name": format!("{}#{}", p["riotIdGameName"].as_str().unwrap_or(""), p["riotIdTagline"].as_str().unwrap_or("")).trim_matches('#'),
+                "dmg": n("totalDamageDealtToChampions"), "gold": n("goldEarned"), "vision": n("visionScore"),
             })
         })
         .collect();
@@ -209,9 +213,11 @@ pub fn recent_of(puuid: &str, champion: u64, games: &[Value]) -> Value {
             let mut row = (*p).clone();
             row.as_object_mut().map(|o| o.remove("puuid"));
             row["win"] = json!(won(p));
-            for k in ["queue", "end", "duration"] {
+            for k in ["id", "queue", "end", "duration"] {
                 row[k] = g[k].clone();
             }
+            // Whose row: the scoreboard (scout_game) marks them in it.
+            row["who"] = json!(puuid);
             let side = |team: u64| g["players"].as_array().into_iter().flatten().filter(|q| q["team"].as_u64() == Some(team)).map(|q| q["champion"].clone()).collect::<Vec<_>>();
             row["blue"] = json!(side(100));
             row["red"] = json!(side(200));
@@ -359,9 +365,19 @@ fn matches_dir(sh: &Shared) -> PathBuf {
     sh.dir.join("lol").join("matches")
 }
 
+fn game_path(sh: &Shared, id: &str) -> PathBuf {
+    matches_dir(sh).join(format!("{}.json", id.replace(['/', '\\', '.'], "_")))
+}
+
+// A game as kept (read before, for a row of her games or a player's): its
+// whole scoreboard, for the page (scout_game). None if not kept.
+pub fn kept_game(sh: &Shared, id: &str) -> Value {
+    std::fs::read_to_string(game_path(sh, id)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or(Value::Null)
+}
+
 // A game, kept on disk or read once from Riot and kept.
 fn game(sh: &Shared, key: &str, regional: &str, id: &str) -> Option<Value> {
-    let path = matches_dir(sh).join(format!("{}.json", id.replace(['/', '\\', '.'], "_")));
+    let path = game_path(sh, id);
     if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(|k| k["v"].as_u64() == Some(KEPT)) {
         return Some(kept);
     }

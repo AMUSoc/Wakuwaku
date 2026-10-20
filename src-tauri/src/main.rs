@@ -938,7 +938,13 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
     }
 }
 
-// The game's ten clicked: away (scout.rs).
+// A game of a row in the game's ten, whole, for its scoreboard (scout.rs).
+#[tauri::command]
+async fn scout_game(app: AppHandle, id: String) -> Value {
+    scout::kept_game(&shared(&app), &id)
+}
+
+// The game's ten put away by its close button (scout.rs).
 #[tauri::command]
 async fn scout_close(app: AppHandle) {
     let sh = shared(&app);
@@ -1347,6 +1353,7 @@ fn main() {
             pet_panel,
             pet_answer,
             scout_close,
+            scout_game,
             pet_dismiss,
             pet_keyboard,
             pet_walk,
