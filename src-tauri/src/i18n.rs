@@ -52,6 +52,7 @@ pub fn t(lang: &str, key: &str) -> String {
         "menu.displayAuto" => ("跟着主屏幕", "跟著主螢幕", "The main display"),
         "menu.displayN" => ("屏幕 {n}", "螢幕 {n}", "Display {n}"),
         "menu.displayMain" => ("（主）", "（主）", " (main)"),
+        "menu.dock" => ("右边的竖岛", "右邊的直立島", "Side island"),
         "menu.dnd" => ("勿扰", "勿擾", "Do not disturb"),
         "menu.show" => ("显示宠物", "顯示寵物", "Show pet"),
         "menu.hide" => ("隐藏宠物", "隱藏寵物", "Hide pet"),

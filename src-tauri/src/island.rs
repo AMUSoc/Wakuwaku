@@ -117,7 +117,7 @@ fn set_ignore(sh: &Shared, ignore: Option<bool>) {
 // The display it is on: the one chosen for it (islandDisplay, the top-left
 // corner of a display), while there is such a one; else where it is, else
 // the primary one.
-fn area(sh: &Shared) -> Option<Area> {
+pub(crate) fn area(sh: &Shared) -> Option<Area> {
     let screens = sh.screens();
     if let Some(chosen) = chosen(sh).and_then(|at| screens.areas.iter().copied().find(|a| (a.mon.0, a.mon.1) == at)) {
         return Some(chosen);
@@ -146,6 +146,8 @@ pub fn moved(sh: &Shared) {
         lay_again(sh, "moved to another display");
         crate::backplate::again();
     }
+    // The side island goes with it.
+    crate::dock::keep_on_screen(sh);
 }
 
 // The display it is on (x, y, w, h), as area finds it.

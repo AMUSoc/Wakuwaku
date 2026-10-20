@@ -1,0 +1,227 @@
+/* The side island (dock.js): rows down the right edge, each a bubble with
+   its agent's pet beside it, the pet on the screen's side. */
+:root {
+  --bg: rgba(16, 17, 20, 0.92);
+  --fg: #f2f3f5;
+  --muted: #9aa0aa;
+  --line: rgba(255, 255, 255, 0.1);
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  font-family: 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+  color: var(--fg);
+}
+
+#dock {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+  padding-right: 6px;
+  box-sizing: border-box;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 100%;
+  cursor: pointer;
+}
+
+/* The pet: one cell of its sheet, small. */
+.head {
+  flex: none;
+  position: relative;
+  width: 64px;
+  height: 69px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--bg);
+  border: 2px solid var(--agent);
+  box-sizing: border-box;
+}
+
+.head .film {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(1536px / 3);
+  height: calc(var(--sheet-h) / 3);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+.head .none {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--agent);
+}
+
+.row.idle .head {
+  opacity: 0.55;
+}
+
+/* The bubble, its tail toward the pet. */
+.bubble {
+  position: relative;
+  min-width: 0;
+  max-width: 280px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  font-size: 13px;
+  line-height: 1.4;
+  margin-top: 8px;
+}
+
+.bubble::after {
+  content: '';
+  position: absolute;
+  right: -7px;
+  top: 16px;
+  border: 7px solid transparent;
+  border-right: 0;
+  border-left-color: var(--bg);
+}
+
+.row.idle:not(.open) .bubble {
+  display: none;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.who .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--agent);
+}
+
+.what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mood-waiting .what,
+.mood-error .what {
+  color: #ffb36b;
+}
+
+.mood-done .what,
+.mood-review .what {
+  color: #8fe3a2;
+}
+
+/* Opened: every session of the agent, its reply, its prompts. */
+.more {
+  display: none;
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.row.open .more {
+  display: block;
+}
+
+.row.open .what {
+  white-space: normal;
+}
+
+.session + .session {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+.session .name {
+  font-weight: 600;
+}
+
+.session .line {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session .reply {
+  margin-top: 4px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.ask {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(255, 179, 107, 0.12);
+}
+
+.ask pre {
+  margin: 4px 0;
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+button {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+button.primary {
+  background: #2f7d4f;
+  border-color: #2f7d4f;
+}
+
+button.danger {
+  background: #8a3a3a;
+  border-color: #8a3a3a;
+}

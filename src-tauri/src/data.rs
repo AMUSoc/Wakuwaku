@@ -120,6 +120,8 @@ fn defaults() -> Map<String, Value> {
         // The display the island is on: the top-left corner of one ([x, y],
         // physical), or none: the main one (island.rs area).
         "islandDisplay": null,
+        // The side island at the right edge, one row for each agent (dock.rs).
+        "dock": false,
         // A League of Legends game on: the pets show of it (lol.rs); her own
         // Riot API key, for her rank and her party's in champion select (lcu.rs).
         "lol": true,

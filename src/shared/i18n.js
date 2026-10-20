@@ -31,6 +31,11 @@
       'island.done': '搞定',
       'island.review': '改好了',
       'island.error': '出错了',
+      // The side island (src/dock/)
+      'dock.none': '没有会话',
+      'dock.jump': '跳到窗口',
+      'dock.onIsland': '到灵动岛上回答',
+      'dock.more': '还有 {n} 个会话',
 
       // What a session is doing (events.rs step_of), how its turn ended (status.js)
       'step.thinking': '思考中',
@@ -660,6 +665,11 @@
       'island.done': '搞定',
       'island.review': '改好了',
       'island.error': '出錯了',
+      // The side island (src/dock/)
+      'dock.none': '沒有工作階段',
+      'dock.jump': '跳到視窗',
+      'dock.onIsland': '到靈動島上回答',
+      'dock.more': '還有 {n} 個工作階段',
       'step.thinking': '思考中',
       'step.thinkingFor': '思考了 {time}',
       'step.for': '已執行 {time}',
@@ -1269,6 +1279,11 @@
       'island.done': 'Done',
       'island.review': 'Review',
       'island.error': 'Error',
+      // The side island (src/dock/)
+      'dock.none': 'No session',
+      'dock.jump': 'Go to its window',
+      'dock.onIsland': 'Answer it on the island',
+      'dock.more': '{n} more sessions',
 
       'step.thinking': 'Thinking',
       'step.thinkingFor': 'Thinking for {time}',

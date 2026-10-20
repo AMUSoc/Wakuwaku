@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data: http://asset.localhost asset: https://codex-pets.net; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>wakuwaku dock</title>
+    <link rel="stylesheet" href="dock.css" />
+  </head>
+  <body>
+    <div id="dock"></div>
+    <script src="../pet/bridge.js"></script>
+    <script src="../shared/i18n.js"></script>
+    <script src="../pet/sprite.js"></script>
+    <script src="../pet/status.js"></script>
+    <script src="dock.js"></script>
+  </body>
+</html>

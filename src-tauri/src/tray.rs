@@ -107,6 +107,7 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
         menu.append(&MenuItem::with_id(app, format!("web:{agent}"), t("menu.web"), true, None::<&str>)?)?;
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&CheckMenuItem::with_id(app, "dock", t("menu.dock"), true, flag("dock"), None::<&str>)?)?;
     menu.append(&CheckMenuItem::with_id(app, "dnd", t("menu.dnd"), true, flag("dnd"), None::<&str>)?)?;
     menu.append(&MenuItem::with_id(app, "settings", t("menu.settings"), true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
@@ -117,7 +118,7 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
 pub fn on_menu(sh: &Arc<Shared>, id: &str) {
     match id {
         "toggle" => sh.set_hidden(sh.is_visible()),
-        "walk" | "look" | "dnd" => sh.change(json!({ id: !sh.flag(id) })),
+        "walk" | "look" | "dnd" | "dock" => sh.change(json!({ id: !sh.flag(id) })),
         // The menu's own items (out:<agent>, corner:<agent>) below.
         "corner" => crate::come_home(sh),
         "settings" => crate::island::open_settings(sh, None),

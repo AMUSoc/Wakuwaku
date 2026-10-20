@@ -25,6 +25,7 @@ cd .. && node --test "test/*.test.js"   # 頁面的單元測試（i18n、注視�
 
 ```
 src/pet/           頁面：她的視窗（?role=pet）和島（?role=island）共用 index.html
+src/dock/          右邊的直立島（dock.rs）：dock.js、dock.css，共用 src/pet/ 的 bridge、sprite、status
 src/mobile/        手機頁（mobile.rs 用 include_str! 編進 exe）：app.js、style.css、manifest、service worker
 src/shared/qr.js   設定頁的 QR code（byte 模式、糾錯 M、版本 1–10）
 src/shared/i18n.js 簡中（zh）、繁中（zh-TW，預設語言）、英文字串（Rust 端少數字串在 src-tauri/src/i18n.rs）；新字串照 docs/zh-TW-glossary.md 翻
@@ -53,6 +54,7 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 **視窗與家**
 - `pet.rs`：桌面上的桌寵視窗，**每個 agent 一個**（`pet-claude`、`pet-codex`、`pet-agy`、`pet-grok`，狀態在 `Shared.pets`，每隻一把鎖）：大小位置、眼睛、拖動與被攜帶、走動、飛回島裡。設定 `desktop` 打開才建視窗，關掉就關視窗（`open_or_close`）；位置各自記在 `spots`。
 - `island.rs`：靈動島的視窗：放在螢幕頂端正中，依頁面要求擴大、伸手夠她、把她吸回去、為設定臨時升起、置頂；底部的 `os` 模組是島用的 Win32 小工具（`raise_top`、`covered`、`maximized_on`、`no_transitions`）。
+- `dock.rs`：右邊的直立島（設定 `dock`）：島所在螢幕的右緣，每個 agent 一格（寵物＋對話框），點一格就地展開；頁面在 `src/dock/`，視窗標籤 `dock`（已列進 capabilities）。細節見 `docs/DEVELOPMENT.md` 的「右边的竖岛」。
 - `notch.rs`：macOS 瀏海裡的島。`backplate.rs`：島下面的壓克力模糊。`wallpaper.rs`：只讀 Windows 的深淺色和強調色（檔名沿用舊的）。
 - `pointer.rs`（點擊穿透）、`screen.rs`（各螢幕工作區）、`focus.rs`（鍵盤焦點的取與還）、`fullscreen.rs`（別的程式是否全螢幕，每 1.5 秒看一次）。
 

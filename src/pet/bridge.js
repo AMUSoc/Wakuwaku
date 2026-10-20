@@ -52,6 +52,8 @@
     onDragEnd: on('pet:drag-end'),
     onAsks: on('pet:asks'),
     onShift: on('pet:shift'),
+    // The side island's rows (dock.rs payload), in its own window.
+    onDock: on('dock:update'),
     answer: (id, choice) => send('pet_answer', { id, choice }),
     dismiss: id => send('pet_dismiss', { id }),
     keyboard: needs => send('pet_keyboard', { needs: needs === true }),

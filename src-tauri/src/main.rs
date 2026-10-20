@@ -35,6 +35,7 @@ mod connection;
 mod crash;
 mod data;
 mod detach;
+mod dock;
 mod events;
 mod events_agy;
 mod events_codex;
@@ -99,6 +100,7 @@ pub struct Shared {
     pub pet: Mutex<state::Pet>,
     pub pets: pet::Pets,
     pub island: Mutex<island::Island>,
+    pub dock: Mutex<dock::Dock>,
     pub asks: Mutex<asks::Asks<Responder>>,
     // Plugins in the island (widgets.rs), and what today has seen.
     pub widgets: Mutex<widgets::Widgets>,
@@ -394,6 +396,7 @@ impl Shared {
             }
         }
         let _ = self.app.emit_to("island", "pet:update", island);
+        dock::push(self);
         tray::refresh(self);
         self.push_settings();
     }
@@ -425,6 +428,7 @@ impl Shared {
                 let _ = self.app.emit_to(pet::label(agent), "pet:asks", self.asks_for(Some(agent)));
             }
         }
+        dock::push_asks(self);
         self.push_settings();
     }
 
@@ -596,7 +600,7 @@ impl Shared {
 
     pub fn change(self: &Arc<Self>, patch: Value) {
         let Value::Object(patch) = patch else { return };
-        let touches_visibility = ["dnd", "display", "desktop", "hideInFullscreen"].iter().any(|k| patch.contains_key(*k));
+        let touches_visibility = ["dnd", "display", "desktop", "hideInFullscreen", "dock"].iter().any(|k| patch.contains_key(*k));
         let touches_top = ["settingsPin", "settingsTop"].iter().any(|k| patch.contains_key(*k));
         let touches_monitor = ["monitor", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
         let touches_desktop = patch.contains_key("desktop");
@@ -667,6 +671,7 @@ impl Shared {
             pet::apply_visibility(self, agent);
         }
         island::apply_visibility(self);
+        dock::apply_visibility(self);
         // Out of sight, nobody can answer here: the terminal has them.
         if !self.asks_seen() {
             let n = self.asks.lock().unwrap().dismiss_all();
@@ -826,6 +831,11 @@ fn is_island(window: &WebviewWindow) -> bool {
     window.label() == "island"
 }
 
+// The side island's page (dock.rs).
+fn is_dock(window: &WebviewWindow) -> bool {
+    window.label() == dock::LABEL
+}
+
 // The agent of a pet's window (pet-codex: codex); the island's, Claude's.
 fn agent_of(window: &WebviewWindow) -> String {
     pet::agent_of(window.label()).unwrap_or("claude").to_string()
@@ -834,6 +844,11 @@ fn agent_of(window: &WebviewWindow) -> String {
 #[tauri::command]
 async fn pet_ready(app: AppHandle, window: WebviewWindow) {
     let sh = shared(&app);
+    if is_dock(&window) {
+        dock::ready(&sh);
+        dock::push_asks(&sh);
+        return;
+    }
     if is_island(&window) { island::ready(&sh) } else { pet::ready(&sh, &agent_of(&window)) }
     let views = sh.asks_for(pet::agent_of(window.label()));
     let _ = app.emit_to(window.label(), "pet:asks", views);
@@ -842,7 +857,13 @@ async fn pet_ready(app: AppHandle, window: WebviewWindow) {
 #[tauri::command]
 async fn pet_hover(app: AppHandle, window: WebviewWindow, is_over: bool) {
     let sh = shared(&app);
-    if is_island(&window) { island::hover(&sh, is_over) } else { pet::hover(&sh, &agent_of(&window), is_over) }
+    if is_dock(&window) {
+        dock::hover(&sh, is_over)
+    } else if is_island(&window) {
+        island::hover(&sh, is_over)
+    } else {
+        pet::hover(&sh, &agent_of(&window), is_over)
+    }
 }
 
 #[tauri::command]
@@ -1371,6 +1392,7 @@ fn main() {
                 pet: Mutex::new(state::Pet::default()),
                 pets: pet::Pets::default(),
                 island: Mutex::new(island::Island::default()),
+                dock: Mutex::new(dock::Dock::default()),
                 asks: Mutex::new(asks::Asks::default()),
                 widgets: Mutex::new(widgets::Widgets::default()),
                 scripts: Mutex::new(scripts::Runner::default()),
@@ -1404,6 +1426,7 @@ fn main() {
                 sh.by_fullscreen.store(fullscreen::check(&[], &sh.displays()) == Some(true), Ordering::SeqCst);
             }
             island::apply_visibility(&sh);
+            dock::apply_visibility(&sh);
             tray::create(&sh)?;
             server::serve(sh.clone(), listener);
             // Phone access: the page listened for on Tailscale's address too (mobile.rs).
@@ -1429,7 +1452,7 @@ fn main() {
                     (c, c)
                 };
                 let wait = match at {
-                    (Some(her), Some(home)) => data::AGENTS.iter().map(|agent| pet::poll(&pointer, agent, her)).fold(island::poll(&pointer, home), u64::min),
+                    (Some(her), Some(home)) => data::AGENTS.iter().map(|agent| pet::poll(&pointer, agent, her)).fold(island::poll(&pointer, home).min(dock::poll(&pointer, home)), u64::min),
                     _ => 200,
                 };
                 let wait = if pointer.check_quiet() { wait.max(1000) } else { wait };
@@ -1566,6 +1589,7 @@ fn main() {
                             pet::keep_on_screen(&ticker, agent);
                         }
                         island::keep_on_screen(&ticker);
+                        dock::keep_on_screen(&ticker);
                     }
                 }
             });

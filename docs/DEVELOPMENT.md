@@ -500,6 +500,15 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 
 实测（2026-10-17，Windows 11，Tailscale 100.90.183.86，另开一份在 47299 端口）：外部无 token 时页面 200、`api/*` 401、`/hook` `/health` `/quit` `/state` 404；`?t=` 后 302 并设 cookie；带 `X-Forwarded-For`、`Tailscale-User-Login`、`Host: evil.example` 的本机请求都当外部；没有 `x-wakuwaku` 头的回答 404；Chrome 里从 Tailscale 地址打开、按「允许」，挂着的 hook 收到 `{"behavior":"allow"}`。0.0.0.0 → Tailscale、Tailscale → 0.0.0.0、0.0.0.0 → 关掉，`netstat` 上旧地址都马上放掉。
 
+## 右边的竖岛（dock.rs、src/dock/）
+
+托盘或岛的右键菜单「右边的竖岛」（设置 `dock`，默认关）：岛所在那块屏的右边缘、上下居中，一个 agent 一格（Claude、Codex、Antigravity、Grok），宠物在靠屏幕边那侧，左边是对话框写它在做什么（`status.js` 的 `brief`）；闲置又没有确认的只露出宠物。单击一格就在原地展开：那个 agent 的每个会话（名字、状态、用时、做完的回复）、「跳到窗口」按钮（有行程链才有），以及它的确认：权限和计划可以直接允许／拒绝（照 id 回到原本的 hook，和岛、桌宠上回答一样），问题类的写「到灵动岛上回答」。单击不再开终端机。顶端的岛照旧，两个同时在。
+
+- 窗口固定 380×640（逻辑像素，高度不超过工作区），点击穿透和岛同一套（`pointer.rs` 的 `ClickThrough`），页面在每一格的 mouseenter／mouseleave 叫 `pet_hover`。每一格的节点一直留着，只换里面的内容，进出事件才不会跟着重画丢掉；鼠标在上面时不做每秒的重画（按钮按到一半不会被换掉）。
+- 资料：`dock::payload`（每个 agent 的 `get_for`、`list_for`、宠物图集和颜色），`Shared::redraw` 时送 `dock:update`；确认清单全部送（`dock::push_asks`）。
+- 跟着岛换屏（`islandDisplay`），屏幕变化时和岛一起 `keep_on_screen`；勿扰、隐藏、全屏时跟着她藏起来。
+- 实测（2026-10-20，左边 150% 的屏）：四格位置正确，点 Codex 那格会展开；鼠标在格子上时窗口接住鼠标，移到窗口里的空白处、格子之间就恢复穿透。
+
 ## 踩过的坑
 
 - **藏窗口不等于藏页面**：`WebviewWindow::hide` 只藏窗口，WebView2 照样当页面可见，定时器和动画都在跑；要连 WebView 一起藏（`win.as_ref().hide()`，即 `SetIsVisible(false)`），`document.hidden` 才是真。
