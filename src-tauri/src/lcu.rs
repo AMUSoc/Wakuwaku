@@ -37,7 +37,13 @@ pub fn parse_lockfile(text: &str) -> Option<(u16, String)> {
 }
 
 // Riot's API's platform for the client's region (/riotclient/region-locale).
+// A client in Taiwan says "TW2" (2026-10-20): the platform's own name is
+// taken as well.
 pub fn platform_of(region: &str) -> Option<&'static str> {
+    const PLATFORMS: [&str; 17] = ["na1", "euw1", "eun1", "kr", "jp1", "br1", "la1", "la2", "oc1", "tr1", "ru", "tw2", "vn2", "sg2", "ph2", "th2", "me1"];
+    if let Some(p) = PLATFORMS.iter().find(|p| p.eq_ignore_ascii_case(region)) {
+        return Some(p);
+    }
     Some(match region.to_uppercase().as_str() {
         "NA" => "na1",
         "EUW" => "euw1",
@@ -161,13 +167,15 @@ fn lcu(agent: &ureq::Agent, (base, auth): &(String, String), path: &str) -> Opti
     agent.get(&format!("{base}{path}")).header("Authorization", auth.as_str()).call().ok()?.body_mut().read_json::<Value>().ok()
 }
 
-// Who she is (her PUUID), her platform on Riot's API, and the champions'
-// names in the client's language (its game data: id to name): for the
-// game's ten (scout.rs). None without the client.
+// Who she is (her Riot ID, name#tag: the client's PUUID is not the one
+// Riot's API knows her by, scout::puuid_of), her platform on Riot's API,
+// and the champions' names in the client's language (its game data: id to
+// name): for the game's ten (scout.rs). None without the client.
 pub fn me_platform_names() -> Option<(String, &'static str, HashMap<u64, String>)> {
     let c = client()?;
     let agent = local();
-    let me = lcu(&agent, &c, "/lol-summoner/v1/current-summoner")?["puuid"].as_str()?.to_string();
+    let summoner = lcu(&agent, &c, "/lol-summoner/v1/current-summoner")?;
+    let me = format!("{}#{}", summoner["gameName"].as_str()?, summoner["tagLine"].as_str()?);
     let platform = lcu(&agent, &c, "/riotclient/region-locale").and_then(|r| r["region"].as_str().and_then(platform_of))?;
     let names = lcu(&agent, &c, "/lol-game-data/assets/v1/champion-summary.json")
         .and_then(|v| v.as_array().cloned())
@@ -242,13 +250,15 @@ fn look_at(sh: &Shared, l: &mut Looking, c: &(String, String)) -> Option<Value> 
     let key = sh.setting("riotApiKey").as_str().unwrap_or("").to_string();
     let mut players = Vec::new();
     for (puuid, position) in to_look_up(&session, &l.me.0, &l.party) {
+        let me = puuid == l.me.0;
+        let name = if me { l.me.1.clone() } else { l.party.get(&puuid).cloned().unwrap_or_default() };
+        // Riot's API knows them by another PUUID than the client's: found by their Riot ID.
         if !key.is_empty() && !l.ranks.contains_key(&puuid) {
-            if let Some(entries) = ranks(&key, l.platform, &puuid) {
+            let known = l.platform.and_then(|p| crate::scout::puuid_of(&key, p, &name));
+            if let Some(entries) = known.and_then(|known| ranks(&key, l.platform, &known)) {
                 l.ranks.insert(puuid.clone(), rank_of(&entries));
             }
         }
-        let me = puuid == l.me.0;
-        let name = if me { l.me.1.clone() } else { l.party.get(&puuid).cloned().unwrap_or_default() };
         players.push(json!({ "name": name, "me": me, "position": position, "rank": l.ranks.get(&puuid).cloned().unwrap_or(Value::Null) }));
     }
     Some(json!({ "players": players, "keyless": key.is_empty() }))
@@ -274,6 +284,8 @@ mod tests {
         assert_eq!(parse_lockfile("LeagueClient:12345:54321:s3cr3t:https\n"), Some((54321, "s3cr3t".into())));
         assert_eq!(parse_lockfile("nonsense"), None);
         assert_eq!((platform_of("TW"), platform_of("euw"), platform_of("XX")), (Some("tw2"), Some("euw1"), None));
+        // As a client in Taiwan says it.
+        assert_eq!((platform_of("TW2"), platform_of("KR")), (Some("tw2"), Some("kr")));
         assert_eq!(base64(b"riot:s3cr3t"), "cmlvdDpzM2NyM3Q=");
         assert_eq!(base64(b"riot:ab"), "cmlvdDphYg==");
     }

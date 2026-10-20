@@ -99,6 +99,32 @@ pub fn riot(key: &str, url: &str) -> Result<Value, Miss> {
     Err(Miss::Other)
 }
 
+// The regional host account-v1 lives on: Asia's for Asia and the Pacific.
+pub fn account_region_of(platform: &str) -> &'static str {
+    match region_of(platform) {
+        "americas" => "americas",
+        "europe" => "europe",
+        _ => "asia",
+    }
+}
+
+// The PUUID Riot's API knows a player by, from their Riot ID (name#tag):
+// the client's own is another (Riot's API answers it "Exception
+// decrypting", 2026-10-20). Kept while she runs.
+pub fn puuid_of(key: &str, platform: &str, riot_id: &str) -> Option<String> {
+    static KNOWN: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+    let (name, tag) = riot_id.rsplit_once('#').filter(|(n, t)| !n.is_empty() && !t.is_empty())?;
+    if let Some(p) = KNOWN.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|k| k.get(riot_id)) {
+        return Some(p.clone());
+    }
+    let base = std::env::var("WAKUWAKU_RIOT_API_URL").unwrap_or_else(|_| format!("https://{}.api.riotgames.com", account_region_of(platform)));
+    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+    let found = riot(key, &format!("{base}/riot/account/v1/accounts/by-riot-id/{}/{}", enc(name), enc(tag))).ok()?;
+    let puuid = found["puuid"].as_str()?.to_string();
+    KNOWN.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(riot_id.to_string(), puuid.clone());
+    Some(puuid)
+}
+
 // The regional host match-v5 lives on, for a platform.
 pub fn region_of(platform: &str) -> &'static str {
     match platform {
@@ -253,18 +279,30 @@ pub fn on_game(sh: &Arc<Shared>, pid: Option<u32>) {
 
 fn scout(sh: &Arc<Shared>) {
     let key = sh.setting("riotApiKey").as_str().unwrap_or("").to_string();
+    // Shown by itself only while the game loads: one already under way (she
+    // started in the middle of it) is not covered over, the key brings it.
+    // Told after the game's next look (lol.rs reads it each second), not before.
+    std::thread::sleep(Duration::from_millis(1500));
+    let loading = !crate::lol::in_game();
     if key.is_empty() {
         status(sh, "nokey");
-        show(sh, true);
+        if loading {
+            show(sh, true);
+        }
         return;
     }
     status(sh, "looking");
-    show(sh, true);
+    if loading {
+        show(sh, true);
+    }
     // Tests: someone's game on Taiwan's server looked up as if hers
     // (WAKUWAKU_SCOUT_AS=<their PUUID>), no client needed.
     let as_someone = std::env::var("WAKUWAKU_SCOUT_AS").ok().map(|puuid| (puuid, "tw2", HashMap::new()));
-    let Some((me, platform, names)) = as_someone.or_else(crate::lcu::me_platform_names) else {
-        sh.log("scout: the client is not there to say who she is");
+    let Some((me, platform, names)) = as_someone.or_else(|| {
+        let (riot_id, platform, names) = crate::lcu::me_platform_names()?;
+        Some((puuid_of(&key, platform, &riot_id)?, platform, names))
+    }) else {
+        sh.log("scout: the client is not there to say who she is, or Riot's API does not know her");
         status(sh, "noclient");
         return;
     };
@@ -559,6 +597,8 @@ mod tests {
 
     #[test]
     fn match_v5_s_region_for_each_platform() {
+        assert_eq!(account_region_of("tw2"), "asia");
+        assert_eq!(account_region_of("euw1"), "europe");
         assert_eq!(region_of("tw2"), "sea");
         assert_eq!(region_of("kr"), "asia");
         assert_eq!(region_of("euw1"), "europe");

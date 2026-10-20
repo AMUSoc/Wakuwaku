@@ -29,6 +29,7 @@ import argparse
 import json
 import threading
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOCK = threading.Lock()
@@ -75,9 +76,9 @@ PLAYERS = [
 ]
 ME = {'riotId': 'Me#TW1', 'summonerName': 'Me#TW1', 'currentGold': 1250.0, 'level': 6}
 CLIENT = {'phase': 'None'}
-LOBBY = {'members': [{'puuid': 'puuid-me', 'gameName': 'Me', 'gameTag': 'TW1'}, {'puuid': 'puuid-duo', 'gameName': 'Duo', 'gameTag': 'TW1'}]}
+LOBBY = {'members': [{'puuid': 'client-puuid-me', 'gameName': 'Me', 'gameTag': 'TW1'}, {'puuid': 'client-puuid-duo', 'gameName': 'Duo', 'gameTag': 'TW1'}]}
 SESSION = {'myTeam': [
-    {'puuid': 'puuid-me', 'assignedPosition': 'middle'}, {'puuid': 'puuid-duo', 'assignedPosition': 'utility'},
+    {'puuid': 'client-puuid-me', 'assignedPosition': 'middle'}, {'puuid': 'client-puuid-duo', 'assignedPosition': 'utility'},
     {'puuid': '', 'assignedPosition': 'top'}, {'puuid': '', 'assignedPosition': 'jungle'}, {'puuid': '', 'assignedPosition': 'bottom'},
 ]}
 RANKS = {
@@ -133,9 +134,9 @@ class Handler(BaseHTTPRequestHandler):
                 if path == '/lol-gameflow/v1/gameflow-phase':
                     return self.send(CLIENT['phase'])
                 if path == '/lol-summoner/v1/current-summoner':
-                    return self.send({'puuid': 'puuid-me', 'gameName': 'Me', 'tagLine': 'TW1'})
+                    return self.send({'puuid': 'client-puuid-me', 'gameName': 'Me', 'tagLine': 'TW1'})
                 if path == '/riotclient/region-locale':
-                    return self.send({'region': 'TW', 'locale': 'zh_TW'})
+                    return self.send({'region': 'TW2', 'locale': 'zh_TW'})
                 if path == '/lol-lobby/v2/lobby':
                     return self.send(LOBBY)
                 if path == '/lol-champ-select/v1/session' and CLIENT['phase'] == 'ChampSelect':
@@ -146,6 +147,10 @@ class Handler(BaseHTTPRequestHandler):
                 puuid = path.rsplit('/', 1)[1]
                 LOOKED_UP.append(puuid)
                 return self.send(RANKS.get(puuid, []))
+            if path.startswith('/riot/account/v1/accounts/by-riot-id/'):
+                # Riot's API knows a player by another PUUID than the client's: here 'puuid-' and their name.
+                name = urllib.parse.unquote(path.split('/')[6])
+                return self.send({'puuid': f'puuid-{name.lower()}', 'gameName': name, 'tagLine': path.split('/')[7]})
             if path.startswith('/lol/spectator/v5/active-games/by-summoner/'):
                 if CLIENT['phase'] != 'InProgress':
                     return self.send({'status': {'status_code': 404}}, 404)
