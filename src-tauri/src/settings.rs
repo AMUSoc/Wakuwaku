@@ -424,6 +424,10 @@ pub async fn settings_mobile(app: AppHandle, what: String) -> Value {
             sh.change(json!({ "ntfy": ntfy }));
             None
         }
+        "ring" => {
+            crate::mobile::ring();
+            None
+        }
         "test" => {
             let sh = sh.clone();
             Some(tauri::async_runtime::spawn_blocking(move || crate::mobile::push_test(&sh)).await.unwrap_or_else(|e| Err(e.to_string())))

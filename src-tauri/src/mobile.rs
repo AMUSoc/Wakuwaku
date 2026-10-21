@@ -68,6 +68,10 @@ static SEEN: AtomicU64 = AtomicU64::new(0);
 // when a ring was asked for it from the tray (0 none).
 static BATTERY: Mutex<Option<(u8, bool, u64)>> = Mutex::new(None);
 static RING: AtomicU64 = AtomicU64::new(0);
+// The phone's last notifications, the latest first, for the settings to
+// list (and mute an app from): in memory alone, gone as she quits.
+static NOTICES: Mutex<std::collections::VecDeque<Value>> = Mutex::new(std::collections::VecDeque::new());
+const NOTICES_KEPT: usize = 20;
 // A ring not taken by the phone in so long is forgotten (it was away).
 const RING_MS: u64 = 120_000;
 // The phone's battery off the island once its app has not asked in so long.
@@ -323,7 +327,27 @@ pub fn view(sh: &Shared) -> Value {
         (l.on.as_ref().map(|(ip, _)| ip.to_string()), l.problem.clone())
     };
     let seen = SEEN.load(Ordering::SeqCst);
+    let now = now_ms();
+    // The specifics kept off screen: who and when alone.
+    let details = sh.setting("details") != false;
+    let notices: Vec<Value> = NOTICES
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|n| {
+            let mut n = n.clone();
+            n["ago"] = json!(now.saturating_sub(n["at"].as_u64().unwrap_or(now)));
+            if !details {
+                n["title"] = json!("");
+                n["text"] = json!("");
+            }
+            n
+        })
+        .collect();
+    let battery = BATTERY.lock().unwrap().filter(|b| now.saturating_sub(b.2) <= BATTERY_GONE_MS).map(|b| json!({ "level": b.0, "charging": b.1 }));
     json!({
+        "notices": notices,
+        "battery": battery,
         "listening": on,
         "problem": problem,
         "url": page_url(sh, true),
@@ -459,6 +483,12 @@ fn notice(sh: &Shared, body: &Value) -> bool {
     if title.is_empty() && text.is_empty() {
         return false;
     }
+    {
+        let mut kept = NOTICES.lock().unwrap();
+        kept.push_front(json!({ "pkg": pkg, "app": app, "title": title, "text": text, "at": now_ms() }));
+        kept.truncate(NOTICES_KEPT);
+    }
+    sh.push_settings();
     if sh.setting("phoneNotices") == false || sh.setting("phoneNoticeMute").as_array().is_some_and(|m| m.iter().any(|p| p.as_str() == Some(pkg.as_str()))) {
         return false;
     }

@@ -516,6 +516,8 @@
         ${row(esc(T('s.clickAction')), esc(T('s.clickActionNote')), seg('clickAction', [['jump', T('s.clickJump')], ['terminal', T('s.clickTerminal')]], s.clickAction || 'jump'))}
         ${row(esc(T('s.lol')), esc(T('s.lolNote')), sw('lol', s.lol !== false))}
         ${row(esc(T('s.riotKey')), esc(T('s.riotKeyNote')), `<input class="in" id="s-riot-key" type="password" spellcheck="false" autocomplete="off" placeholder="RGAPI-…" value="${esc(s.riotApiKey || '')}">`)}
+        ${row(esc(T('s.duel')), esc(T('s.duelNote', { key: s.duelKey || 'Alt+D' })), sw('duel', s.duel !== false))}
+        ${row(esc(T('s.duelHand')), esc(T('s.duelHandNote')), `<input class="in" id="s-duel-hand" spellcheck="false" autocomplete="off" placeholder="${esc(T('s.duelHandHint'))}" value="${esc(s.duelHand || '')}">`)}
       </div>`
   }
 
@@ -986,11 +988,41 @@
             : ''
         }
       </div>
+      ${s.mobile ? phoneBlock() : ''}
       ${sec(T('s.ntfy'))}<div class="grp">
         ${row(esc(T('s.ntfyOn')), esc(T('s.ntfyNote')), sw('ntfy.on', ntfy.on))}
         ${row(esc(T('s.ntfyServer')), esc(T('s.ntfyServerNote')), `<input class="in" id="s-ntfy-server" spellcheck="false" autocomplete="off" placeholder="https://ntfy.sh" value="${esc(ntfy.server || '')}">`)}
         <div class="r"><div class="grow"><div>${esc(T('s.ntfyTopic'))}</div><div class="d">${esc(T('s.ntfyTopicNote'))}</div><div class="r"><span class="cmd mono">${esc(ntfy.topic || '')}</span></div><div class="r"><button class="pbtn sm" data-copy="${esc(ntfy.topic || '')}">${esc(T('home.copy'))}</button><button class="pbtn sm" data-mobile="topic">${esc(T('s.ntfyNewTopic'))}</button><button class="pbtn sm al" data-mobile="test">${esc(T('s.ntfyTest'))}</button></div>${tried}</div></div>
       </div>`
+  }
+
+  // The phone's app (mobile.rs): its notifications on the island or not,
+  // the last ones (an app muted or let back from each), its battery and
+  // a ring to find it.
+  function phoneBlock() {
+    const s = snap.settings
+    const m = snap.mobile || {}
+    const muted = s.phoneNoticeMute || []
+    const b = m.battery
+    const ago = ms => (ms < 60000 ? T('s.phoneJustNow') : ms < 3600000 ? T('s.phoneMinAgo', { n: Math.round(ms / 60000) }) : T('s.phoneHourAgo', { n: Math.round(ms / 3600000) }))
+    const notices = (m.notices || []).slice(0, 10)
+    const list = notices
+      .map(n => {
+        const off = muted.includes(n.pkg)
+        const words = [n.title, n.text].filter(Boolean).join('：')
+        return `<div class="r"><div class="grow"><div>${esc(n.app || n.pkg)} <span class="d">· ${esc(ago(n.ago || 0))}${off ? ` · ${esc(T('s.phoneMutedTag'))}` : ''}</span></div>${words ? `<div class="d ellip">${esc(words)}</div>` : ''}</div><button class="pbtn sm${off ? '' : ' no'}" data-${off ? 'unmute' : 'mute'}="${esc(n.pkg)}">${esc(T(off ? 's.phoneUnmute' : 's.phoneMute'))}</button></div>`
+      })
+      .join('')
+    const others = muted.filter(p => !notices.some(n => n.pkg === p))
+    const mutedRow = others.length
+      ? `<div class="r"><div class="grow"><div>${esc(T('s.phoneMutedList'))}</div><div class="r">${others.map(p => `<button class="pbtn sm" data-unmute="${esc(p)}">${esc(p)} ✕</button>`).join('')}</div></div></div>`
+      : ''
+    return `${sec(T('s.phone'))}<div class="grp">
+        <div class="r"><div class="grow"><div>${esc(b ? T('s.phoneBattery', { n: b.level }) + (b.charging ? ' ⚡' : '') : T('s.phoneAway'))}</div><div class="d">${esc(T('s.phoneRingNote'))}</div></div><button class="pbtn sm" data-mobile="ring"${b ? '' : ' disabled'}>${esc(T('s.phoneRing'))}</button></div>
+        ${row(esc(T('s.phoneNotices')), esc(T('s.phoneNoticesNote')), sw('phoneNotices', s.phoneNotices !== false))}
+        ${mutedRow}
+      </div>
+      ${sec(T('s.phoneRecent'))}<div class="grp">${list || `<div class="r"><div class="grow d">${esc(T('s.phoneNone'))}</div></div>`}</div>`
   }
 
   // General: the welcome (nothing connected yet), the sessions and the
@@ -1411,6 +1443,11 @@
         draw()
       })
     }
+    // An app's notifications kept off the island, or let back.
+    const mute = at('[data-mute]')
+    if (mute) return patch({ phoneNoticeMute: [...new Set([...(snap.settings.phoneNoticeMute || []), mute.dataset.mute])] })
+    const unmute = at('[data-unmute]')
+    if (unmute) return patch({ phoneNoticeMute: (snap.settings.phoneNoticeMute || []).filter(p => p !== unmute.dataset.unmute) })
     const use = at('[data-use]')
     if (use) return patch({ pet: use.dataset.use })
     // An agent's pet out on the desktop, or home.
@@ -1576,6 +1613,8 @@
     if (e.target.id === 's-ntfy-server') return patch({ ntfy: { ...snap.settings.ntfy, server: e.target.value.trim().replace(/\/+$/, '') } })
     // Her Riot API key, kept once typed (lcu.rs); one not as Riot gives them is not kept.
     if (e.target.id === 's-riot-key') return patch({ riotApiKey: e.target.value.trim() })
+    // Her own hand traps, for Master Duel's helper (duel.rs).
+    if (e.target.id === 's-duel-hand') return patch({ duelHand: e.target.value.trim().slice(0, 300) })
     const key = e.target.dataset.field
     if (!key || !(key in drafts)) return
     const value = drafts[key].trim()
