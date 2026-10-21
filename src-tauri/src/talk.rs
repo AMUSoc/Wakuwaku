@@ -190,7 +190,9 @@ fn grok(text: &str) -> Vec<Message> {
         }
         last_role = role;
     }
-    out.retain(|m| !m.text.trim().is_empty());
+    // What the harness put in the person's place (a monitor's events in a
+    // reminder) is not shown as said: its text is a tool's output.
+    out.retain(|m| !m.text.trim().is_empty() && (m.role != "user" || is_persons(&m.text)));
     for m in &mut out {
         m.text = m.text.trim().to_string();
     }
@@ -419,6 +421,8 @@ mod tests {
             c("agent_message_chunk", "Looking."),
             json!({ "params": { "update": { "sessionUpdate": "tool_call" } } }),
             c("agent_message_chunk", "Found it."),
+            c("user_message_chunk", "<system-reminder>
+2 monitor events from 1 monitor"),
         ]);
         assert_eq!(talk(&from_text("grok", &t)), vec![("user", "Remember APPLE"), ("assistant", "OK"), ("user", "Look"), ("assistant", "Looking.\n\nFound it.")]);
     }
