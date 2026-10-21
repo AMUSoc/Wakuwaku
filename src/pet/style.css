@@ -1563,3 +1563,26 @@ body.hinting #island[data-view='compact'] .hint-dot {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* Tucked away (island.js isTucked): a handle at the top in the mood's
+   colour, out of the way of the tabs under it; pulled down, it comes out. */
+body.pulled-up #island {
+  width: 96px !important;
+  height: 8px !important;
+  border-radius: 6px;
+  transform: translateY(-5px);
+  /* Light whatever is under it, tinted with the mood (dark when idle). */
+  background: color-mix(in srgb, var(--ring, #9aa0aa) 55%, #dfe3ea) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  opacity: 0.8;
+  cursor: s-resize;
+}
+
+body.pulled-up #island:hover {
+  opacity: 1;
+  height: 11px !important;
+}
+
+body.pulled-up #island > * {
+  display: none !important;
+}

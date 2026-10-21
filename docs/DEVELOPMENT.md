@@ -287,6 +287,10 @@ examples/widgets 里的天气、股票、番茄钟、倒计时、久坐提醒、
 
 **它自己的外观**（#27）：设置 `islandTopLook`，`{ dark, light }`，各自 `{ bg, op, blur, edge }`；没设时纯黑、一圈 `rgba(255,255,255,0.07)` 的细线、白字，和以前一样，所以老用户什么都不变。`island.js` 的 `lookNow` 按 `pet:update` 的 `winLight`（Windows 的浅色、深色；`island.rs` 的 `look_over_max` 发现模式变了就重画一次）选哪一份；样式是 `style.css` 的 `home-island` 一节（`--i-bg`、`--i-edge`、`--i-line`，浅底上线和字都变深）。页面自己的 `backdrop-filter` 在这里没有东西可模糊，所以不设 `--i-blur`：半透明又开了毛玻璃时，`backplate.rs` 的亚克力底板跟着岛走，收起、展开、确认都垫着（设置不垫），大小变的时候不藏（见上面 #20 的 `movePlate`），静默时不垫。底板用不了时（Windows 10、关了透明效果），设置里不显示「云母毛玻璃」预设和毛玻璃滑块。半透明又没有模糊时，所在屏幕上有窗口最大化（`island.rs` 的 `os::maximized_on`：会有任务栏按钮的窗口、最大化、中心在这块屏上），底色加深到 90%：`look_over_max` 跟着全屏检测每 1.5 秒看一次（只在设了顶部外观、不透明度低于 90%、没有底板模糊、有人在用电脑时），变了才发 `island:over-max`。设置「外观」页的「灵动岛外观」放在灵动岛那一组里，预设是纯黑（默认）、Windows 深灰、云母毛玻璃、深灰 + 状态色光圈（深色），纯黑、Windows 浅灰、近白、云母毛玻璃、白 + 状态色光圈（浅色），上面一句说明这是顶部灵动岛的（`s.ilookTop`）；预览是桌面顶上的一颗岛，展开往下长。
 
+## 岛收起来（islandTuck，2026-10-22）
+
+托盘或岛的右键菜单「岛收起来（往下拉才出现）」：岛平常只剩顶端中间一条 96×8 的小把手（颜色是心情的 `--ring` 混浅灰，闲置也看得见），浏览器的分页列几乎都按得到。按住把手往下拉 14px、在把手上点一下、或在把手上滚轮往下，岛就出来（展开那一种）；滑鼠离开后照常的 `HOVER_CLOSE_MS` 加上刚拉出来的 0.7 秒宽限（`retuck`）再收回去。滑鼠只是经过把手**不会**打开（使用者要点分页时会一直误触），只拿住滑鼠让手势可以开始。等你核准的确认和设定页不收，照常自己跳出来。`island.js` 的 `isTucked`、`untuck`、`retuck`，body 的 class 是 `pulled-up`（原本已经有一个 `tucked` 是刘海用的，同名会被盖掉）；样式在 `style.css` 最后，背景要 `!important`。测试：把手离萤幕顶端太近，PowerShell 的 `SetCursorPos` 在那里会被系统移开（设 (-1278,12) 拿回来是 (-1266,0)），而且按下去点到的是下面 Chrome 的分页列（真的拖动过使用者的 Chrome），所以手势用 `/debug/eval` 在页面里发 pointer 事件测。
+
 ## macOS（刘海里的岛，zhoupengjie/Wakuwaku#32）
 
 从源码在 Mac 上编译、运行（jjme9307 的 PR，Apple Silicon + macOS 26.6 上试过）。家只有灵动岛，和 Windows 上一样。Accessory 应用（不进 Dock、不占菜单栏），`macos-private-api` 让窗口透明。

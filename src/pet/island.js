@@ -216,6 +216,26 @@
   let spriteUrl = null
   let second = null
   let isHover = false
+  // Tucked away (the islandTuck setting): a handle at the top alone, out of
+  // the way of what is under it (a browser's tabs); pulled down, or a click
+  // or the wheel on it, it comes out, and goes back once the pointer leaves.
+  // Not for a prompt nor the settings: those come out by themselves.
+  let tuckOpen = false
+  let tuckOpenedAt = 0
+  let tuckPress = null
+  let pointerIn = false
+  const TUCK_PULL_PX = 14
+  const TUCK_GRACE_MS = 700
+
+  // Back into its tuck once the pointer is out of it, but not in the
+  // moment it came out (the pull's own pointer may still be leaving it).
+  function retuck() {
+    if (!tuckOpen || tuckPress || pointerIn) return
+    const left = TUCK_GRACE_MS - (Date.now() - tuckOpenedAt)
+    if (left > 0) return void setTimeout(retuck, left)
+    tuckOpen = false
+    update()
+  }
   let hoverTimer
   // Something just happened: { until, clip, text }. The island opens for a
   // moment, she plays clip, and text (a hello) replaces the mood's line.
@@ -1012,6 +1032,17 @@
     body.classList.toggle('isl-light', inkLight)
   }
 
+  const isTucked = () => isOn() && config.islandTuck === true && !tuckOpen && !isAsking() && !isSetting() && !pull && !peek
+
+  // Pulled out of its tuck: open, as under the pointer.
+  function untuck() {
+    if (!isTucked()) return
+    tuckOpen = true
+    tuckOpenedAt = Date.now()
+    isHover = true
+    update()
+  }
+
   function update() {
     clearInterval(clockTimer)
     // While she is being pulled out, the pull has the island.
@@ -1041,6 +1072,7 @@
       settingsFrom = null
     }
     island.dataset.view = view
+    body.classList.toggle('pulled-up', isTucked() && view === 'compact')
     // The deeper ground at once as it opens; changing, over a moment.
     setDeep(was === view || view === 'compact')
     setInk()
@@ -1505,19 +1537,26 @@
 
   for (const target of [island]) {
     target.addEventListener('mouseenter', () => {
+      pointerIn = true
       window.pet.hover(true)
       clearTimeout(hoverTimer)
+      // Tucked: passing over the handle opens nothing (the tabs under it are
+      // being reached for); a pull, a click or the wheel does.
+      if (isTucked()) return
       hoverTimer = setTimeout(() => {
         isHover = true
         update()
       }, HOVER_OPEN_MS)
     })
     target.addEventListener('mouseleave', () => {
+      pointerIn = false
       // Pulling her out keeps the window's pointer, wherever it goes.
       if (!pull?.started) window.pet.hover(false)
       clearTimeout(hoverTimer)
       hoverTimer = setTimeout(() => {
         isHover = false
+        // Out again: tucked away (retuck waits out the moment it came out in).
+        if (tuckOpen) return retuck()
         // In the notch, whatever was open goes back once the pointer has
         // left, as a notch app's does: the settings too, unless a field in
         // them is being typed in (the user's call, 2026-10-14).
@@ -1532,6 +1571,8 @@
     // press may be a pull; pullUp decides). In the open island, a click on a
     // session goes to its window instead.
     target.addEventListener('click', e => {
+      // The click that pulled it out of its tuck opens nothing more.
+      if (Date.now() - tuckOpenedAt < 600) return
       // A click in the settings (✕, the head) may just have closed them: not a click to open.
       if (isSetting() || window.Settings?.layer?.contains(e.target) || Date.now() - pulledAt < 500) return
       if (view === 'ask' || panel.contains(e.target) || her.contains(e.target)) return
@@ -1563,6 +1604,11 @@
     target.addEventListener(
       'wheel',
       e => {
+        if (isTucked()) {
+          e.preventDefault()
+          if (e.deltaY > 0) untuck()
+          return
+        }
         if (!isQuiet() || widgets.length < 2 || isSetting() || view === 'ask') return
         e.preventDefault()
         turnWidget(e.deltaY > 0 ? 1 : -1)
@@ -1570,6 +1616,27 @@
       { passive: false },
     )
     target.addEventListener('pointerdown', e => {
+      // Tucked: a press on the handle, then a pull down (or a release) brings it out.
+      if (isTucked() && e.button === 0) {
+        tuckPress = { y: e.clientY }
+        const move = ev => {
+          if (tuckPress && ev.clientY - tuckPress.y > TUCK_PULL_PX) {
+            tuckPress = null
+            untuck()
+          }
+        }
+        const up = () => {
+          window.removeEventListener('pointermove', move)
+          window.removeEventListener('pointerup', up)
+          if (tuckPress) {
+            tuckPress = null
+            untuck()
+          }
+        }
+        window.addEventListener('pointermove', move)
+        window.addEventListener('pointerup', up)
+        return
+      }
       const session = e.button === 0 && view === 'expanded' && e.target.closest('[data-jump]')
       pressed = { id: session ? session.dataset.jump : '', at: Date.now() }
     })

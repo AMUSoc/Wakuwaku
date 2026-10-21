@@ -120,6 +120,8 @@ fn defaults() -> Map<String, Value> {
         // The display the island is on: the top-left corner of one ([x, y],
         // physical), or none: the main one (island.rs area).
         "islandDisplay": null,
+        // The island tucked away to a handle until pulled down (island.js).
+        "islandTuck": false,
         // The side island at the right edge, one row for each agent (dock.rs).
         "dock": false,
         // A League of Legends game on: the pets show of it (lol.rs); her own
