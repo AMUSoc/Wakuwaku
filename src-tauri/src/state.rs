@@ -803,6 +803,25 @@ impl Pet {
         Some(Talk { agent: agent_key(&s.agent).to_string(), transcript: s.transcript.clone(), cwd: s.cwd.clone(), chain: s.chain.clone(), reply: s.reply.clone(), mood: s.mood.clone() })
     }
 
+    // The session of an agent run under a process (a task from the phone,
+    // under her helper: run.rs job), the latest if several.
+    pub fn session_under(&self, agent: &str, pid: u32) -> Option<String> {
+        self.sessions.values().filter(|s| agent_key(&s.agent) == agent && s.chain.iter().any(|&(p, _)| p == pid)).max_by_key(|s| s.event_at).map(|s| s.id.clone())
+    }
+
+    // Else the session of that agent heard from since the run began, in its
+    // folder, asked what it was asked (its task, when the words make one):
+    // Codex runs its hooks from its own sandbox service, whose processes
+    // are not under the run's (seen 2026-10-22).
+    pub fn session_begun(&self, agent: &str, since: u64, dir: &str, task: Option<&str>) -> Option<String> {
+        let same_dir = |cwd: &str| cwd.trim_end_matches(['\\', '/']).eq_ignore_ascii_case(dir.trim_end_matches(['\\', '/']));
+        self.sessions
+            .values()
+            .filter(|s| agent_key(&s.agent) == agent && s.event_at >= since && same_dir(&s.cwd) && task.is_none_or(|t| s.task == t))
+            .max_by_key(|s| s.event_at)
+            .map(|s| s.id.clone())
+    }
+
     // Whether a session already knows where it runs.
     pub fn has_chain(&self, id: &str) -> bool {
         self.sessions.get(id).is_some_and(|s| !s.chain.is_empty())
@@ -1204,6 +1223,18 @@ mod tests {
         pet.check_stale(STALE_MS + 1, Hold::Seen);
         assert_eq!(pet.get_for("grok", STALE_MS + 1)["mood"], "working");
         assert_eq!(pet.get_for("claude", STALE_MS + 1)["mood"], "idle");
+    }
+
+    #[test]
+    fn the_session_a_run_from_the_phone_began() {
+        let mut pet = Pet::default();
+        pet.apply(&msg(json!({ "session": "old", "agent": "codex", "mood": "working", "cwd": "C:\\w", "task": "say hi" })), 5, Hold::Seen);
+        pet.apply(&msg(json!({ "session": "other", "agent": "codex", "mood": "working", "cwd": "C:\\x", "task": "say hi" })), 20, Hold::Seen);
+        pet.apply(&msg(json!({ "session": "new", "agent": "codex", "mood": "working", "cwd": "c:\\W\\", "task": "say hi", "chain": [[7, 1]] })), 20, Hold::Seen);
+        assert_eq!(pet.session_begun("codex", 10, "C:\\w", Some("say hi")).as_deref(), Some("new"));
+        assert_eq!(pet.session_begun("codex", 10, "C:\\w", Some("else")), None);
+        assert_eq!(pet.session_begun("claude", 10, "C:\\w", None), None);
+        assert_eq!(pet.session_under("codex", 7).as_deref(), Some("new"));
     }
 
     #[test]

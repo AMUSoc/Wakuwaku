@@ -11,6 +11,7 @@
 //   POST /mobile/api/run       { agent, prompt, cwd? }: a task for an agent (run.rs)
 //   GET  /mobile/api/conversation  ?session=<id>: the whole conversation, and whether the phone may add to it (talk.rs)
 //   POST /mobile/api/say       { session, text }: the phone's words for that session (talk.rs, run.rs)
+//   GET  /mobile/api/job       ?agent=<a>&started=<ms>: how a run from the phone goes, its session (run.rs)
 //
 // On this computer (127.0.0.1) the page needs nothing. With "phone access"
 // on (the setting mobile), the same port is listened on at one more address
@@ -483,8 +484,8 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
         ("GET", "/mobile/icon-192.png") => respond(req, 200, "image/png", ICON_192.to_vec(), &[("cache-control", "max-age=86400".into())]),
         ("GET", "/mobile/icon-512.png") => respond(req, 200, "image/png", ICON_512.to_vec(), &[("cache-control", "max-age=86400".into())]),
         // Phone access on and the token, wherever they come from.
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation") | ("POST", "/mobile/api/run" | "/mobile/api/say") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation") | ("POST", "/mobile/api/run" | "/mobile/api/say") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
         ("GET", "/mobile/api/conversation") => {
             let id = query_of(req.url(), "session").map(decode).unwrap_or_default();
             match conversation(sh, &id) {
@@ -498,6 +499,14 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
             match say(sh, &id, body["text"].as_str().unwrap_or("")) {
                 Ok(done) => json_reply(req, 200, done),
                 Err(why) => json_reply(req, if matches!(why, "busy" | "live") { 409 } else if why == "no such session" { 404 } else { 400 }, json!({ "error": why })),
+            }
+        }
+        ("GET", "/mobile/api/job") => {
+            let agent = query_of(req.url(), "agent").map(decode).unwrap_or_default();
+            let started = query_of(req.url(), "started").and_then(|s| s.parse().ok()).unwrap_or(0);
+            match crate::run::job(sh, &agent, started) {
+                Some(body) => json_reply(req, 200, body),
+                None => json_reply(req, 404, json!({ "error": "no such run" })),
             }
         }
         ("GET", "/mobile/api/reply") => {

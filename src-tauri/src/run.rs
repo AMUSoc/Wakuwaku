@@ -9,7 +9,8 @@
 // job (detach.rs), which runs the agent with the file as its input:
 //
 //   claude  claude -p                                 (the words on stdin)
-//   codex   codex exec -                              (the words on stdin)
+//   codex   codex exec --skip-git-repo-check -        (the words on stdin; the
+//                                                      folder chosen need not be a git repository)
 //   grok    grok --prompt-file <file> --permission-mode default
 //   agy     agy -p <words>                            (agy.exe takes them only so;
 //                                                      an .exe: no cmd.exe between)
@@ -29,7 +30,7 @@
 // agent's resume of that session in the folder it works in:
 //
 //   claude  claude --resume <id> -p                    (the words on stdin)
-//   codex   codex exec resume <id> -                   (the words on stdin)
+//   codex   codex exec resume --skip-git-repo-check <id> -  (the words on stdin)
 //           codex queue --thread <id> --message <words>  while it is open:
 //                                                      Codex's own codex.exe, no cmd.exe
 //   grok    grok -r <id> --prompt-file <file> --permission-mode default
@@ -61,6 +62,11 @@ struct Run {
 }
 
 static RUNS: Mutex<Option<HashMap<String, Run>>> = Mutex::new(None);
+// The helpers of the last runs, by agent and start: the session each began
+// is the one whose chain has it, else the one asked its task since (job).
+static HELPERS: Mutex<Vec<(String, u64, u32)>> = Mutex::new(Vec::new());
+// So much of a run's output, its end, at most.
+const OUTPUT: usize = 6000;
 
 fn runs_dir(sh: &Shared) -> PathBuf {
     sh.dir.join("runs")
@@ -171,7 +177,9 @@ fn launch(sh: &Shared, agent: &str, prompt: &str, dir: &Path, mode: Mode) -> Res
         Mode::Resume(id) => (json!(id), Value::Null),
         Mode::Queue(id) => (Value::Null, json!(id)),
     };
-    let spec = json!({ "agent": agent, "dir": dir.to_string_lossy(), "prompt": words.to_string_lossy(), "log": runs.join(format!("{agent}-{started}.log")).to_string_lossy(), "started": started, "resume": resume, "queue": queue });
+    // What its words ask, to know its session by (job): kept with it, as she may restart meanwhile.
+    let task = if matches!(mode, Mode::New) { crate::events::task_of(prompt) } else { None };
+    let spec = json!({ "agent": agent, "dir": dir.to_string_lossy(), "prompt": words.to_string_lossy(), "log": runs.join(format!("{agent}-{started}.log")).to_string_lossy(), "started": started, "resume": resume, "queue": queue, "task": task });
     std::fs::write(&job, spec.to_string()).map_err(|_| "io")?;
     let exe = std::env::current_exe().map_err(|_| "io")?;
     let job_arg = job.to_string_lossy().into_owned();
@@ -180,6 +188,12 @@ fn launch(sh: &Shared, agent: &str, prompt: &str, dir: &Path, mode: Mode) -> Res
         return Err("spawn");
     };
     RUNS.lock().unwrap().get_or_insert_with(HashMap::new).insert(agent.to_string(), Run { pid, started, job });
+    {
+        let mut helpers = HELPERS.lock().unwrap();
+        helpers.push((agent.to_string(), started, pid));
+        let excess = helpers.len().saturating_sub(KEEP);
+        helpers.drain(..excess);
+    }
     let how = match &mode {
         Mode::New => "run".to_string(),
         Mode::Resume(id) => format!("resume {id}"),
@@ -187,6 +201,58 @@ fn launch(sh: &Shared, agent: &str, prompt: &str, dir: &Path, mode: Mode) -> Res
     };
     sh.log(&format!("{how} from the phone: {agent} in {} (helper {pid}): {}", dir.display(), first_words(prompt)));
     Ok(json!({ "ok": true, "agent": agent, "started": started, "mode": match mode { Mode::New => "new", Mode::Resume(_) => "resume", Mode::Queue(_) => "queue" } }))
+}
+
+// How a run from the phone goes (GET /mobile/api/job): whether it still
+// runs, how it ended, the session it began (or the one it went on with),
+// and, ended, the end of what it printed (its reply: the headless modes
+// print it), for a run whose session she never heard of.
+pub fn job(sh: &Shared, agent: &str, started: u64) -> Option<Value> {
+    if !crate::data::AGENTS.contains(&agent) {
+        return None;
+    }
+    let runs = runs_dir(sh);
+    let spec: Value = serde_json::from_str(&std::fs::read_to_string(runs.join(format!("{agent}-{started}.json"))).ok()?).ok()?;
+    let ended = spec.get("ended").is_some();
+    let pid = HELPERS.lock().unwrap().iter().find(|(a, s, _)| a == agent && *s == started).map(|h| h.2);
+    let given = spec["resume"].as_str().or(spec["queue"].as_str()).map(str::to_string);
+    let task = spec["task"].as_str();
+    let session = given
+        .or_else(|| pid.and_then(|p| sh.pet.lock().unwrap().session_under(agent, p)))
+        .or_else(|| sh.pet.lock().unwrap().session_begun(agent, started, spec["dir"].as_str().unwrap_or(""), task));
+    let output = if ended { output_of(&runs.join(format!("{agent}-{started}.log"))) } else { String::new() };
+    Some(json!({ "agent": agent, "started": started, "running": !ended, "exit": spec.get("exit"), "error": spec.get("error"), "session": session, "output": output }))
+}
+
+// The end of a run's output, without a terminal's colours; read as UTF-8
+// (what is not, as best it can).
+fn output_of(log: &Path) -> String {
+    let Ok(bytes) = std::fs::read(log) else { return String::new() };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut plain = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            // ESC [ … a letter: a colour, a cursor move.
+            '\u{1b}' => {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    for n in chars.by_ref() {
+                        if n.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+            }
+            '\r' => {}
+            c => plain.push(c),
+        }
+    }
+    let plain = plain.trim();
+    match plain.char_indices().rev().nth(OUTPUT - 1) {
+        Some((at, _)) if at > 0 => format!("…{}", &plain[at..]),
+        _ => plain.to_string(),
+    }
 }
 
 // Only the last few runs' files kept.
@@ -234,8 +300,10 @@ pub fn command(agent: &str, prompt_file: &str, prompt: &str, mode: &Mode) -> (&'
     let v = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     match (agent, mode) {
         ("codex", Mode::Queue(id)) => ("codex", v(&["queue", "--thread", id, "--message", prompt]), false),
-        ("codex", Mode::Resume(id)) => ("codex", v(&["exec", "resume", id, "-"]), true),
-        ("codex", _) => ("codex", v(&["exec", "-"]), true),
+        // The folder is the one the person chose (agentDirs): Codex's own
+        // check, that it be a git repository, would refuse a plain one.
+        ("codex", Mode::Resume(id)) => ("codex", v(&["exec", "resume", "--skip-git-repo-check", id, "-"]), true),
+        ("codex", _) => ("codex", v(&["exec", "--skip-git-repo-check", "-"]), true),
         ("grok", Mode::Resume(id)) => ("grok", v(&["-r", id, "--prompt-file", prompt_file, "--permission-mode", "default"]), false),
         ("grok", _) => ("grok", v(&["--prompt-file", prompt_file, "--permission-mode", "default"]), false),
         ("agy", Mode::Resume(id)) => ("agy", v(&["--conversation", id, "-p", prompt]), false),
@@ -379,7 +447,7 @@ mod tests {
     fn each_agent_s_non_interactive_command_and_no_skipping() {
         let new = Mode::New;
         assert_eq!(command("claude", "p.txt", "hi", &new), ("claude", vec!["-p".to_string()], true));
-        assert_eq!(command("codex", "p.txt", "hi", &new), ("codex", vec!["exec".to_string(), "-".to_string()], true));
+        assert_eq!(command("codex", "p.txt", "hi", &new), ("codex", vec!["exec".to_string(), "--skip-git-repo-check".into(), "-".into()], true));
         assert_eq!(command("grok", "p.txt", "hi", &new).1, ["--prompt-file", "p.txt", "--permission-mode", "default"]);
         assert_eq!(command("agy", "p.txt", "a \"quoted\" & piped | thing", &new), ("agy", vec!["-p".to_string(), "a \"quoted\" & piped | thing".to_string()], false));
         for agent in crate::data::AGENTS {
@@ -394,7 +462,7 @@ mod tests {
     fn words_for_a_session_by_each_agent_s_resume() {
         let id = Mode::Resume("01a1-b2".into());
         assert_eq!(command("claude", "p.txt", "hi", &id), ("claude", vec!["--resume".to_string(), "01a1-b2".into(), "-p".into()], true));
-        assert_eq!(command("codex", "p.txt", "hi", &id), ("codex", vec!["exec".to_string(), "resume".into(), "01a1-b2".into(), "-".into()], true));
+        assert_eq!(command("codex", "p.txt", "hi", &id), ("codex", vec!["exec".to_string(), "resume".into(), "--skip-git-repo-check".into(), "01a1-b2".into(), "-".into()], true));
         assert_eq!(command("grok", "p.txt", "hi", &id).1, ["-r", "01a1-b2", "--prompt-file", "p.txt", "--permission-mode", "default"]);
         assert_eq!(command("agy", "p.txt", "hi", &id).1, ["--conversation", "01a1-b2", "-p", "hi"]);
         assert_eq!(command("codex", "p.txt", "a & b", &Mode::Queue("t".into())), ("codex", vec!["queue".to_string(), "--thread".into(), "t".into(), "--message".into(), "a & b".into()], false));
@@ -431,6 +499,16 @@ mod tests {
         assert_eq!(workdir(&root, Some(&std::env::temp_dir().to_string_lossy())), None);
         assert_eq!(workdir(&root, Some("no-such")), None);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_run_s_output_without_colours_its_end_alone() {
+        let path = std::env::temp_dir().join(format!("wakuwaku-out-{}.log", std::process::id()));
+        std::fs::write(&path, "\u{1b}[32mHi\u{1b}[0m there\r\n").unwrap();
+        assert_eq!(output_of(&path), "Hi there");
+        std::fs::write(&path, "x".repeat(OUTPUT + 10)).unwrap();
+        assert_eq!(output_of(&path).chars().count(), OUTPUT + 1);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
