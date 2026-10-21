@@ -552,7 +552,7 @@ fn phone_battery(sh: &Shared, said: &str) {
     let before = BATTERY.lock().unwrap().replace((level, charging, now));
     let words = if charging { format!("{level}% ⚡") } else { format!("{level}%") };
     if sh.widgets.lock().unwrap().set_built_in("phone", json!(words), now) {
-        sh.redraw();
+        sh.redraw_widgets();
     }
     if !charging {
         let was = before.filter(|b| !b.1).map_or(101, |b| b.0);

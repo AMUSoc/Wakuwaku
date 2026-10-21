@@ -1689,7 +1689,9 @@ fn main() {
                             // A Grok turn still under way by its own log is not stale (keep.rs).
                             keep::keep_grok_busy(&ticker);
                             changed |= ticker.pet.lock().unwrap().check_stale(now, hold);
-                            changed |= mobile::phone_gone(&ticker);
+                            if mobile::phone_gone(&ticker) {
+                                ticker.redraw_widgets();
+                            }
                         }
                         changed |= ticker.pet.lock().unwrap().hide_quiet(now, hide);
                         if changed {
