@@ -67,6 +67,7 @@ mod run;
 mod screen;
 mod scout;
 mod duel;
+mod clip;
 mod scripts;
 mod server;
 mod settings;
@@ -1012,6 +1013,14 @@ async fn scout_close(app: AppHandle) {
     scout::show(&sh, false);
 }
 
+// The folder the phone's files go to (mobile.rs drop), from the island's word of one.
+#[tauri::command]
+async fn open_drops() {
+    let dir = mobile::drops_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    jump::open_url(&dir.to_string_lossy());
+}
+
 // Master Duel's helper (duel.rs): put away by its ✕, or asked again.
 #[tauri::command]
 async fn duel_close(app: AppHandle) {
@@ -1426,6 +1435,7 @@ fn main() {
             pet_answer,
             scout_close,
             duel_close,
+            open_drops,
             duel_again,
             scout_game,
             scout_rows,

@@ -13,6 +13,8 @@
 //   POST /mobile/api/say       { session, text }: the phone's words for that session (talk.rs, run.rs)
 //   GET  /mobile/api/job       ?agent=<a>&started=<ms>: how a run from the phone goes, its session (run.rs)
 //   POST /mobile/api/notice    { pkg, app, title, text }: a notification on the phone, shown on the island (notice)
+//   POST /mobile/api/clip      { text }: the phone's text onto the computer's clipboard
+//   POST /mobile/api/drop      a file shared from the phone (its name in x-wakuwaku-name): into Downloads\Wakuwaku
 //
 // On this computer (127.0.0.1) the page needs nothing. With "phone access"
 // on (the setting mobile), the same port is listened on at one more address
@@ -72,6 +74,12 @@ static RING: AtomicU64 = AtomicU64::new(0);
 // list (and mute an app from): in memory alone, gone as she quits.
 static NOTICES: Mutex<std::collections::VecDeque<Value>> = Mutex::new(std::collections::VecDeque::new());
 const NOTICES_KEPT: usize = 20;
+// The clipboard's change count last given to the phone (or set from it): a
+// change since is sent with its next ask; 0 until first looked at.
+static CLIP_SEEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+const CLIP_MOST: usize = 20_000;
+// A file from the phone: so large at most.
+const DROP_MOST: u64 = 1024 * 1024 * 1024;
 // A ring not taken by the phone in so long is forgotten (it was away).
 const RING_MS: u64 = 120_000;
 // The phone's battery off the island once its app has not asked in so long.
@@ -574,6 +582,86 @@ fn take_ring() -> bool {
     at != 0 && now_ms().saturating_sub(at) < RING_MS
 }
 
+// The computer's clipboard for the phone, if its text changed since it was
+// last given (or set from it). Not with clipToPhone off; none the first
+// time it is looked at (what was there before is not news).
+fn clip_for_phone(sh: &Shared) -> Option<String> {
+    if sh.setting("clipToPhone") == false {
+        return None;
+    }
+    let seq = crate::clip::seq();
+    let seen = CLIP_SEEN.swap(seq, Ordering::SeqCst);
+    if seen == 0 || seen == seq {
+        return None;
+    }
+    crate::clip::read(CLIP_MOST).1
+}
+
+// The phone's text onto the clipboard, not sent back to it; said on the island.
+fn from_phone_clip(sh: &Shared, text: &str) -> bool {
+    let Some(seq) = crate::clip::write(text) else { return false };
+    CLIP_SEEN.store(seq, Ordering::SeqCst);
+    let lang = sh.lang();
+    sh.to_pages("pet:nudge", json!({ "id": "phone", "icon": "phone", "words": crate::i18n::t(lang, "phone.clip"), "label": clip_chars(text.trim(), 40), "value": "", "private": true, "open": null }));
+    true
+}
+
+// Where the phone's files go: Downloads\Wakuwaku.
+pub fn drops_dir() -> std::path::PathBuf {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(std::path::PathBuf::from).unwrap_or_default();
+    home.join("Downloads").join("Wakuwaku")
+}
+
+// A file's name as Windows takes it: no path, none of \ / : * ? " < > |,
+// no control characters, not ending in a dot or a space; none at all, the time.
+pub fn safe_name(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let clean: String = base.chars().filter(|c| !c.is_control() && !"\\/:*?\"<>|".contains(*c)).take(120).collect();
+    let clean = clean.trim().trim_end_matches(['.', ' ']).to_string();
+    if clean.is_empty() || clean.chars().all(|c| c == '.') {
+        format!("phone-{}", now_ms())
+    } else {
+        clean
+    }
+}
+
+// Not over one there: "photo (2).jpg".
+fn free_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(at) if at > 0 => (&name[..at], &name[at..]),
+        _ => (name, ""),
+    };
+    (2..1000).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap_or(first)
+}
+
+// A file from the phone, written as it comes; said on the island (a click: the folder).
+fn drop_file(sh: &Shared, req: &mut Request, name: &str) -> Result<String, &'static str> {
+    let dir = drops_dir();
+    std::fs::create_dir_all(&dir).map_err(|_| "io")?;
+    let path = free_path(&dir, &safe_name(name));
+    let part = dir.join(format!("{}.part", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+    let mut file = std::fs::File::create(&part).map_err(|_| "io")?;
+    let copied = std::io::copy(&mut req.as_reader().take(DROP_MOST + 1), &mut file);
+    drop(file);
+    match copied {
+        Ok(n) if n > 0 && n <= DROP_MOST => {}
+        _ => {
+            let _ = std::fs::remove_file(&part);
+            return Err("size");
+        }
+    }
+    std::fs::rename(&part, &path).map_err(|_| "io")?;
+    let saved = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let lang = sh.lang();
+    sh.to_pages("pet:nudge", json!({ "id": "phone", "icon": "down", "words": crate::i18n::t(lang, "phone.got").replace("{name}", &saved), "label": crate::i18n::t(lang, "phone.gotWhere"), "value": "", "private": false, "open": { "drops": true } }));
+    sh.log("phone: a file into Downloads\\Wakuwaku");
+    Ok(saved)
+}
+
 // Whether the phone's app has been heard from lately (the tray offers to ring it).
 pub fn phone_near() -> bool {
     BATTERY.lock().unwrap().is_some_and(|b| now_ms().saturating_sub(b.2) <= BATTERY_GONE_MS)
@@ -624,8 +712,8 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
         ("GET", "/mobile/icon-192.png") => respond(req, 200, "image/png", ICON_192.to_vec(), &[("cache-control", "max-age=86400".into())]),
         ("GET", "/mobile/icon-512.png") => respond(req, 200, "image/png", ICON_512.to_vec(), &[("cache-control", "max-age=86400".into())]),
         // Phone access on and the token, wherever they come from.
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
         ("GET", "/mobile/api/conversation") => {
             let id = query_of(req.url(), "session").map(decode).unwrap_or_default();
             match conversation(sh, &id) {
@@ -645,6 +733,22 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
             let Some(body) = read_json(&mut req) else { return json_reply(req, 400, json!({ "error": "bad json" })) };
             let shown = notice(sh, &body);
             json_reply(req, 200, json!({ "ok": true, "shown": shown }))
+        }
+        ("POST", "/mobile/api/clip") if header(&req, "x-wakuwaku").is_some() => {
+            let Some(body) = read_json(&mut req) else { return json_reply(req, 400, json!({ "error": "bad json" })) };
+            let text = body["text"].as_str().unwrap_or("");
+            if text.trim().is_empty() || text.chars().count() > CLIP_MOST {
+                return json_reply(req, 400, json!({ "error": "text" }));
+            }
+            let ok = from_phone_clip(sh, text);
+            json_reply(req, 200, json!({ "ok": ok }))
+        }
+        ("POST", "/mobile/api/drop") if header(&req, "x-wakuwaku").is_some() => {
+            let name = header(&req, "x-wakuwaku-name").map(decode).unwrap_or_default();
+            match drop_file(sh, &mut req, &name) {
+                Ok(saved) => json_reply(req, 200, json!({ "ok": true, "name": saved })),
+                Err(why) => json_reply(req, 400, json!({ "error": why })),
+            }
         }
         ("GET", "/mobile/api/job") => {
             let agent = query_of(req.url(), "agent").map(decode).unwrap_or_default();
@@ -684,6 +788,9 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
             if let Some(battery) = header(&req, "x-wakuwaku-battery") {
                 phone_battery(sh, &battery);
                 body["ring"] = json!(take_ring());
+                if let Some(text) = clip_for_phone(sh) {
+                    body["clip"] = json!(text);
+                }
             }
             json_reply(req, 200, body)
         }
@@ -787,6 +894,16 @@ pub fn push_test(sh: &Shared) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_name_windows_takes() {
+        assert_eq!(safe_name("IMG_0001.jpg"), "IMG_0001.jpg");
+        assert_eq!(safe_name("../../evil:name?.txt"), "evilname.txt");
+        assert_eq!(safe_name("C:\\x\\y.pdf"), "y.pdf");
+        assert_eq!(safe_name("a<b>|c. "), "abc");
+        assert!(safe_name("..").starts_with("phone-"));
+        assert!(safe_name("").starts_with("phone-"));
+    }
 
     #[test]
     fn a_one_time_code_where_the_message_says_so() {

@@ -1020,6 +1020,7 @@
     return `${sec(T('s.phone'))}<div class="grp">
         <div class="r"><div class="grow"><div>${esc(b ? T('s.phoneBattery', { n: b.level }) + (b.charging ? ' ⚡' : '') : T('s.phoneAway'))}</div><div class="d">${esc(T('s.phoneRingNote'))}</div></div><button class="pbtn sm" data-mobile="ring"${b ? '' : ' disabled'}>${esc(T('s.phoneRing'))}</button></div>
         ${row(esc(T('s.phoneNotices')), esc(T('s.phoneNoticesNote')), sw('phoneNotices', s.phoneNotices !== false))}
+        ${row(esc(T('s.clipToPhone')), esc(T('s.clipToPhoneNote')), sw('clipToPhone', s.clipToPhone !== false))}
         ${mutedRow}
       </div>
       ${sec(T('s.phoneRecent'))}<div class="grp">${list || `<div class="r"><div class="grow d">${esc(T('s.phoneNone'))}</div></div>`}</div>`

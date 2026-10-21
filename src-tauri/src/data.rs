@@ -126,6 +126,8 @@ fn defaults() -> Map<String, Value> {
         // for the apps muted (their package names).
         "phoneNotices": true,
         "phoneNoticeMute": [],
+        // The computer's clipboard to the phone as it changes (mobile.rs).
+        "clipToPhone": true,
         // The side island at the right edge, one row for each agent (dock.rs).
         "dock": false,
         // A League of Legends game on: the pets show of it (lol.rs); her own

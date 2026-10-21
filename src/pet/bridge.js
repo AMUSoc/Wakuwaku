@@ -61,6 +61,8 @@
     onDuel: on('duel:update'),
     duelClose: () => send('duel_close'),
     duelAgain: () => send('duel_again'),
+    // The folder the phone's files go to (mobile.rs drop).
+    openDrops: () => send('open_drops'),
     // A game kept, whole (its scoreboard), by its id; none if not kept.
     scoutGame: id => invoke('scout_game', { id: String(id || '') }).catch(() => null),
     // Her rows of these games kept (a champion's, a position's), as who in them.

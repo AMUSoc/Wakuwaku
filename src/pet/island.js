@@ -1597,6 +1597,8 @@
       }
       const open = isNudging() && nudge.widget?.open
       // A code in a phone's notification (mobile.rs notice): copied.
+      // A file from the phone: its folder.
+      if (open?.drops) return window.pet.openDrops()
       if (open?.copy) {
         navigator.clipboard?.writeText(open.copy).then(() => nudgeFor('waving', t(lang, 'phone.copied', { code: open.copy }), 1600), () => {})
         return
