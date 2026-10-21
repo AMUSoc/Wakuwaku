@@ -12,6 +12,7 @@
 //   GET  /mobile/api/conversation  ?session=<id>: the whole conversation, and whether the phone may add to it (talk.rs)
 //   POST /mobile/api/say       { session, text }: the phone's words for that session (talk.rs, run.rs)
 //   GET  /mobile/api/job       ?agent=<a>&started=<ms>: how a run from the phone goes, its session (run.rs)
+//   POST /mobile/api/notice    { pkg, app, title, text }: a notification on the phone, shown on the island (notice)
 //
 // On this computer (127.0.0.1) the page needs nothing. With "phone access"
 // on (the setting mobile), the same port is listened on at one more address
@@ -63,6 +64,14 @@ struct Listening {
 static LISTENING: Mutex<Listening> = Mutex::new(Listening { on: None, problem: String::new() });
 // When the phone last asked for anything of its own (ms), 0 never.
 static SEEN: AtomicU64 = AtomicU64::new(0);
+// The phone's battery as its app last said (percent, charging, when), and
+// when a ring was asked for it from the tray (0 none).
+static BATTERY: Mutex<Option<(u8, bool, u64)>> = Mutex::new(None);
+static RING: AtomicU64 = AtomicU64::new(0);
+// A ring not taken by the phone in so long is forgotten (it was away).
+const RING_MS: u64 = 120_000;
+// The phone's battery off the island once its app has not asked in so long.
+const BATTERY_GONE_MS: u64 = 3 * 60_000;
 
 // --- Who is asking --------------------------------------------------------------------
 
@@ -439,6 +448,107 @@ fn say(sh: &Shared, id: &str, text: &str) -> Result<Value, &'static str> {
     crate::run::say(sh, &t.agent, text, &dir, mode)
 }
 
+// A notification on the phone (its app's name and package, title, text):
+// on the island for a moment as a widget's nudge is, the specifics kept off
+// screen as hers are (details), a code in it copied by a click. Not while
+// a session wants you, she is out of sight (hidden, full screen), the
+// setting is off, or its app is muted. Nothing of it kept or logged.
+fn notice(sh: &Shared, body: &Value) -> bool {
+    let field = |k: &str, most: usize| body[k].as_str().map(|s| clip_chars(s.trim(), most)).unwrap_or_default();
+    let (pkg, app, title, text) = (field("pkg", 200), field("app", 60), field("title", 120), field("text", 400));
+    if title.is_empty() && text.is_empty() {
+        return false;
+    }
+    if sh.setting("phoneNotices") == false || sh.setting("phoneNoticeMute").as_array().is_some_and(|m| m.iter().any(|p| p.as_str() == Some(pkg.as_str()))) {
+        return false;
+    }
+    if !sh.is_visible() || sh.pet.lock().unwrap().wants_you() {
+        return false;
+    }
+    let code = code_of(&format!("{title} {text}"));
+    let words = if text.is_empty() { title.clone() } else { text.clone() };
+    let label = [app.as_str(), if text.is_empty() { "" } else { title.as_str() }].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · ");
+    let value = code.as_ref().map(|c| format!("{c} · {}", crate::i18n::t(sh.lang(), "phone.copy"))).unwrap_or_default();
+    sh.to_pages("pet:nudge", json!({ "id": "phone", "icon": "phone", "words": words, "label": label, "value": value, "private": true, "open": code.map(|c| json!({ "copy": c })) }));
+    true
+}
+
+fn clip_chars(s: &str, most: usize) -> String {
+    match s.char_indices().nth(most) {
+        Some((at, _)) => format!("{}…", &s[..at]),
+        None => s.to_string(),
+    }
+}
+
+// A one-time code in a message that says it is one: its first run of 4 to 8 digits.
+pub fn code_of(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    const SAYS: [&str; 9] = ["驗證碼", "验证码", "認證碼", "认证码", "驗證", "code", "otp", "密碼", "passcode"];
+    if !SAYS.iter().any(|w| lower.contains(w)) {
+        return None;
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_digit() {
+            let start = i;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+            if (4..=8).contains(&(i - start)) {
+                return Some(chars[start..i].iter().collect());
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+// The phone's battery ("80", "80+" while charging): the island's phone
+// widget, and a word as it falls to 20% and to 10% unplugged.
+fn phone_battery(sh: &Shared, said: &str) {
+    let charging = said.ends_with('+');
+    let Some(level) = said.trim_end_matches('+').trim().parse::<u8>().ok().filter(|l| *l <= 100) else { return };
+    let now = now_ms();
+    let before = BATTERY.lock().unwrap().replace((level, charging, now));
+    let words = if charging { format!("{level}% ⚡") } else { format!("{level}%") };
+    if sh.widgets.lock().unwrap().set_built_in("phone", json!(words), now) {
+        sh.redraw();
+    }
+    if !charging {
+        let was = before.filter(|b| !b.1).map_or(101, |b| b.0);
+        if [20u8, 10].iter().any(|m| level <= *m && was > *m) {
+            sh.nudge_widget("phone", &crate::i18n::t(sh.lang(), "phone.low").replace("{n}", &level.to_string()));
+        }
+    }
+}
+
+// Not heard from in a while: its battery off the island. True when it went.
+pub fn phone_gone(sh: &Shared) -> bool {
+    let stale = BATTERY.lock().unwrap().is_some_and(|b| now_ms().saturating_sub(b.2) > BATTERY_GONE_MS);
+    if !stale {
+        return false;
+    }
+    *BATTERY.lock().unwrap() = None;
+    sh.widgets.lock().unwrap().remove_built_in("phone")
+}
+
+// The tray's "ring the phone": taken by its app's next ask.
+pub fn ring() {
+    RING.store(now_ms(), Ordering::SeqCst);
+}
+
+fn take_ring() -> bool {
+    let at = RING.swap(0, Ordering::SeqCst);
+    at != 0 && now_ms().saturating_sub(at) < RING_MS
+}
+
+// Whether the phone's app has been heard from lately (the tray offers to ring it).
+pub fn phone_near() -> bool {
+    BATTERY.lock().unwrap().is_some_and(|b| now_ms().saturating_sub(b.2) <= BATTERY_GONE_MS)
+}
+
 fn read_json(req: &mut Request) -> Option<Value> {
     let mut bytes = Vec::new();
     req.as_reader().take(64 * 1024).read_to_end(&mut bytes).ok()?;
@@ -484,8 +594,8 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
         ("GET", "/mobile/icon-192.png") => respond(req, 200, "image/png", ICON_192.to_vec(), &[("cache-control", "max-age=86400".into())]),
         ("GET", "/mobile/icon-512.png") => respond(req, 200, "image/png", ICON_512.to_vec(), &[("cache-control", "max-age=86400".into())]),
         // Phone access on and the token, wherever they come from.
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
         ("GET", "/mobile/api/conversation") => {
             let id = query_of(req.url(), "session").map(decode).unwrap_or_default();
             match conversation(sh, &id) {
@@ -500,6 +610,11 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
                 Ok(done) => json_reply(req, 200, done),
                 Err(why) => json_reply(req, if matches!(why, "busy" | "live") { 409 } else if why == "no such session" { 404 } else { 400 }, json!({ "error": why })),
             }
+        }
+        ("POST", "/mobile/api/notice") if header(&req, "x-wakuwaku").is_some() => {
+            let Some(body) = read_json(&mut req) else { return json_reply(req, 400, json!({ "error": "bad json" })) };
+            let shown = notice(sh, &body);
+            json_reply(req, 200, json!({ "ok": true, "shown": shown }))
         }
         ("GET", "/mobile/api/job") => {
             let agent = query_of(req.url(), "agent").map(decode).unwrap_or_default();
@@ -534,7 +649,13 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
         _ if !allowed => json_reply(req, 401, json!({ "error": "token" })),
         ("GET", "/mobile/api/state") => {
             SEEN.store(now_ms(), Ordering::SeqCst);
-            json_reply(req, 200, state(sh))
+            let mut body = state(sh);
+            // The phone's app (not the page): its battery, and a ring asked for it.
+            if let Some(battery) = header(&req, "x-wakuwaku-battery") {
+                phone_battery(sh, &battery);
+                body["ring"] = json!(take_ring());
+            }
+            json_reply(req, 200, body)
         }
         ("GET", "/mobile/api/asks") => {
             SEEN.store(now_ms(), Ordering::SeqCst);
@@ -636,6 +757,15 @@ pub fn push_test(sh: &Shared) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_one_time_code_where_the_message_says_so() {
+        assert_eq!(code_of("您的驗證碼為 482913，5 分鐘內有效").as_deref(), Some("482913"));
+        assert_eq!(code_of("Your Google code is G-123456").as_deref(), Some("123456"));
+        assert_eq!(code_of("OTP: 12 34 9876").as_deref(), Some("9876"));
+        assert_eq!(code_of("晚上 7 點 2024 號門口見"), None);
+        assert_eq!(code_of("code 123456789"), None);
+    }
 
     #[test]
     fn tailscale_addresses_are_the_cgnat_block() {

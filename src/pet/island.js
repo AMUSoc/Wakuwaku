@@ -1596,6 +1596,11 @@
         return openWidgetSettings(at >= 0 ? widgets[at] : { id: row.dataset.widget })
       }
       const open = isNudging() && nudge.widget?.open
+      // A code in a phone's notification (mobile.rs notice): copied.
+      if (open?.copy) {
+        navigator.clipboard?.writeText(open.copy).then(() => nudgeFor('waving', t(lang, 'phone.copied', { code: open.copy }), 1600), () => {})
+        return
+      }
       // A page, or a part of one (a new version: the updates).
       if (open?.tab) return window.pet.openSettings(open.tab)
       window.pet.openSettings()

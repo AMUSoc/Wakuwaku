@@ -585,10 +585,12 @@
       's.detailsNote': '会话名、命令、文件和 Claude 的回复；共享屏幕时可以关掉',
       'jump.hint': '点一下，去它的窗口',
       'jump.notFound': '找不到它的窗口了',
+      'phone.copied': '已复制 {code}',
 
       // Plugins in the island (widgets.rs)
       'widget.monitor': '监控',
       'widget.today': '今天',
+      'widget.phone': '手机',
       'widget.todayValue': '{turns} 轮 · {time} · 批准 {approvals}',
       // Antigravity's turns alone: its approvals never come to her.
       'widget.todayValueAgy': '{turns} 轮 · {time} · 批准 —',
@@ -1393,8 +1395,10 @@
       's.detailsNote': '工作階段名稱、指令、檔案和 Claude 的回覆；分享螢幕時可以關掉',
       'jump.hint': '點一下，到它的視窗',
       'jump.notFound': '找不到它的視窗了',
+      'phone.copied': '已複製 {code}',
       'widget.monitor': '監控',
       'widget.today': '今天',
+      'widget.phone': '手機',
       'widget.todayValue': '{turns} 輪 · {time} · 核准 {approvals}',
       'widget.todayValueAgy': '{turns} 輪 · {time} · 核准 —',
       'widget.todaySeconds': '{n} 秒',
@@ -2201,9 +2205,11 @@
       's.detailsNote': "Session names, commands, files and Claude's replies; turn off when sharing your screen",
       'jump.hint': 'Click to go to its window',
       'jump.notFound': "Can't find its window any more",
+      'phone.copied': 'Copied {code}',
 
       'widget.monitor': 'Monitor',
       'widget.today': 'Today',
+      'widget.phone': 'Phone',
       'widget.todayValue': '{turns} turns · {time} · {approvals} approved',
       'widget.todayValueAgy': '{turns} turns · {time} · approvals —',
       'widget.todaySeconds': '{n} s',

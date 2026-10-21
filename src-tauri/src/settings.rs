@@ -124,6 +124,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "lang" => matches!(v.as_str(), Some("auto" | "zh" | "zh-TW" | "en")),
         "pet" => v.as_str().is_some_and(|id| data::pets(&sh.dir).iter().any(|p| p.id == id)),
         // Each agent's project folder (launch.rs): a path, or blank.
+        "phoneNoticeMute" => v.as_array().is_some_and(|a| a.len() <= 200 && a.iter().all(|p| p.as_str().is_some_and(|p| !p.is_empty() && p.len() <= 200))),
         "agentDirs" => v.as_object().is_some_and(|m| m.iter().all(|(agent, dir)| data::AGENTS.contains(&agent.as_str()) && dir.as_str().is_some_and(|d| d.len() <= 400))),
         // A click on a pet: to its session (else a new terminal), or a new terminal always.
         "clickAction" => matches!(v.as_str(), Some("jump" | "terminal")),
@@ -139,7 +140,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // The island's display: none, or a display's top-left corner (island.rs chosen).
         "islandDisplay" => v.is_null() || v.as_array().is_some_and(|a| a.len() == 2 && a.iter().all(|n| n.as_i64().is_some_and(|n| n.abs() < 100_000))),
         "scale" => v.as_f64().is_some_and(|s| data::SCALES.iter().any(|(_, x)| (x - s).abs() < 1e-9)),
-        "details" | "walk" | "look" | "sound" | "dnd" | "dock" | "islandTuck" | "hideInFullscreen" | "lol" | "onboarded" | "out" | "settingsPin" | "settingsTop" | "oledShift" | "autoUpdateCheck" => is_bool,
+        "details" | "walk" | "look" | "sound" | "dnd" | "dock" | "islandTuck" | "phoneNotices" | "hideInFullscreen" | "lol" | "onboarded" | "out" | "settingsPin" | "settingsTop" | "oledShift" | "autoUpdateCheck" => is_bool,
         // Where an update is downloaded from first (updates.rs gitee_first).
         // The key for the game's ten (scout.rs): one it can take.
         "scoutKey" => v.as_str().is_some_and(|k| k.len() <= 30 && crate::scout::parse_key(k).is_some()),

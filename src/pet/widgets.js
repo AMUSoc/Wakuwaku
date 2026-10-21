@@ -37,6 +37,7 @@
     down: '<path d="M12 4v15M6 13l6 6 6-6"/>',
     up: '<path d="M12 20V5M6 11l6-6 6 6"/>',
     bolt: '<path d="M13 2L5 14h6l-1 8 8-12h-6z"/>',
+    phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
   }
 
   // Icons Windows has itself, from its icon font (Segoe Fluent Icons; Segoe

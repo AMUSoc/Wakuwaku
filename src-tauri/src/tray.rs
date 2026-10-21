@@ -110,6 +110,9 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
     menu.append(&CheckMenuItem::with_id(app, "islandTuck", t("menu.islandTuck"), true, flag("islandTuck"), None::<&str>)?)?;
     menu.append(&CheckMenuItem::with_id(app, "dock", t("menu.dock"), true, flag("dock"), None::<&str>)?)?;
     menu.append(&CheckMenuItem::with_id(app, "dnd", t("menu.dnd"), true, flag("dnd"), None::<&str>)?)?;
+    if crate::mobile::phone_near() {
+        menu.append(&MenuItem::with_id(app, "ringPhone", t("menu.ringPhone"), true, None::<&str>)?)?;
+    }
     menu.append(&MenuItem::with_id(app, "settings", t("menu.settings"), true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(app, "quit", t("menu.quit"), true, None::<&str>)?)?;
@@ -122,6 +125,7 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
         "walk" | "look" | "dnd" | "dock" | "islandTuck" => sh.change(json!({ id: !sh.flag(id) })),
         // The menu's own items (out:<agent>, corner:<agent>) below.
         "corner" => crate::come_home(sh),
+        "ringPhone" => crate::mobile::ring(),
         "settings" => crate::island::open_settings(sh, None),
         // Quit by the person: no session's hook starts her again until she
         // is opened (data.rs mark_quit).

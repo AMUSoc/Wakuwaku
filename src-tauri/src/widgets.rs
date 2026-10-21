@@ -27,12 +27,12 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-pub const ICONS: [&str; 26] = [
-    "cpu", "weather", "note", "calendar", "bell", "stock", "today", "clock", "mail", "music", "code", "star", "dot", "chart", "battery", "timer", "flag", "server",
+pub const ICONS: [&str; 27] = [
+    "cpu", "weather", "note", "calendar", "bell", "stock", "today", "clock", "mail", "music", "code", "star", "dot", "chart", "battery", "timer", "flag", "server", "phone",
     "check", "terminal", "coin", "gauge", "memory", "down", "up", "bolt",
 ];
 // The built-in ones: id, icon, colour.
-pub const BUILT_IN: [(&str, &str, &str); 3] = [("today", "today", "#34d27b"), ("tokens", "code", "#ff9f0a"), ("monitor", "gauge", "#5e9bff")];
+pub const BUILT_IN: [(&str, &str, &str); 4] = [("today", "today", "#34d27b"), ("tokens", "code", "#ff9f0a"), ("monitor", "gauge", "#5e9bff"), ("phone", "phone", "#b18cff")];
 const MAX_SCRIPTED: usize = 32;
 const DEFAULT_TTL: u64 = 300;
 const NUDGE_EVERY_MS: u64 = 60_000;
@@ -631,7 +631,7 @@ mod tests {
         // The ones not measured are listed too, without a value.
         let none = |_: &str| None;
         let all = w.view(0, &[], &[], &none);
-        assert_eq!(ids(all.clone()), ["monitor", "today", "tokens", "a"]);
+        assert_eq!(ids(all.clone()), ["monitor", "today", "tokens", "phone", "a"]);
         assert_eq!((all[0]["value"].clone(), all[1]["value"].clone(), all[1]["icon"].clone()), (json!("1"), Value::Null, json!("today")));
         assert_eq!(ids(w.view(0, &[], &["a".into()], &none))[0], "a");
         assert_eq!(w.view(0, &["tokens".into()], &[], &none)[2]["on"], false);
@@ -645,7 +645,7 @@ mod tests {
         w.put(&json!({ "id": "a", "label": "A" }), 0).unwrap();
         // Built-in ones never go; a script's does.
         assert!(w.expire(u64::MAX));
-        assert_eq!(ids(w.view(0, &[], &[], &none)), ["monitor", "today", "tokens"]);
+        assert_eq!(ids(w.view(0, &[], &[], &none)), ["monitor", "today", "tokens", "phone"]);
     }
 
     #[test]
