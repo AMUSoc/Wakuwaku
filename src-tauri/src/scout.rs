@@ -1165,6 +1165,10 @@ mod key {
     pub static SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
     pub static MODS: AtomicU32 = AtomicU32::new(0);
     pub static VK: AtomicU32 = AtomicU32::new(0);
+    // Master Duel's helper's key (duel.rs), heard by the same hook.
+    pub static DUEL_MODS: AtomicU32 = AtomicU32::new(0);
+    pub static DUEL_VK: AtomicU32 = AtomicU32::new(0);
+    static DUEL_DOWN: AtomicBool = AtomicBool::new(false);
     // Held: its repeats are not presses.
     static DOWN: AtomicBool = AtomicBool::new(false);
 
@@ -1201,6 +1205,17 @@ mod key {
         if code >= 0 && l != 0 {
             // SAFETY: Windows hands a KBDLLHOOKSTRUCT for a low-level keyboard hook.
             let event = unsafe { &*(l as *const KeyEvent) };
+            if event.vk != 0 && event.vk == DUEL_VK.load(Ordering::Relaxed) {
+                match w {
+                    WM_KEYDOWN | WM_SYSKEYDOWN if mods_now() == DUEL_MODS.load(Ordering::Relaxed) && !DUEL_DOWN.swap(true, Ordering::SeqCst) => {
+                        if let Some(sh) = SHARED.get().cloned() {
+                            std::thread::spawn(move || crate::duel::press(&sh));
+                        }
+                    }
+                    WM_KEYUP | WM_SYSKEYUP => DUEL_DOWN.store(false, Ordering::SeqCst),
+                    _ => {}
+                }
+            }
             if event.vk == VK.load(Ordering::Relaxed) {
                 match w {
                     WM_KEYDOWN | WM_SYSKEYDOWN if mods_now() == MODS.load(Ordering::Relaxed) && !DOWN.swap(true, Ordering::SeqCst) => {
@@ -1225,6 +1240,10 @@ pub fn listen_key(sh: &Arc<Shared>) {
     let Some((mods, vk)) = parse_key(&name) else { return };
     key::MODS.store(mods, Ordering::SeqCst);
     key::VK.store(vk, Ordering::SeqCst);
+    if let Some((mods, vk)) = parse_key(&crate::duel::key_name(sh)) {
+        key::DUEL_MODS.store(mods, Ordering::SeqCst);
+        key::DUEL_VK.store(vk, Ordering::SeqCst);
+    }
     let _ = key::SHARED.set(sh.clone());
     let sh = sh.clone();
     crate::spawn_named("scout-key", move || {

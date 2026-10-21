@@ -57,6 +57,10 @@
     // The game's ten (scout.rs), in their panel's window.
     onScout: on('scout:update'),
     scoutClose: () => send('scout_close'),
+    // Master Duel's helper (duel.rs), in its panel's window.
+    onDuel: on('duel:update'),
+    duelClose: () => send('duel_close'),
+    duelAgain: () => send('duel_again'),
     // A game kept, whole (its scoreboard), by its id; none if not kept.
     scoutGame: id => invoke('scout_game', { id: String(id || '') }).catch(() => null),
     // Her rows of these games kept (a champion's, a position's), as who in them.

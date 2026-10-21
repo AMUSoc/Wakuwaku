@@ -140,9 +140,11 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // The island's display: none, or a display's top-left corner (island.rs chosen).
         "islandDisplay" => v.is_null() || v.as_array().is_some_and(|a| a.len() == 2 && a.iter().all(|n| n.as_i64().is_some_and(|n| n.abs() < 100_000))),
         "scale" => v.as_f64().is_some_and(|s| data::SCALES.iter().any(|(_, x)| (x - s).abs() < 1e-9)),
-        "details" | "walk" | "look" | "sound" | "dnd" | "dock" | "islandTuck" | "phoneNotices" | "hideInFullscreen" | "lol" | "onboarded" | "out" | "settingsPin" | "settingsTop" | "oledShift" | "autoUpdateCheck" => is_bool,
+        "details" | "walk" | "look" | "sound" | "dnd" | "dock" | "islandTuck" | "phoneNotices" | "hideInFullscreen" | "lol" | "duel" | "onboarded" | "out" | "settingsPin" | "settingsTop" | "oledShift" | "autoUpdateCheck" => is_bool,
         // Where an update is downloaded from first (updates.rs gitee_first).
         // The key for the game's ten (scout.rs): one it can take.
+        "duelKey" => v.as_str().is_some_and(|k| k.len() <= 30 && crate::scout::parse_key(k).is_some()),
+        "duelHand" => v.as_str().is_some_and(|h| h.chars().count() <= 300),
         "scoutKey" => v.as_str().is_some_and(|k| k.len() <= 30 && crate::scout::parse_key(k).is_some()),
         "updateFrom" => matches!(v.as_str(), Some("auto" | "github" | "gitee")),
         // Crash reports sent by themselves, never, or asked about (crash.rs).

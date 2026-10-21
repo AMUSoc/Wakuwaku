@@ -66,6 +66,7 @@ mod review;
 mod run;
 mod screen;
 mod scout;
+mod duel;
 mod scripts;
 mod server;
 mod settings;
@@ -856,6 +857,10 @@ async fn pet_ready(app: AppHandle, window: WebviewWindow) {
         scout::ready(&sh);
         return;
     }
+    if window.label() == duel::LABEL {
+        duel::ready(&sh);
+        return;
+    }
     if is_dock(&window) {
         dock::ready(&sh);
         dock::push_asks(&sh);
@@ -1005,6 +1010,18 @@ async fn scout_close(app: AppHandle) {
     let sh = shared(&app);
     sh.log("scout: clicked away");
     scout::show(&sh, false);
+}
+
+// Master Duel's helper (duel.rs): put away by its ✕, or asked again.
+#[tauri::command]
+async fn duel_close(app: AppHandle) {
+    duel::show(&shared(&app), false);
+}
+
+#[tauri::command]
+async fn duel_again(app: AppHandle) {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::again(&sh)).await.ok();
 }
 
 #[tauri::command]
@@ -1408,6 +1425,8 @@ fn main() {
             pet_panel,
             pet_answer,
             scout_close,
+            duel_close,
+            duel_again,
             scout_game,
             scout_rows,
             scout_timeline,

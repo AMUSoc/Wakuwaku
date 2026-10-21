@@ -475,6 +475,15 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 - **测试**：`tools/lol_fake.py` 加了 spectator、熟练度、场次清单、对局、英雄清单；`/fake/phase {"phase":"InProgress"}` 之后 spectator 才有这局。2026-10-20 用假的跑过：十人、段位、熟练度、第一次玩、战绩依次出来，快捷键叫出／收起正常。`WAKUWAKU_SCOUT_AS=<某人的 PUUID>` 把台服别人正在进行的对局当成自己的来查（不用开客户端，英雄名因此是空的），配合 `WAKUWAKU_LOL_URL` 指向假的 Live Client。
 - **真金钥实测**（2026-10-20，开发金钥）：台服的 spectator、段位、熟练度、`sea` 的场次和对局都通；一场 8 人有 puuid 的对局读了 54 场，约 75 秒（另一个查询同时用着额度，碰到 429 等过）；面板上段位、胜率、熟练度、最近战绩、连胜连败都对。踩到的：新产生的金钥要 30 秒到两分钟才在所有服务器生效，期间同一个请求时而 401 `Unknown apikey`、时而 403、时而 200；Riot 挡 Python `urllib` 的默认 User-Agent（403），curl、ureq 不受影响，用 Python 测要自己设 User-Agent。
 
+## 游戏王 Master Duel 小助手（duel.rs、src/duel/）
+
+- **按键**：设置 `duelKey`（默认 `Alt+D`，和 `scoutKey` 共用 scout.rs 的低级键盘钩子）。只有 `masterduel.exe` 在跑时才有反应（别处的 Alt+D 是浏览器的），面板开着时再按就收起；设置 `duel` 关掉就不理。
+- **截图**：找游戏进程最大的可见窗口（`GetWindowRect`），从屏幕 `BitBlt` 那一块（看到什么截什么，不读游戏内存），按方块平均缩到宽 1600 以内，用 `png` crate 存 `duel/work/shot.png`。
+- **问 Claude**：`claude -p --allowedTools Read WebSearch WebFetch`，在 `duel/work/` 跑，提示从 stdin 进：先 Read 截图，认出对手的卡（台湾 Master Duel 繁中官方译名，不确定写日文或英文）、判断卡组，不确定就上网查，回一个 JSON：`deck`、`deckAlt`、`sure`、`seen`、`plan`、`stop`（最多 3 个：卡、效果、用什么断、时机、原因）、`watch`、`tip`。设置 `duelHand`（自己带的手坑）有写就优先用那些。20 分钟内的上一次判断会一起送去，新截图在它的基础上更新。150 秒逾时。
+- **面板**：游戏所在屏幕的右边、垂直置中，440×660（逻辑像素），深色玻璃风格；等待时显示秒数，好了显示卡组、把握、要断的（编号、橘色是 Claude 的颜色）、小心、建议、看到的卡；「重新看」先把面板藏起来再截图。窗口标签 `duel`（已列进 capabilities）。
+- **条款**：只看屏幕、不读内存、不替人按任何东西（Konami 禁止外挂操作或读取游戏）。
+- **实测（2026-10-22）**：没开游戏，用 `WAKUWAKU_DUEL_EXE=python.exe` 让一个显示三张蛇眼卡图的 tkinter 窗口当游戏；SendKeys 送 Alt+D：截图正确，23 秒认出「蛇眼（可能混黑魔女）」，三个断点（蛇眼灰烬的检索、原罪宝-蛇眼、黑魔女）合理；再按一次收起。真的 Master Duel（全屏时截不截得到）还没测。
+
 ## 手机页（mobile.rs、src/mobile/）
 
 `/mobile/` 是给手机看的单页：四个 agent 各一张卡（宠物的图集照 mood 播 `sprite.js` 的 `MOOD_CLIP` 那一行，半尺寸；`status.js` 说会话在做什么；做完／改好／出错时显示 `reply`），有确认在等时最上面是面板，按钮走和宠物一样的 `Shared::answer`（原来 `pet_answer` 的内容）。页面每 2 秒问 `api/state` 和 `api/asks`，页面藏着时不问。`i18n.js`、`status.js`、`sprite.js` 和页面自己的文件都用 `include_str!` 编进 exe，由 `mobile.rs` 直接回（不经 Tauri）。

@@ -134,6 +134,10 @@ fn defaults() -> Map<String, Value> {
         "riotApiKey": "",
         // The key that brings up the game's ten (scout.rs): read as she starts.
         "scoutKey": "Alt+X",
+        // Master Duel's helper (duel.rs): on, its key, the person's own hand traps.
+        "duel": true,
+        "duelKey": "Alt+D",
+        "duelHand": "",
         // The phone's page from elsewhere (mobile.rs): off, or listened for
         // at Tailscale's address ("tailscale"), at 0.0.0.0, or at one set;
         // asked for with this token (made as she first starts). Its address

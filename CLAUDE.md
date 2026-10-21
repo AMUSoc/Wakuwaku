@@ -27,6 +27,7 @@ cd .. && node --test "test/*.test.js"   # 頁面的單元測試（i18n、注視�
 src/pet/           頁面：她的視窗（?role=pet）和島（?role=island）共用 index.html
 src/dock/          右邊的直立島（dock.rs）：dock.js、dock.css，共用 src/pet/ 的 bridge、sprite、status
 src/scout/         本局十人的面板（scout.rs）
+src/duel/          遊戲王 Master Duel 小助手的面板（duel.rs）
 src/mobile/        手機頁（mobile.rs 用 include_str! 編進 exe）：app.js、style.css、manifest、service worker
 src/shared/qr.js   設定頁的 QR code（byte 模式、糾錯 M、版本 1–10）
 src/shared/i18n.js 簡中（zh）、繁中（zh-TW，預設語言）、英文字串（Rust 端少數字串在 src-tauri/src/i18n.rs）；新字串照 docs/zh-TW-glossary.md 翻
@@ -64,6 +65,7 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 - `lol.rs`、`lcu.rs`：英雄聯盟對局助手。只讀 Riot 官方介面（Live Client Data API、客戶端 LCU、用個人金鑰的 Riot API），對局中各隻桌寵分工顯示（claude 時間、grok 目標倒數和我方召喚師技能、codex 對方關鍵裝備和自己的數據、選角時自己和組隊隊友的段位），只說中性事實、不做敵方計時（Riot 政策）。細節見 `docs/DEVELOPMENT.md` 的「英雄联盟对局助手」。
 - `keep.rs`：重開後記得工作階段：每 10 秒和退出時寫 `sessions.json`，啟動時讀回（行程不在的丟掉）；Grok 另從 `~/.grok/active_sessions.json` 和它的日誌補回開著的工作階段。
 - `scout.rs`：本局十人（像 Porofessor）：對局載入時用 Riot API（spectator、段位、熟練度、最近戰績）查十個人，畫面中間的面板顯示，`Alt+X` 叫出／收起、點一下收起；所有 Riot API 請求在這裡排隊守次數限制。頁面在 `src/scout/`。細節見 `docs/DEVELOPMENT.md` 的「本局十人」。
+- `duel.rs`：遊戲王 Master Duel 小助手：遊戲開著時按 `duelKey`（Alt+D）截遊戲畫面，交給 Claude 看圖認出對手牌組和該斷的效果，結果顯示在遊戲右邊的面板（`src/duel/`）。只看螢幕，不讀遊戲記憶體。細節見 `docs/DEVELOPMENT.md` 的「游戏王 Master Duel 小助手」。
 - `review.rs`：四個 AI 一起檢討一場對局：Wakuwaku 先整理成一頁事實，按了才跑，每隻一次、各管一塊、3 行 100 字內、不准用工具，結果存 `lol/reviews/` 不重跑。
 - `opgg.rs`：OP.GG 的出裝和克制：由 Claude 透過 OP.GG 官方 MCP 查（`--mcp-config` 臨時掛上、只開兩個查詢工具），回 JSON，存一天。她自己叫的 agent（檢討、OP.GG）在 `data/lol/` 底下跑，`server.rs` 的 `is_hers` 不把它們當工作階段。
 - `jump.rs`：點會話跳到它的視窗（行程鏈、找視窗、叫到前面、Claude 桌面版的會話連結）。
