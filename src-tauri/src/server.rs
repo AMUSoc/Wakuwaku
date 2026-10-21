@@ -256,11 +256,13 @@ pub fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
 // Run code in a page ("island", an agent's pet: "pet-codex"; "pet" is
 // Claude's) and wait for what it gives back.
 // A hook event from an agent she ran herself: its folder under hers for
-// them (data/lol/: reviews' and OP.GG's work folders). The folder is the
-// event's cwd (Claude Code, Codex, Grok), or Antigravity's first workspace.
+// them (data/lol/: reviews' and OP.GG's work folders; data/duel/: Master
+// Duel's helper's; data/ask/: what is asked of her on the island). The
+// folder is the event's cwd (Claude Code, Codex, Grok), or Antigravity's
+// first workspace.
 pub fn is_hers(sh: &Shared, event: &Value) -> bool {
     let folder = event.get("cwd").and_then(Value::as_str).or_else(|| event.get("workspacePaths").and_then(|w| w.get(0)).and_then(Value::as_str)).unwrap_or("");
-    is_under(folder, &sh.dir.join("lol").to_string_lossy())
+    ["lol", "duel", "ask"].iter().any(|d| is_under(folder, &sh.dir.join(d).to_string_lossy()))
 }
 
 // A folder in another (or that one), whatever its slashes and case.

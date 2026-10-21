@@ -61,6 +61,12 @@
     onDuel: on('duel:update'),
     duelClose: () => send('duel_close'),
     duelAgain: () => send('duel_again'),
+    // Asking her (ask.rs), in its box's window.
+    onAsk: on('ask:update'),
+    askSend: (agent, text) => invoke('ask_send', { agent: String(agent || ''), text: String(text || '') }).catch(() => false),
+    askClear: () => send('ask_clear'),
+    askClose: () => send('ask_close'),
+    askOpen: () => send('ask_open'),
     // The folder the phone's files go to (mobile.rs drop).
     openDrops: () => send('open_drops'),
     // A game kept, whole (its scoreboard), by its id; none if not kept.

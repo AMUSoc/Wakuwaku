@@ -484,6 +484,12 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 - **条款**：只看屏幕、不读内存、不替人按任何东西（Konami 禁止外挂操作或读取游戏）。
 - **实测（2026-10-22）**：没开游戏，用 `WAKUWAKU_DUEL_EXE=python.exe` 让一个显示三张蛇眼卡图的 tkinter 窗口当游戏；SendKeys 送 Alt+D：截图正确，23 秒认出「蛇眼（可能混黑魔女）」，三个断点（蛇眼灰烬的检索、原罪宝-蛇眼、黑魔女）合理；再按一次收起。真的 Master Duel（全屏时截不截得到）还没测。
 
+## 问她（ask.rs、src/ask/）
+
+- 按 `askKey`（默认 `Alt+Q`，同一个低级键盘钩子）或托盘菜单「问她…」，在岛所在屏幕上方中间弹出一个框（窗口标签 `ask`，可以拿键盘焦点，Esc／✕／再按一次收起）。选 Claude（`claude -p --allowedTools WebSearch WebFetch`，提示从 stdin 进）或 Antigravity（`agy -p <字>`，它自带 Google 搜索），在 `data/ask/work/` 跑；`server.rs` 的 `is_hers` 把 `data/lol`、`data/duel`、`data/ask` 下面的会话都当成她自己的，不显示在岛上。
+- 提示要求繁中台湾用语、先讲结论、约 300 字、要即时资讯就先上网查并附来源、不改文件不跑指令。最近 3 轮问答（答案截 1500 字）一起送，所以可以追问；「新问题」清掉。180 秒逾时。上次选的 agent 记在 `askAgent`。
+- 实测（2026-10-22，测试实例）：Claude 12 秒答出台北气温（附来源）；接着用 Antigravity 问「那高雄呢？」，21 秒答出高雄气温，懂得接上一题。
+
 ## 手机页（mobile.rs、src/mobile/）
 
 `/mobile/` 是给手机看的单页：四个 agent 各一张卡（宠物的图集照 mood 播 `sprite.js` 的 `MOOD_CLIP` 那一行，半尺寸；`status.js` 说会话在做什么；做完／改好／出错时显示 `reply`），有确认在等时最上面是面板，按钮走和宠物一样的 `Shared::answer`（原来 `pet_answer` 的内容）。页面每 2 秒问 `api/state` 和 `api/asks`，页面藏着时不问。`i18n.js`、`status.js`、`sprite.js` 和页面自己的文件都用 `include_str!` 编进 exe，由 `mobile.rs` 直接回（不经 Tauri）。

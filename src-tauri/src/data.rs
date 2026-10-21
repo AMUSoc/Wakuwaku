@@ -140,6 +140,9 @@ fn defaults() -> Map<String, Value> {
         "duel": true,
         "duelKey": "Alt+D",
         "duelHand": "",
+        // Asking her (ask.rs): its key, and the agent last asked.
+        "askKey": "Alt+Q",
+        "askAgent": "claude",
         // The phone's page from elsewhere (mobile.rs): off, or listened for
         // at Tailscale's address ("tailscale"), at 0.0.0.0, or at one set;
         // asked for with this token (made as she first starts). Its address

@@ -58,6 +58,7 @@ pub fn t(lang: &str, key: &str) -> String {
         "phone.clip" => ("手机传来的文字，已复制", "手機傳來的文字，已複製", "Text from the phone, copied"),
         "phone.got" => ("收到手机的 {name}", "收到手機的 {name}", "From the phone: {name}"),
         "phone.gotWhere" => ("在 下载\\Wakuwaku · 点一下打开", "在 下載\\Wakuwaku · 點一下打開", "In Downloads\\Wakuwaku · click to open"),
+        "menu.ask" => ("问她…", "問她…", "Ask her…"),
         "phone.copy" => ("点一下复制", "點一下複製", "click to copy"),
         "menu.dock" => ("右边的竖岛", "右邊的直立島", "Side island"),
         "menu.dnd" => ("勿扰", "勿擾", "Do not disturb"),

@@ -1169,6 +1169,10 @@ mod key {
     pub static DUEL_MODS: AtomicU32 = AtomicU32::new(0);
     pub static DUEL_VK: AtomicU32 = AtomicU32::new(0);
     static DUEL_DOWN: AtomicBool = AtomicBool::new(false);
+    // Asking her (ask.rs), the same.
+    pub static ASK_MODS: AtomicU32 = AtomicU32::new(0);
+    pub static ASK_VK: AtomicU32 = AtomicU32::new(0);
+    static ASK_DOWN: AtomicBool = AtomicBool::new(false);
     // Held: its repeats are not presses.
     static DOWN: AtomicBool = AtomicBool::new(false);
 
@@ -1205,6 +1209,17 @@ mod key {
         if code >= 0 && l != 0 {
             // SAFETY: Windows hands a KBDLLHOOKSTRUCT for a low-level keyboard hook.
             let event = unsafe { &*(l as *const KeyEvent) };
+            if event.vk != 0 && event.vk == ASK_VK.load(Ordering::Relaxed) {
+                match w {
+                    WM_KEYDOWN | WM_SYSKEYDOWN if mods_now() == ASK_MODS.load(Ordering::Relaxed) && !ASK_DOWN.swap(true, Ordering::SeqCst) => {
+                        if let Some(sh) = SHARED.get().cloned() {
+                            std::thread::spawn(move || crate::ask::press(&sh));
+                        }
+                    }
+                    WM_KEYUP | WM_SYSKEYUP => ASK_DOWN.store(false, Ordering::SeqCst),
+                    _ => {}
+                }
+            }
             if event.vk != 0 && event.vk == DUEL_VK.load(Ordering::Relaxed) {
                 match w {
                     WM_KEYDOWN | WM_SYSKEYDOWN if mods_now() == DUEL_MODS.load(Ordering::Relaxed) && !DUEL_DOWN.swap(true, Ordering::SeqCst) => {
@@ -1243,6 +1258,10 @@ pub fn listen_key(sh: &Arc<Shared>) {
     if let Some((mods, vk)) = parse_key(&crate::duel::key_name(sh)) {
         key::DUEL_MODS.store(mods, Ordering::SeqCst);
         key::DUEL_VK.store(vk, Ordering::SeqCst);
+    }
+    if let Some((mods, vk)) = parse_key(&crate::ask::key_name(sh)) {
+        key::ASK_MODS.store(mods, Ordering::SeqCst);
+        key::ASK_VK.store(vk, Ordering::SeqCst);
     }
     let _ = key::SHARED.set(sh.clone());
     let sh = sh.clone();
