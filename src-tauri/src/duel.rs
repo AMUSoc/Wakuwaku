@@ -243,18 +243,22 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
          【如果這是對戰畫面】畫面上方是對手的場地，下方是我的；左邊可能打開著某張卡的說明，中間可能正跳出「是否連鎖」。\n\
          對手的格子這樣叫（照畫面上的左右）：上面那排魔法陷阱區 S1～S5（左到右），下一排怪獸區 M1～M5（左到右），\
          對手怪獸區右邊那格場地區 F，中間兩格額外怪獸區 EL（左）、ER（右）。在手牌、墓地、除外或連鎖中的寫 hand、gy、ban、chain。\n\
+         畫面最下面一排是我的手牌（我看得到牌面）；我場上蓋著的魔法陷阱我也知道是什麼。\n\
          請：\n\
+         0. 先認出我現在手上的每一張牌（myHand），和我場上蓋著、能用的卡。認不出的寫「?」，不要用牌組清單去猜。\n\
          1. 認出看得到的對手的卡（卡名用台灣 Master Duel 的繁體中文官方譯名；左邊或上方有卡片說明時以說明為準；不確定就寫日文或英文名）。\n\
          2. 判斷對手是什麼牌組。不確定時用 WebSearch 查目前的環境和這個牌組的打法（日文、英文的資料都可以）。\n\
-         3. 告訴我要斷哪裡：關鍵展開點，用手坑或魔法陷阱該斷哪張卡的哪個效果、什麼時機，那張卡在哪一格。\n\
-         4. 正在問「是否連鎖」時：說要不要連鎖、用哪張（看得到我能連鎖的卡）。\n\
-         5. 我這邊：對上這個牌組先攻、後攻各該怎麼打；看得到我的手牌時，這回合具體怎麼做（幾個步驟）。\n",
+         3. 告訴我要斷哪裡：關鍵展開點、哪張卡的哪個效果、什麼時機、在哪一格。\
+         「用什麼斷」（with）只能寫我現在手上或場上真的有的卡（第 0 步認出來的）；\
+         我手上沒有能斷它的，with 寫「手上沒有」，why 說我這回合怎麼撐過去或下回合怎麼反打。絕對不要叫我用手上沒有的卡。\n\
+         4. 正在問「是否連鎖」時：說要不要連鎖、用哪張——同樣只能用我手上或場上有的。\n\
+         5. 我這邊：對上這個牌組先攻、後攻各該怎麼打；看得到我的手牌時，照我手上這幾張，這回合具體怎麼做（幾個步驟）。\n",
     );
     if !deck.is_empty() {
-        p.push_str(&format!("\n我的牌組（我自己記的，可能不完整）：\n{deck}\n建議都照我真的有的卡來說。\n"));
+        p.push_str(&format!("\n我的牌組（認手牌時用來對卡名；牌組裡有不代表現在手上有）：\n{deck}\n"));
     }
     if !hand.is_empty() {
-        p.push_str(&format!("\n我的牌組帶的手坑／斷點卡：{hand}。建議時優先用這些，沒有合適的才提別的。\n"));
+        p.push_str(&format!("\n我的牌組帶的手坑／斷點卡：{hand}。只有我現在手上（或場上）真的有的才能叫我用。\n"));
     }
     if let Some(last) = last {
         p.push_str(&format!(
@@ -265,7 +269,7 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
     }
     p.push_str(
         "\n對戰畫面只回一個 JSON，不要其他文字：\n\
-         {\"screen\":\"duel\",\"deck\":\"對手牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的對手卡名\"],\"plan\":\"它想做什麼，一句話\",\
+         {\"screen\":\"duel\",\"myHand\":[\"我手上的牌，認不出寫?\"],\"mySet\":[\"我場上蓋著能用的卡\"],\"deck\":\"對手牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的對手卡名\"],\"plan\":\"它想做什麼，一句話\",\
          \"chain\":{\"card\":\"對手正在發動的卡\",\"answer\":\"要不要連鎖、用哪張，一句話\"},\
          \"stop\":[{\"card\":\"要斷的卡\",\"zone\":\"M3|S1|F|EL|hand|gy|chain…\",\"effect\":\"哪個效果\",\"with\":\"用什麼斷\",\"when\":\"時機\",\"why\":\"為什麼，20字內\"}],\
          \"me\":{\"first\":\"先攻怎麼打，一句\",\"second\":\"後攻怎麼打，一句\",\"now\":[\"這回合第一步\",\"第二步\"]},\
@@ -1171,10 +1175,57 @@ pub fn frames_ready(sh: &Arc<Shared>) {
     apply(sh);
 }
 
+// How long the frames stay on the game after a look: what they point at is
+// gone a turn or two later (they stayed after the duel was over, 2026-10-23).
+const FRAMES_FOR: u64 = 120_000;
+static FRAMES_ON: AtomicBool = AtomicBool::new(false);
+static FRAMES_WATCH: AtomicBool = AtomicBool::new(false);
+
+// The game in front (or one of her own windows, typed in): else the frames
+// would sit over whatever is.
+fn game_in_front(sh: &Shared) -> bool {
+    let front = crate::focus::foreground();
+    if game_pid().and_then(os::game_window).is_some_and(|(hwnd, _)| hwnd == front) {
+        return true;
+    }
+    [LABEL, DECK].iter().filter_map(|l| sh.app.get_webview_window(l)).filter_map(|w| w.hwnd().ok()).any(|h| h.0 as isize == front)
+}
+
+// Every second while she has the bar up: the frames off once stale or with
+// the game not in front, back when it is; the bar away with the game gone.
+fn watch_frames(sh: &Arc<Shared>) {
+    if FRAMES_WATCH.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let sh = sh.clone();
+    crate::spawn_named("duel-frames", move || loop {
+        std::thread::sleep(Duration::from_secs(1));
+        if !SHOWN.load(Ordering::SeqCst) {
+            continue;
+        }
+        if game_pid().is_none() {
+            show(&sh, false);
+            continue;
+        }
+        let want = FLY.load(Ordering::SeqCst);
+        if FRAMES_ON.load(Ordering::SeqCst) != (want && frames_fresh(&sh)) {
+            apply_frames(&sh, want);
+        }
+    });
+}
+
+fn frames_fresh(sh: &Shared) -> bool {
+    let at = VIEW.lock().unwrap_or_else(|e| e.into_inner())["at"].as_u64().unwrap_or(0);
+    crate::now_ms().saturating_sub(at) < FRAMES_FOR && game_in_front(sh)
+}
+
 // The frames: on the game's inside while the panel is up with an answer.
 fn apply_frames(sh: &Arc<Shared>, want: bool) {
+    watch_frames(sh);
+    let want = want && frames_fresh(sh);
     let zones = VIEW.lock().unwrap_or_else(|e| e.into_inner()).get("found").map(zones_of).unwrap_or(json!([]));
     let any = zones.as_array().is_some_and(|z| !z.is_empty());
+    FRAMES_ON.store(want, Ordering::SeqCst);
     if want && any && !FRAMES_MADE.load(Ordering::SeqCst) {
         make_frames(sh);
         return;
@@ -1253,8 +1304,9 @@ mod tests {
         assert!(p.contains("shot.png") && p.contains("\"stop\"") && !p.contains("我的牌組帶的"));
         let last = json!({ "deck": "蛇眼", "seen": ["蛇眼灰燼", "原罪寶-蛇眼"] });
         let p = prompt_of("灰流麗、增殖的G", "巳劍：天叢雲之巳劍×2", Some(&last));
-        assert!(p.contains("我的牌組（我自己記的") && p.contains("天叢雲之巳劍×2") && p.contains("\"zone\""));
-        assert!(p.contains("我的牌組帶的手坑／斷點卡：灰流麗、增殖的G"));
+        assert!(p.contains("牌組裡有不代表現在手上有") && p.contains("天叢雲之巳劍×2") && p.contains("\"zone\""));
+        assert!(p.contains("我的牌組帶的手坑／斷點卡：灰流麗、增殖的G。只有我現在手上"));
+        assert!(p.contains("\"myHand\"") && p.contains("手上沒有"));
         assert!(p.contains("可能是「蛇眼」（看到：蛇眼灰燼、原罪寶-蛇眼）"));
     }
 

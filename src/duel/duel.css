@@ -672,3 +672,22 @@ pre.mine {
   font-size: 13px;
   padding: 5px 10px;
 }
+
+/* My hand as read: the advice goes by these. */
+.myhand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.myhand .chip.unknown {
+  opacity: 0.6;
+}
+
+.with.none {
+  background: rgba(255, 107, 107, 0.15) !important;
+  color: var(--bad) !important;
+}

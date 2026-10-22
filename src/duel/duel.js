@@ -154,6 +154,9 @@
       // Asked whether to chain: the answer first, above all else.
       if (f.chain && f.chain.answer) parts.push(el('div', 'chain', el('div', 'q', T('duel.chainQ', { card: f.chain.card || '' })), el('div', 'a', f.chain.answer)))
       if (f.plan) parts.push(el('p', 'plan', f.plan))
+      // What she read as my hand (and my set cards): advice goes by these only.
+      const mine = [...(f.myHand || []), ...(f.mySet || []).map(c => `${c}${T('duel.setMark')}`)]
+      parts.push(el('div', 'myhand', el('span', 'muted', T('duel.myHand')), mine.length ? mine.map(c => el('span', `chip${c === '?' ? ' unknown' : ''}`, c)) : el('span', 'muted', T('duel.noHand'))))
       const stops = (f.stop || []).slice(0, 3)
       if (stops.length) {
         parts.push(el('h2', '', T('duel.stop')))
@@ -167,7 +170,7 @@
                 'div',
                 'what',
                 el('div', 'card', s.card || '', s.effect ? el('span', 'effect', `・${s.effect}`) : null),
-                el('div', 'line', s.with ? el('span', 'with', s.with) : null, s.when ? el('span', 'when', s.when) : null, ZONE_WORD[s.zone] ? el('span', 'where', T(ZONE_WORD[s.zone], { n: (s.zone || '').slice(1) })) : null),
+                el('div', 'line', s.with ? el('span', `with${/手上沒有|没有|none/i.test(s.with) ? ' none' : ''}`, s.with) : null, s.when ? el('span', 'when', s.when) : null, ZONE_WORD[s.zone] ? el('span', 'where', T(ZONE_WORD[s.zone], { n: (s.zone || '').slice(1) })) : null),
                 s.why ? el('div', 'why', s.why) : null,
               ),
             ),
