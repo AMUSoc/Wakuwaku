@@ -46,7 +46,7 @@
       let line
       if (a && a.state === 'asking') line = Object.assign(el('div', 'line busy', T('duel.crewThinking', { s: secs(Date.now() - a.since) })), { since: a.since })
       else if (a && a.state === 'failed') line = el('div', 'line bad', T('duel.crewFailed', { why: a.a || '' }))
-      else if (a) line = el('div', 'line', el('span', 'q', `「${a.q}」`), a.a, a.stoodIn ? el('span', 'muted', T('duel.crewStoodIn', { name: NAMES[m.agent] })) : null)
+      else if (a) line = el('div', 'line', el('span', 'q', `「${a.q}」`), a.a, a.stoodIn ? el('span', 'muted', T('duel.crewStoodIn', { name: NAMES[m.agent] })) : a.looked ? el('span', 'muted', T('duel.crewLooked')) : null)
       else line = el('div', 'line', String(said[m.agent] || '').replace(/^[^：:]{2,4}[：:]/, '') || el('span', 'muted', T('duel.crewHint')))
       const cell = el('button', `mate${asking === m.agent ? ' on' : ''}`, head(m, a && a.state === 'asking'), el('div', 'who', el('b', '', NAMES[m.agent]), el('span', 'role', role)), line)
       cell.style.setProperty('--c', m.color || '#888')

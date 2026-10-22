@@ -218,31 +218,33 @@ fn command_of(agent: &str, prompt_file: &str, prompt: &str) -> (&'static str, Ve
     }
 }
 
-// One of them asked something else (the duel's four, duel.rs): the same way, the same shortness.
+// One of them asked something else (the duel's four, duel.rs): the same way.
 // Its answer whole (its lines tidied, none cut short: she could not read
-// them cut, 2026-10-23), at most six lines.
-pub fn ask(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, String> {
-    run_whole(agent, folder, prompt).map(|text| {
+// them cut, 2026-10-23), at most six lines. `web`: Claude may search the web.
+pub fn ask(agent: &str, folder: &std::path::Path, prompt: &str, web: bool) -> Result<String, String> {
+    run_whole(agent, folder, prompt, web).map(|text| {
         text.lines()
             .map(|l| l.trim().trim_start_matches(['-', '*', '•', '·', ' ']).replace("**", ""))
             .filter(|l| !l.is_empty())
             .take(6)
             .collect::<Vec<_>>()
-            .join("
-")
+            .join("\n")
     })
 }
 
 fn run(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, String> {
-    run_whole(agent, folder, prompt).map(|text| short(&text))
+    run_whole(agent, folder, prompt, false).map(|text| short(&text))
 }
 
-fn run_whole(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, String> {
+fn run_whole(agent: &str, folder: &std::path::Path, prompt: &str, web: bool) -> Result<String, String> {
     let prompt_file = folder.join(format!("{agent}.prompt.txt"));
     std::fs::write(&prompt_file, prompt).map_err(|e| e.to_string())?;
     let file = prompt_file.to_string_lossy().into_owned();
     let (name, mut args, on_input) = command_of(agent, &file, prompt);
     if name == "claude" {
+        if web {
+            args.extend(["--allowedTools", "WebSearch", "WebFetch"].map(String::from));
+        }
         args.extend(crate::run::quiet(folder));
     }
     let exe = crate::run::find(name).ok_or(format!("{name} not found"))?;

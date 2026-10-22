@@ -592,29 +592,26 @@ fn crew(sh: &Shared) -> Value {
 }
 
 // What one of them is asked: her part, the duel as Claude read it off the
-// last picture, her deck, the question; no tools, short.
-pub fn ask_prompt(agent: &str, q: &str, found: &Value, deck: &str) -> String {
+// last picture, her deck, the question; short. No tools, but for the meta
+// (`web`): that one may search the web.
+pub fn ask_prompt(agent: &str, q: &str, found: &Value, deck: &str, web: bool) -> String {
     let part = PARTS.iter().find(|p| p.0 == agent).map_or(PARTS[0].1, |p| p.1);
+    let rule = if web {
+        "可以用 WebSearch 查目前 Master Duel 的環境、這個牌組的構築和打法（最多查 2 次，不要細讀長網頁），不要讀寫檔案"
+    } else {
+        "只根據下面的資料和你自己對遊戲王的了解回答，不要使用任何工具、不要讀寫檔案、不要上網"
+    };
     let mut p = format!(
-        "你是遊戲王 Master Duel 軍師團的一員，四位軍師各管一塊，你負責「{part}」。玩家在對戰中問你：「{q}」
-         規則：只根據下面的資料和你自己對遊戲王的了解回答，不要使用任何工具、不要讀寫檔案、不要上網；         繁體中文、台灣 Master Duel 的卡名和用語；從你負責的角度回答，最多 3 行、100 字內，直接講結論，不要開場白。
-"
+        "你是遊戲王 Master Duel 軍師團的一員，四位軍師各管一塊，你負責「{part}」。玩家在對戰中問你：「{q}」\n\
+         規則：{rule}；繁體中文、台灣 Master Duel 的卡名和用語；從你負責的角度回答，最多 3 行、100 字內，直接講結論，不要開場白。\n"
     );
     if found.is_object() {
-        p.push_str(&format!("
-=== 目前對局（另一位軍師剛看遊戲截圖整理的）===
-{}
-", serde_json::to_string_pretty(found).unwrap_or_default()));
+        p.push_str(&format!("\n=== 目前對局（另一位軍師剛看遊戲截圖整理的）===\n{}\n", serde_json::to_string_pretty(found).unwrap_or_default()));
     } else {
-        p.push_str("
-（還沒看過對局畫面。）
-");
+        p.push_str("\n（還沒看過對局畫面。）\n");
     }
     if !deck.is_empty() {
-        p.push_str(&format!("
-=== 我的牌組 ===
-{deck}
-"));
+        p.push_str(&format!("\n=== 我的牌組 ===\n{deck}\n"));
     }
     p
 }
@@ -631,7 +628,10 @@ pub fn ask(sh: &Arc<Shared>, agent: &str, q: &str) {
     ASKS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(agent.into(), json!({ "q": q, "state": "asking", "since": since }));
     push(sh);
     let found = VIEW.lock().unwrap_or_else(|e| e.into_inner()).get("found").cloned().unwrap_or(Value::Null);
-    let prompt = ask_prompt(agent, &q, &found, &deck_of(sh));
+    // The meta (Antigravity's part) looked up by Claude on the web: her
+    // answers were poor, the user said (2026-10-23).
+    let web = agent == "agy";
+    let prompt = ask_prompt(agent, &q, &found, &deck_of(sh), web);
     let sh = sh.clone();
     crate::spawn_named("duel-ask", move || {
         let folder = dir(&sh).join("work");
@@ -639,14 +639,13 @@ pub fn ask(sh: &Arc<Shared>, agent: &str, q: &str) {
         let installed = crate::run::find(match agent {
             "codex" => "codex",
             "grok" => "grok",
-            "agy" => "agy",
             _ => "claude",
         })
         .is_some();
-        let by = if installed { agent } else { "claude" };
-        let got = crate::review::ask(by, &folder, &prompt);
+        let by = if installed && !web { agent } else { "claude" };
+        let got = crate::review::ask(by, &folder, &prompt, web);
         let entry = match got {
-            Ok(a) => json!({ "q": q, "state": "done", "a": a, "since": since, "stoodIn": !installed }),
+            Ok(a) => json!({ "q": q, "state": "done", "a": a, "since": since, "stoodIn": !installed && !web, "looked": web }),
             Err(why) => json!({ "q": q, "state": "failed", "a": why, "since": since }),
         };
         {
