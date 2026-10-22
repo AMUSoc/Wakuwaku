@@ -67,6 +67,7 @@ mod run;
 mod screen;
 mod scout;
 mod duel;
+mod deckscan;
 mod clip;
 mod history;
 mod maps;
@@ -1045,8 +1046,14 @@ async fn duel_deck_open(app: AppHandle) {
 }
 
 #[tauri::command]
-async fn duel_deck_save(app: AppHandle, text: String) {
-    duel::save_deck(&shared(&app), &text);
+async fn duel_deck_save(app: AppHandle, deck: Value) {
+    duel::save_deck(&shared(&app), &deck);
+}
+
+// Read again with a theme from her, the cards she marked right kept.
+#[tauri::command]
+async fn duel_deck_rescan(app: AppHandle, theme: String, kept: Vec<(String, String)>) {
+    duel::scan_deck(&shared(&app), &theme, kept);
 }
 
 #[tauri::command]
@@ -1464,6 +1471,7 @@ fn main() {
             duel_close,
             duel_deck_open,
             duel_deck_save,
+            duel_deck_rescan,
             duel_deck_close,
             open_drops,
             duel_again,

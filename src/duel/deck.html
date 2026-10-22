@@ -14,14 +14,22 @@
           <span id="label"></span>
           <h1 id="head"></h1>
         </div>
+        <div class="themebox">
+          <label id="themeLabel" for="theme"></label>
+          <input id="theme" spellcheck="false" autocomplete="off" />
+          <button id="rescan" type="button" class="primary"></button>
+        </div>
         <button id="close" type="button" aria-label="close">✕</button>
       </header>
       <div class="cols">
-        <figure id="pic"></figure>
-        <main id="body"></main>
+        <div id="grids"></div>
+        <div id="side"></div>
+        <div id="scan" hidden><div class="dots"><i></i><i></i><i></i></div><div id="scanText"></div></div>
       </div>
       <footer>
         <span id="foot"></span>
+        <span id="status"></span>
+        <button id="allok" type="button"></button>
         <button id="cancel" type="button"></button>
         <button id="save" type="button" class="primary"></button>
       </footer>

@@ -41,6 +41,9 @@ const MARGIN: f64 = 12.0;
 // The picture sent: so wide at most (a 2560 display halved).
 const MAX_WIDTH: usize = 1600;
 const TIMEOUT: Duration = Duration::from_secs(150);
+// Reading a deck card by card, a theme looked up first: longer (it took
+// 106 to 363 s, 2026-10-22; once or twice a deck, so waited for).
+const DECK_TIMEOUT: Duration = Duration::from_secs(600);
 // A guess this recent goes with the next picture.
 const GUESS_MS: u64 = 20 * 60_000;
 
@@ -49,6 +52,9 @@ static SHOWN: AtomicBool = AtomicBool::new(false);
 static READY: AtomicBool = AtomicBool::new(false);
 static CREATED: AtomicBool = AtomicBool::new(false);
 static LOOKING: AtomicBool = AtomicBool::new(false);
+// The last picture of the game, whole (the deck editor's cards are cut out of it).
+static FULL: Mutex<Option<crate::deckscan::Image>> = Mutex::new(None);
+static SCANNING: Mutex<Option<u64>> = Mutex::new(None);
 static FRAMES_MADE: AtomicBool = AtomicBool::new(false);
 static FRAMES_READY: AtomicBool = AtomicBool::new(false);
 // The last answer and when: the next picture is asked with it.
@@ -103,7 +109,12 @@ fn look(sh: &Arc<Shared>, pid: u32) {
     };
     LOOKING.store(true, Ordering::SeqCst);
     let picture = dir(sh).join("work").join("shot.png");
-    let taken = std::fs::create_dir_all(dir(sh).join("work")).is_ok() && os::capture_game(hwnd, rect).is_some_and(|(w, h, rgb)| save_png(&picture, w, h, &rgb).is_ok());
+    let taken = std::fs::create_dir_all(dir(sh).join("work")).is_ok()
+        && os::capture_game(hwnd, rect).is_some_and(|(w, h, rgb)| {
+            let saved = save_png(&picture, w, h, &rgb).is_ok();
+            *FULL.lock().unwrap_or_else(|e| e.into_inner()) = Some(crate::deckscan::Image { w, h, rgb });
+            saved
+        });
     if !taken {
         LOOKING.store(false, Ordering::SeqCst);
         sh.log("duel: the game's window could not be pictured");
@@ -118,21 +129,21 @@ fn look(sh: &Arc<Shared>, pid: u32) {
     let sh = sh.clone();
     crate::spawn_named("duel", move || {
         let prompt = prompt_of(&hand_of(&sh), &deck_of(&sh), last_guess().as_ref());
-        let answer = run(&sh, &prompt).and_then(|text| answer_in(&text).ok_or_else(|| text.chars().take(120).collect()));
+        let answer = run(&sh, &prompt, TIMEOUT).and_then(|text| answer_in(&text).ok_or_else(|| text.chars().take(120).collect()));
         let took = crate::now_ms().saturating_sub(started);
         match answer {
             Ok(found) if found["screen"] == "deck" => {
-                let deck = deck_text(&found);
-                sh.log(&format!("duel: her deck read in {} s", took / 1000));
-                // The picture it was read off, for her to check it by (the deck editor).
-                let _ = std::fs::copy(dir(&sh).join("work").join("shot.png"), dir(&sh).join("deck.png"));
-                if !deck.trim().is_empty() {
-                    sh.change(json!({ "duelDeck": deck }));
+                // The deck editor: its cards cut out and read one by one, in the deck window.
+                let full = FULL.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if let Some(full) = full {
+                    let _ = std::fs::create_dir_all(dir(&sh));
+                    let _ = full.save(&dir(&sh).join("full.png"));
                 }
-                publish(&sh, json!({ "state": "deck", "deck": deck, "took": took, "at": crate::now_ms() }));
-                // To look over at once.
                 show(&sh, false);
-                open_deck(&sh);
+                LOOKING.store(false, Ordering::SeqCst);
+                let theme = crate::deckscan::read_deck(&dir(&sh))["theme"].as_str().unwrap_or("").to_string();
+                scan_deck(&sh, &theme, Vec::new());
+                return;
             }
             Ok(found) => {
                 sh.log(&format!("duel: {} in {} s", found["deck"].as_str().unwrap_or("?"), took / 1000));
@@ -166,46 +177,17 @@ fn keep_shot(sh: &Shared, picture: &std::path::Path, at: u64) {
 }
 
 // The answer in what Claude wrote: the first JSON object in it that says
-// which screen it saw, whatever is written around it (a word before, a note
+// which screen it saw (or a deck's cards), whatever is written around it (a word before, a note
 // after with braces of its own: the first try failed so, 2026-10-22).
 pub fn answer_in(text: &str) -> Option<Value> {
     text.match_indices('{').find_map(|(at, _)| {
         let v = serde_json::Deserializer::from_str(&text[at..]).into_iter::<Value>().next()?.ok()?;
-        (v.get("screen").is_some() || v.get("deck").is_some()).then_some(v)
+        (v.get("screen").is_some() || v.get("deck").is_some() || v.get("cards").is_some()).then_some(v)
     })
 }
 
 fn last_guess() -> Option<Value> {
     LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(_, at)| crate::now_ms().saturating_sub(*at) < GUESS_MS).map(|(v, _)| v.clone())
-}
-
-// A deck as read, in the lines her deck editor (src/duel/deck.js) and the
-// prompt both read: 主題, then each card "name ×n", "？" after one not sure.
-pub fn deck_text(found: &Value) -> String {
-    let rows = |part: &Value| -> Vec<String> {
-        part.as_array()
-            .map(|cards| {
-                cards
-                    .iter()
-                    .filter_map(|c| {
-                        let name = c["name"].as_str()?.trim();
-                        let n = c["n"].as_u64().unwrap_or(1).clamp(1, 3);
-                        (!name.is_empty()).then(|| format!("{name} ×{n}{}", if c["sure"] == false { " ？" } else { "" }))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    let mut lines = Vec::new();
-    if let Some(theme) = found["theme"].as_str().filter(|t| !t.trim().is_empty()) {
-        lines.push(format!("主題：{}", theme.trim()));
-    }
-    lines.push("【主要牌組】".to_string());
-    lines.extend(rows(&found["main"]));
-    lines.push("【額外牌組】".to_string());
-    lines.extend(rows(&found["extra"]));
-    let text = lines.join("\n");
-    text.chars().take(1500).collect()
 }
 
 fn deck_of(sh: &Shared) -> String {
@@ -219,9 +201,7 @@ fn hand_of(sh: &Shared) -> String {
 pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
     let mut p = String::from(
         "你是遊戲王 Master Duel 的對戰助手。先用 Read 讀這張遊戲截圖：shot.png（在目前資料夾，就是遊戲畫面本身）。\n\n\
-         【如果這是牌組編輯畫面】（上面主要牌組、下面額外牌組的卡片格子）：這是「我」的牌組。盡量認出每張卡（同一張多張就合併），只回\n\
-         {\"screen\":\"deck\",\"theme\":\"牌組主題\",\"main\":[{\"name\":\"卡名\",\"n\":張數,\"sure\":true}],\"extra\":[{\"name\":\"卡名\",\"n\":張數,\"sure\":false}]}\n\
-         沒把握的 sure 寫 false，名字寫你最有可能的猜測（我會自己對照截圖改）。\n\n\
+         【如果這是牌組編輯畫面】（上面主要牌組、下面額外牌組的卡片格子）：只回 {\"screen\":\"deck\"}，不用認卡（之後會一張一張切出來再認）。\n\n\
          【如果這是對戰畫面】畫面上方是對手的場地，下方是我的；左邊可能打開著某張卡的說明，中間可能正跳出「是否連鎖」。\n\
          對手的格子這樣叫（照畫面上的左右）：上面那排魔法陷阱區 S1～S5（左到右），下一排怪獸區 M1～M5（左到右），\
          對手怪獸區右邊那格場地區 F，中間兩格額外怪獸區 EL（左）、ER（右）。在手牌、墓地、除外或連鎖中的寫 hand、gy、ban、chain。\n\
@@ -258,7 +238,7 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
     p
 }
 
-fn run(sh: &Shared, prompt: &str) -> Result<String, String> {
+fn run(sh: &Shared, prompt: &str, timeout: Duration) -> Result<String, String> {
     let folder = dir(sh).join("work");
     let prompt_file = folder.join("prompt.txt");
     std::fs::write(&prompt_file, prompt).map_err(|e| e.to_string())?;
@@ -290,7 +270,7 @@ fn run(sh: &Shared, prompt: &str) -> Result<String, String> {
     let ok = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status.success(),
-            Ok(None) if started.elapsed() > TIMEOUT => {
+            Ok(None) if started.elapsed() > timeout => {
                 let _ = child.kill();
                 return Err("timeout".into());
             }
@@ -589,6 +569,74 @@ fn create(sh: &Arc<Shared>) {
     });
 }
 
+// --- Her deck, read slot by slot (deckscan.rs) ---------------------------------------------
+
+// The deck editor's picture (duel/full.png) cut into its cards and read,
+// with her theme and the cards she has marked right (slot, name) kept; the
+// deck window told as it goes. One at a time.
+pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>) {
+    {
+        let mut scanning = SCANNING.lock().unwrap_or_else(|e| e.into_inner());
+        if scanning.is_some() {
+            return;
+        }
+        *scanning = Some(crate::now_ms());
+    }
+    open_deck(sh);
+    let sh = sh.clone();
+    let theme = theme.trim().to_string();
+    crate::spawn_named("duel-deck", move || {
+        let started = crate::now_ms();
+        let done = (|| -> Result<(), String> {
+            let d = dir(&sh);
+            let full = crate::deckscan::Image::load(&d.join("full.png")).ok_or("no picture of the deck editor")?;
+            let cards = crate::deckscan::slots(&full);
+            if cards.is_empty() {
+                return Err("no cards".into());
+            }
+            let slots_dir = d.join("slots");
+            let _ = std::fs::remove_dir_all(&slots_dir);
+            std::fs::create_dir_all(&slots_dir).map_err(|e| e.to_string())?;
+            for (slot, img) in &cards {
+                let _ = img.save(&slots_dir.join(format!("{slot}.png")));
+            }
+            let work = d.join("work");
+            std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+            crate::deckscan::sheet(&cards).ok_or("no sheet")?.save(&work.join("sheet.png"))?;
+            let main = cards.iter().filter(|(s, _)| s.starts_with('m')).count();
+            let numbered: Vec<(usize, String)> = kept.iter().filter_map(|(slot, name)| cards.iter().position(|(s, _)| s == slot).map(|i| (i + 1, name.clone()))).collect();
+            let prompt = crate::deckscan::prompt_of(main, cards.len() - main, &theme, &numbered);
+            let text = run(&sh, &prompt, DECK_TIMEOUT)?;
+            let found = answer_in(&text).ok_or_else(|| text.chars().take(120).collect::<String>())?;
+            let read: Vec<Value> = cards
+                .iter()
+                .enumerate()
+                .map(|(i, (slot, _))| {
+                    if let Some((_, name)) = kept.iter().find(|(s, _)| s == slot) {
+                        return json!({ "slot": slot, "name": name, "sure": true });
+                    }
+                    let c = found["cards"].as_array().and_then(|a| a.iter().find(|c| c["n"].as_u64() == Some(i as u64 + 1)));
+                    json!({ "slot": slot, "name": c.and_then(|c| c["name"].as_str()).unwrap_or(""), "sure": c.is_some_and(|c| c["sure"] != false) })
+                })
+                .collect();
+            let theme = if theme.is_empty() { found["theme"].as_str().unwrap_or("").to_string() } else { theme.clone() };
+            let deck = json!({ "theme": theme, "cards": read, "at": crate::now_ms() });
+            std::fs::write(crate::deckscan::deck_path(&d), deck.to_string()).map_err(|e| e.to_string())?;
+            sh.change(json!({ "duelDeck": crate::deckscan::text_of(&deck) }));
+            Ok(())
+        })();
+        let took = crate::now_ms().saturating_sub(started) / 1000;
+        match &done {
+            Ok(()) => sh.log(&format!("duel: her deck read card by card in {took} s")),
+            Err(why) => sh.log(&format!("duel: her deck not read ({why})")),
+        }
+        *SCANNING.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let mut view = deck_view(&sh);
+        view["error"] = json!(done.err());
+        let _ = sh.app.emit_to(DECK, "duel:deck", view);
+    });
+}
+
 // --- Her deck, to look over ---------------------------------------------------------------
 
 pub const DECK: &str = "dueldeck";
@@ -597,14 +645,24 @@ static DECK_READY: AtomicBool = AtomicBool::new(false);
 static DECK_WANTED: AtomicBool = AtomicBool::new(false);
 
 fn deck_view(sh: &Shared) -> Value {
-    let picture = dir(sh).join("deck.png");
-    let url = picture.is_file().then(|| {
-        let _ = sh.app.asset_protocol_scope().allow_file(&picture);
-        // A new picture each time: its time in the address.
-        let at = std::fs::metadata(&picture).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
-        format!("{}?v={at}", crate::data::asset_url(&picture))
-    });
-    json!({ "lang": sh.lang(), "deck": deck_of(sh), "picture": url })
+    let d = dir(sh);
+    let deck = crate::deckscan::read_deck(&d);
+    let slots_dir = d.join("slots");
+    let _ = sh.app.asset_protocol_scope().allow_directory(&slots_dir, false);
+    let at = deck["at"].as_u64().unwrap_or(0);
+    // Each slot's picture, its address new with each reading.
+    let pictures: serde_json::Map<String, Value> = deck["cards"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let slot = c["slot"].as_str()?;
+            let file = slots_dir.join(format!("{slot}.png"));
+            file.is_file().then(|| (slot.to_string(), json!(format!("{}?v={at}", crate::data::asset_url(&file)))))
+        })
+        .collect();
+    let scanning = *SCANNING.lock().unwrap_or_else(|e| e.into_inner());
+    json!({ "lang": sh.lang(), "deck": deck, "pictures": pictures, "scanning": scanning, "hasPicture": d.join("full.png").is_file(), "text": deck_of(sh) })
 }
 
 // Up, in the middle of the display the game is on (it takes the keyboard: names are typed in it).
@@ -612,7 +670,7 @@ pub fn open_deck(sh: &Arc<Shared>) {
     DECK_WANTED.store(true, Ordering::SeqCst);
     let a = game_pid().and_then(os::window_rect).and_then(|r| sh.screens().near((r.l + r.r) / 2, (r.t + r.b) / 2)).or_else(|| crate::island::area(sh));
     let Some(a) = a else { return };
-    let (w, h) = (((920.0 * a.sf) as i32).min(a.w - 40), ((720.0 * a.sf) as i32).min(a.h - 40));
+    let (w, h) = (((1080.0 * a.sf) as i32).min(a.w - 40), ((760.0 * a.sf) as i32).min(a.h - 40));
     let pos = (a.x + (a.w - w) / 2, a.y + (a.h - h) / 2);
     if !DECK_MADE.swap(true, Ordering::SeqCst) {
         let sh = sh.clone();
@@ -666,9 +724,24 @@ pub fn close_deck(sh: &Shared) {
     }
 }
 
-pub fn save_deck(sh: &Arc<Shared>, text: &str) {
-    let text: String = text.chars().take(1500).collect();
-    sh.change(json!({ "duelDeck": text }));
+// Put right by hand: { theme, cards: [{ slot, name, sure }] }.
+pub fn save_deck(sh: &Arc<Shared>, deck: &Value) {
+    let cards: Vec<Value> = deck["cards"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let slot = c["slot"].as_str().filter(|s| s.len() <= 8 && (s.starts_with('m') || s.starts_with('e')))?;
+            let name: String = c["name"].as_str().unwrap_or("").trim().chars().take(60).collect();
+            Some(json!({ "slot": slot, "name": name, "sure": c["sure"] != false }))
+        })
+        .take(80)
+        .collect();
+    let theme: String = deck["theme"].as_str().unwrap_or("").trim().chars().take(60).collect();
+    let deck = json!({ "theme": theme, "cards": cards, "at": crate::deckscan::read_deck(&dir(sh))["at"] });
+    let _ = std::fs::create_dir_all(dir(sh));
+    let _ = std::fs::write(crate::deckscan::deck_path(&dir(sh)), deck.to_string());
+    sh.change(json!({ "duelDeck": crate::deckscan::text_of(&deck) }));
     sh.log("duel: her deck put right by hand");
     close_deck(sh);
 }
@@ -825,12 +898,6 @@ mod tests {
     }
 
     #[test]
-    fn a_deck_read_as_lines_to_put_right() {
-        let found = json!({ "screen": "deck", "theme": "巳劍", "main": [ { "name": "灰流麗", "n": 3, "sure": true }, { "name": "天叢雲之巳劍", "n": 2, "sure": false }, { "name": " ", "n": 1 } ], "extra": [ { "name": "S:P 小夜騎士", "n": 9 } ] });
-        assert_eq!(deck_text(&found), "主題：巳劍\n【主要牌組】\n灰流麗 ×3\n天叢雲之巳劍 ×2 ？\n【額外牌組】\nS:P 小夜騎士 ×3");
-    }
-
-    #[test]
     fn the_answer_whatever_is_written_around_it() {
         let said = "好的，這是分析：
 ```json
@@ -839,6 +906,9 @@ mod tests {
 補充：{其他}";
         assert_eq!(answer_in(said).unwrap()["deck"], "蛇眼");
         assert!(answer_in("沒有 JSON").is_none());
+        assert_eq!(answer_in("看完了。```json
+{\"theme\":\"雷熱\",\"cards\":[{\"n\":1}]}
+```").unwrap()["theme"], "雷熱");
         assert_eq!(answer_in("{\"x\":1} {\"screen\":\"deck\",\"myDeck\":\"a\"}").unwrap()["screen"], "deck");
     }
 

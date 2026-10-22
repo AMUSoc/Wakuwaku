@@ -1,19 +1,19 @@
-// Her own deck (duel.rs duelDeck), to look over and put right: what Claude
-// read off the deck editor, a row a card (its name, how many; the unsure in
-// yellow until she marks them), beside the picture it read them from. Kept
-// as plain lines the helper's prompt reads as they are:
-//
-//   主題：巳劍＋Ryzeal
-//   【主要牌組】
-//   灰流麗 ×3
-//   天叢雲之巳劍 ×2 ？        (？: not sure yet)
-//   【額外牌組】
-//   …
+// Her own deck (duel.rs, deckscan.rs), as the game shows it: a tile a card,
+// cut out of the deck editor's picture, what it was read as under it, the
+// unsure ones in yellow with a "?" until she marks them right. A tile
+// clicked opens on the right, large, to rename, mark right, put the same
+// name on the others read alike, or remove. A theme from her ("雷熱祀劍")
+// has the cards read again among that theme's, the ones marked right kept.
 ;(function () {
   const { t } = window.I18n
   let lang = 'zh-TW'
-  let deck = { theme: '', main: [], extra: [] }
-  let zoom = false
+  let deck = { theme: '', cards: [] }
+  let pictures = {}
+  let scanning = null
+  let hasPicture = false
+  let error = null
+  let picked = null
+  let timer = 0
   const T = (key, vars) => t(lang, key, vars)
   const $ = id => document.getElementById(id)
 
@@ -24,112 +24,133 @@
     return node
   }
 
-  function parse(text) {
-    const out = { theme: '', main: [], extra: [] }
-    let part = 'main'
-    for (const raw of String(text || '').split('\n')) {
-      const line = raw.trim()
-      if (!line) continue
-      if (/^主題[:：]/.test(line)) out.theme = line.replace(/^主題[:：]\s*/, '')
-      else if (/額外/.test(line) && /^[【\[]/.test(line)) part = 'extra'
-      else if (/主要/.test(line) && /^[【\[]/.test(line)) part = 'main'
-      else {
-        const m = /^(.*?)\s*[×xX＊*]\s*(\d+)\s*([？?])?$/.exec(line)
-        if (m) out[part].push({ name: m[1].trim(), n: Math.max(1, Math.min(3, Number(m[2]))), sure: !m[3] })
-        else out[part].push({ name: line.replace(/[？?]$/, '').trim(), n: 1, sure: !/[？?]$/.test(line) })
-      }
-    }
-    return out
-  }
+  const part = c => (c.slot.startsWith('e') ? 'e' : 'm')
+  const named = list => list.filter(c => c.name.trim())
 
-  function text() {
-    const rows = list => list.filter(c => c.name.trim()).map(c => `${c.name.trim()} ×${c.n}${c.sure ? '' : ' ？'}`)
-    return [deck.theme.trim() ? `主題：${deck.theme.trim()}` : '', '【主要牌組】', ...rows(deck.main), '【額外牌組】', ...rows(deck.extra)].filter(Boolean).join('\n')
-  }
-
-  const count = list => list.reduce((s, c) => s + (c.name.trim() ? c.n : 0), 0)
-
-  function row(list, i) {
-    const c = list[i]
-    const name = el('input', 'name')
-    name.value = c.name
-    name.placeholder = T('deck.namePh')
-    name.addEventListener('input', () => {
-      c.name = name.value
-      drawFoot()
-    })
-    const n = el('span', 'n', String(c.n))
-    const less = el('button', 'step', '−')
-    less.onclick = () => ((c.n = Math.max(1, c.n - 1)), draw())
-    const more = el('button', 'step', '+')
-    more.onclick = () => ((c.n = Math.min(3, c.n + 1)), draw())
-    const ok = c.sure ? null : el('button', 'ok', T('deck.ok'))
-    if (ok) ok.onclick = () => ((c.sure = true), draw())
-    const del = el('button', 'del', '✕')
-    del.title = T('deck.remove')
-    del.onclick = () => (list.splice(i, 1), draw())
-    return el('div', `row${c.sure ? '' : ' unsure'}`, name, less, n, more, ok, del)
-  }
-
-  function section(key, list) {
-    const add = el('button', 'add', T('deck.add'))
-    add.onclick = () => {
-      list.push({ name: '', n: 1, sure: true })
+  function tile(c) {
+    const box = el('button', `tile${c.sure ? '' : ' unsure'}${picked === c.slot ? ' picked' : ''}`)
+    const url = pictures[c.slot]
+    box.append(url ? Object.assign(el('img'), { src: url, alt: '' }) : el('div', 'blank', '＋'))
+    if (!c.sure) box.append(el('span', 'q', '?'))
+    box.append(el('span', 'nm', c.name.trim() || T('deck.unnamed')))
+    box.onclick = () => {
+      picked = c.slot
       draw()
-      const inputs = $('body').querySelectorAll(`[data-part="${key}"] input.name`)
-      inputs[inputs.length - 1]?.focus()
+      setTimeout(() => $('pickName')?.focus(), 0)
     }
-    const box = el('section', '', el('h2', '', T(key === 'main' ? 'deck.main' : 'deck.extra', { n: count(list) })), list.map((_, i) => row(list, i)), add)
-    box.dataset.part = key
     return box
   }
 
-  function drawFoot() {
-    const unsure = [...deck.main, ...deck.extra].filter(c => !c.sure && c.name.trim()).length
-    $('foot').textContent = unsure ? T('deck.unsure', { n: unsure }) : T('deck.allSure')
+  function section(key) {
+    const list = deck.cards.filter(c => part(c) === key)
+    const add = el('button', 'tile addtile', el('div', 'blank', '＋'), el('span', 'nm', T('deck.addOne')))
+    add.onclick = () => {
+      const n = deck.cards.filter(c => part(c) === key && c.slot.includes('+')).length
+      const c = { slot: `${key}+${Date.now() % 100000}${n}`, name: '', sure: true }
+      deck.cards.push(c)
+      picked = c.slot
+      draw()
+      setTimeout(() => $('pickName')?.focus(), 0)
+    }
+    return el('section', '', el('h2', '', T(key === 'm' ? 'deck.main' : 'deck.extra', { n: named(list).length })), el('div', 'grid', list.map(tile), add))
+  }
+
+  // The card picked, large, to put right.
+  function side() {
+    const c = deck.cards.find(x => x.slot === picked)
+    if (!c) {
+      const unsure = deck.cards.filter(x => !x.sure && x.name.trim()).length
+      return el('aside', 'side', el('h3', '', T('deck.howTitle')), el('p', 'muted', T('deck.how')), unsure ? el('p', 'warnline', T('deck.unsure', { n: unsure })) : el('p', 'okline', T('deck.allSure')))
+    }
+    const url = pictures[c.slot]
+    const name = el('input', 'name')
+    name.id = 'pickName'
+    name.value = c.name
+    name.placeholder = T('deck.namePh')
+    const was = c.name
+    name.addEventListener('input', () => {
+      c.name = name.value
+      c.sure = true
+      const n = box.querySelector('.tile.picked .nm')
+      if (n) n.textContent = c.name || T('deck.unnamed')
+    })
+    name.addEventListener('keydown', e => e.key === 'Enter' && ((picked = null), draw()))
+    const alike = deck.cards.filter(x => x !== c && x.name.trim() && x.name.trim() === was.trim())
+    const ok = el('button', 'act good', c.sure ? T('deck.markUnsure') : T('deck.ok'))
+    ok.onclick = () => ((c.sure = !c.sure), draw())
+    const same = alike.length ? el('button', 'act', T('deck.sameAll', { n: alike.length })) : null
+    if (same)
+      same.onclick = () => {
+        for (const x of deck.cards) if (x.name.trim() === was.trim()) Object.assign(x, { name: c.name, sure: true })
+        draw()
+      }
+    const del = el('button', 'act bad', T('deck.remove'))
+    del.onclick = () => {
+      deck.cards = deck.cards.filter(x => x !== c)
+      picked = null
+      draw()
+    }
+    const box = $('grids')
+    return el('aside', 'side', url ? el('img', 'big') : el('div', 'bigblank', '＋'), el('label', 'th', T('deck.cardName')), name, el('div', 'acts', ok, same, del))
   }
 
   function draw() {
-    const theme = el('input', 'theme')
-    theme.value = deck.theme
-    theme.placeholder = T('deck.themePh')
-    theme.addEventListener('input', () => (deck.theme = theme.value))
-    $('body').replaceChildren(el('label', 'th', T('deck.theme')), theme, section('main', deck.main), section('extra', deck.extra))
-    drawFoot()
-  }
-
-  function drawPic(url) {
-    const pic = $('pic')
-    if (!url) {
-      pic.replaceChildren(el('p', 'muted', T('deck.noPic')))
-      return
+    clearInterval(timer)
+    $('theme').value = deck.theme || ''
+    $('rescan').disabled = !!scanning || !hasPicture
+    const grids = $('grids')
+    if (!deck.cards.length && !scanning) {
+      grids.replaceChildren(el('div', 'empty', T(hasPicture ? 'deck.notRead' : 'deck.noPic')), section('m'), section('e'))
+    } else {
+      grids.replaceChildren(section('m'), section('e'))
     }
-    const img = el('img')
-    img.src = url
-    img.title = T('deck.zoom')
-    img.onclick = () => {
-      zoom = !zoom
-      pic.classList.toggle('zoom', zoom)
+    const s = side()
+    const big = s.querySelector('img.big')
+    if (big) big.src = pictures[picked]
+    $('side').replaceChildren(s)
+    $('status').textContent = scanning ? '' : error ? T('deck.failed', { why: error }) : ''
+    $('scan').hidden = !scanning
+    if (scanning) {
+      const tick = () => ($('scanText').textContent = T('deck.scanning', { s: Math.max(0, Math.round((Date.now() - scanning) / 1000)) }))
+      tick()
+      timer = setInterval(tick, 1000)
     }
-    pic.replaceChildren(img, el('figcaption', 'muted', T('deck.picNote')))
+    const unsure = deck.cards.filter(c => !c.sure && c.name.trim()).length
+    $('foot').textContent = unsure ? T('deck.unsure', { n: unsure }) : T('deck.allSure')
   }
 
   $('close').onclick = () => window.pet.duelDeckClose()
   $('cancel').onclick = () => window.pet.duelDeckClose()
-  $('save').onclick = () => window.pet.duelDeckSave(text())
+  $('save').onclick = () => window.pet.duelDeckSave({ theme: $('theme').value.trim(), cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure })) })
+  $('allok').onclick = () => {
+    for (const c of deck.cards) c.sure = true
+    draw()
+  }
+  $('rescan').onclick = () => {
+    deck.theme = $('theme').value.trim()
+    const kept = deck.cards.filter(c => c.sure && c.name.trim() && !c.slot.includes('+')).map(c => [c.slot, c.name.trim()])
+    scanning = Date.now()
+    error = null
+    draw()
+    window.pet.duelDeckRescan(deck.theme, kept)
+  }
+  $('theme').addEventListener('input', e => (deck.theme = e.target.value))
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') window.pet.duelDeckClose()
+    if (e.key === 'Escape') picked ? ((picked = null), draw()) : window.pet.duelDeckClose()
   })
 
   window.pet.onDuelDeck(p => {
     lang = p.lang || 'zh-TW'
     document.documentElement.lang = lang
-    $('label').textContent = T('deck.label')
-    $('head').textContent = T('deck.title')
-    $('cancel').textContent = T('deck.cancel')
-    $('save').textContent = T('deck.save')
-    deck = parse(p.deck)
-    drawPic(p.picture)
+    for (const [id, key] of [['label', 'deck.label'], ['head', 'deck.title'], ['cancel', 'deck.cancel'], ['save', 'deck.save'], ['allok', 'deck.allOk'], ['rescan', 'deck.rescan'], ['themeLabel', 'deck.theme']]) $(id).textContent = T(key)
+    $('theme').placeholder = T('deck.themePh')
+    const d = p.deck || {}
+    deck = { theme: d.theme || '', cards: (d.cards || []).map(c => ({ slot: String(c.slot), name: String(c.name || ''), sure: c.sure !== false })) }
+    pictures = p.pictures || {}
+    scanning = p.scanning || null
+    hasPicture = !!p.hasPicture
+    error = p.error || null
+    if (picked && !deck.cards.some(c => c.slot === picked)) picked = null
     draw()
   })
 })()
