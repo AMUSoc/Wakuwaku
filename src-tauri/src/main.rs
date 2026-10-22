@@ -69,6 +69,7 @@ mod scout;
 mod duel;
 mod clip;
 mod history;
+mod maps;
 mod ask;
 mod scripts;
 mod server;

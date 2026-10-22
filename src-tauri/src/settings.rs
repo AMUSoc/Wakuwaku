@@ -145,6 +145,9 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // The key for the game's ten (scout.rs): one it can take.
         "duelKey" => v.as_str().is_some_and(|k| k.len() <= 30 && crate::scout::parse_key(k).is_some()),
         "askAgent" => v.as_str().is_some_and(|a| crate::ask::AGENTS.contains(&a)),
+        "mapsKey" => v.as_str().is_some_and(|k| k.is_empty() || (k.starts_with("AIza") && k.len() < 80)),
+        "mapsHome" | "mapsWork" => v.as_str().is_some_and(|a| a.chars().count() <= 200),
+        "mapsMode" => matches!(v.as_str(), Some("drive" | "two_wheeler" | "transit")),
         "duelHand" => v.as_str().is_some_and(|h| h.chars().count() <= 300),
         "scoutKey" => v.as_str().is_some_and(|k| k.len() <= 30 && crate::scout::parse_key(k).is_some()),
         "updateFrom" => matches!(v.as_str(), Some("auto" | "github" | "gitee")),

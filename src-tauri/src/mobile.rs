@@ -843,6 +843,10 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
             let mut body = state(sh);
             // The phone's app (not the page): its battery, and a ring asked for it.
             if let Some(battery) = header(&req, "x-wakuwaku-battery") {
+                // Where it is and its next event with a place (maps.rs), as it says.
+                let event = header(&req, "x-wakuwaku-event").map(decode).and_then(|e| serde_json::from_str::<Value>(&e).ok());
+                crate::maps::from_phone(header(&req, "x-wakuwaku-where").as_deref(), event.as_ref());
+                body["maps"] = crate::maps::for_phone(sh);
                 phone_battery(sh, &battery);
                 body["ring"] = json!(take_ring());
                 if let Some(text) = clip_for_phone(sh) {

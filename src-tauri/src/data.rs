@@ -128,6 +128,12 @@ fn defaults() -> Map<String, Value> {
         "phoneNoticeMute": [],
         // The computer's clipboard to the phone as it changes (mobile.rs).
         "clipToPhone": true,
+        // Getting about (maps.rs): the person's Google Maps key, home and
+        // work, and how they go (drive, two_wheeler, transit).
+        "mapsKey": "",
+        "mapsHome": "",
+        "mapsWork": "",
+        "mapsMode": "drive",
         // The side island at the right edge, one row for each agent (dock.rs).
         "dock": false,
         // A League of Legends game on: the pets show of it (lol.rs); her own

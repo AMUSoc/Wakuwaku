@@ -1033,6 +1033,12 @@
     return `${showWelcome() ? part('welcome', welcomeBlock()) : ''}${pageNow()}
       ${part('alerts', pageAlerts())}
       ${part('mobile', pageMobile())}
+      ${sec(T('s.maps'))}<div class="grp">
+        ${row(esc(T('s.mapsKey')), esc(T('s.mapsKeyNote')), `<input class="in" id="s-maps-key" type="password" spellcheck="false" autocomplete="off" placeholder="AIza…" value="${esc(snap.settings.mapsKey || '')}">`)}
+        ${row(esc(T('s.mapsHome')), '', `<input class="in" id="s-maps-home" spellcheck="false" autocomplete="off" placeholder="${esc(T('s.mapsHomeHint'))}" value="${esc(snap.settings.mapsHome || '')}">`)}
+        ${row(esc(T('s.mapsWork')), '', `<input class="in" id="s-maps-work" spellcheck="false" autocomplete="off" placeholder="${esc(T('s.mapsWorkHint'))}" value="${esc(snap.settings.mapsWork || '')}">`)}
+        ${row(esc(T('s.mapsMode')), esc(T('s.mapsModeNote')), seg('mapsMode', [['drive', T('s.mapsDrive')], ['two_wheeler', T('s.mapsScooter')], ['transit', T('s.mapsTransit')]], snap.settings.mapsMode || 'drive'))}
+      </div>
       ${sec(T('s.startLang'))}<div class="grp">
         ${row(esc(T('settings.startAtLogin')), esc(T('home.pluginStart')), sw('login', snap.loginAtStart))}
         ${row(esc(T('home.language')), '', seg('lang', [['auto', T('settings.languageAuto')], ['zh-TW', '繁體中文'], ['zh', '简体中文'], ['en', 'EN']], snap.settings.lang))}
@@ -1593,6 +1599,10 @@
   // A plugin's setting kept once typed (Enter, or leaving the box); a
   // number that is none goes back to what it was.
   layer.addEventListener('change', e => {
+    // Getting about (maps.rs): the key, home and work, kept once typed.
+    if (e.target.id === 's-maps-key') return patch({ mapsKey: e.target.value.trim() })
+    if (e.target.id === 's-maps-home') return patch({ mapsHome: e.target.value.trim() })
+    if (e.target.id === 's-maps-work') return patch({ mapsWork: e.target.value.trim() })
     if (e.target.dataset.ilook) return ilookInput(e.target, true)
     // An agent's project folder, kept once typed (launch.rs); blank, none.
     if (e.target.dataset.agentDir) {
