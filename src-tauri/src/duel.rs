@@ -726,6 +726,11 @@ pub fn search_cards(sh: &Shared, q: &str) -> Value {
     }
 }
 
+// Every picture of a card, its alternate arts too.
+pub fn card_arts(sh: &Shared, id: u64) -> Value {
+    json!(crate::cards::with_cards(&sh.dir, |all| crate::cards::arts(all, id)).unwrap_or_default())
+}
+
 pub fn deck_ready(sh: &Arc<Shared>) {
     DECK_READY.store(true, Ordering::SeqCst);
     if DECK_WANTED.load(Ordering::SeqCst) {

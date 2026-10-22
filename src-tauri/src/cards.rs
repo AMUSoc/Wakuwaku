@@ -132,6 +132,30 @@ fn fetch(data: &Path) -> Result<(), String> {
     std::fs::write(dir(data).join("cards.json"), json).map_err(|e| e.to_string())
 }
 
+// Every picture of a card (its alternate arts too: Master Duel has them,
+// and its cards with art over the frame, the user's word, 2026-10-22), by
+// its English name from YGOPRODeck, which lists them by name; asked once.
+static ARTS: Mutex<Option<HashMap<u64, Vec<u64>>>> = Mutex::new(None);
+
+pub fn arts(cards: &[Card], id: u64) -> Vec<String> {
+    if let Some(hit) = ARTS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&id).cloned()) {
+        return hit.into_iter().map(picture).collect();
+    }
+    let Some(en) = cards.iter().find(|c| c.id == id).map(|c| c.en.clone()).filter(|e| !e.is_empty()) else { return vec![picture(id)] };
+    let url = format!("https://db.ygoprodeck.com/api/v7/cardinfo.php?name={}", en.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>());
+    let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().new_agent();
+    let ids: Vec<u64> = agent
+        .get(&url)
+        .call()
+        .ok()
+        .and_then(|mut r| r.body_mut().read_json::<Value>().ok())
+        .and_then(|v| v["data"][0]["card_images"].as_array().map(|a| a.iter().filter_map(|i| i["id"].as_u64()).collect()))
+        .filter(|ids: &Vec<u64>| !ids.is_empty())
+        .unwrap_or_else(|| vec![id]);
+    ARTS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(id, ids.clone());
+    ids.into_iter().map(picture).collect()
+}
+
 // Cards by what is typed: the name first, as it starts, then as it holds
 // it; the Japanese or English too. The shortest names first among equals.
 pub fn search(cards: &[Card], q: &str, most: usize) -> Vec<Value> {

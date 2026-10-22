@@ -67,7 +67,28 @@
     }
     const url = pictures[c.slot]
     const pics = el('div', 'pics', el('figure', '', url ? Object.assign(el('img', 'big'), { src: url }) : el('div', 'bigblank', '＋'), el('figcaption', '', T('deck.scanned'))))
-    if (c.id) pics.append(el('figure', '', Object.assign(el('img', 'big'), { src: `https://images.ygoprodeck.com/images/cards_small/${c.id}.jpg` }), el('figcaption', '', T('deck.official'))))
+    let arts = null
+    if (c.id) {
+      const official = Object.assign(el('img', 'big'), { src: `https://images.ygoprodeck.com/images/cards_small/${c.id}.jpg` })
+      pics.append(el('figure', '', official, el('figcaption', '', T('deck.official'))))
+      // Its other arts (alternate ones, Master Duel's too where listed): a click shows one.
+      arts = el('div', 'arts')
+      const id = c.id
+      window.pet.duelCardArts(id).then(list => {
+        if (!list || list.length < 2 || picked !== c.slot) return
+        arts.replaceChildren(
+          el('span', 'th', T('deck.arts', { n: list.length })),
+          ...list.map(src => {
+            const b = el('button', `art${src === official.src ? ' on' : ''}`, Object.assign(el('img'), { src, alt: '', loading: 'lazy' }))
+            b.onclick = () => {
+              official.src = src
+              arts.querySelectorAll('.art').forEach(x => x.classList.toggle('on', x === b))
+            }
+            return b
+          }),
+        )
+      })
+    }
     const name = el('input', 'name')
     name.id = 'pickName'
     name.value = c.name
@@ -136,7 +157,7 @@
       picked = null
       draw()
     }
-    return el('aside', 'side', pics, el('label', 'th', T('deck.cardName')), name, list, el('p', 'hint', T('deck.typeHint')), el('div', 'acts', ok, same, del))
+    return el('aside', 'side', pics, arts, el('label', 'th', T('deck.cardName')), name, list, el('p', 'hint', T('deck.typeHint')), el('div', 'acts', ok, same, del))
   }
 
   function draw() {

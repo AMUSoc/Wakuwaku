@@ -363,3 +363,31 @@ footer button {
 .pics figure {
   flex: 0 1 120px;
 }
+
+.arts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.arts .th {
+  width: 100%;
+}
+
+.art {
+  padding: 1px;
+  border-radius: 4px;
+}
+
+.art img {
+  width: 30px;
+  height: 44px;
+  object-fit: cover;
+  display: block;
+  border-radius: 3px;
+}
+
+.art.on {
+  border-color: var(--claude);
+}

@@ -1058,6 +1058,12 @@ async fn duel_cards(app: AppHandle, q: String) -> Value {
     tauri::async_runtime::spawn_blocking(move || duel::search_cards(&sh, &q)).await.unwrap_or(Value::Null)
 }
 
+#[tauri::command]
+async fn duel_card_arts(app: AppHandle, id: u64) -> Value {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::card_arts(&sh, id)).await.unwrap_or(Value::Null)
+}
+
 // Read again with a theme from her, the cards she marked right kept.
 #[tauri::command]
 async fn duel_deck_rescan(app: AppHandle, theme: String, kept: Vec<(String, String)>) {
@@ -1481,6 +1487,7 @@ fn main() {
             duel_deck_save,
             duel_deck_rescan,
             duel_cards,
+            duel_card_arts,
             duel_deck_close,
             open_drops,
             duel_again,
