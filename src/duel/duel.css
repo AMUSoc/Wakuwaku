@@ -520,3 +520,85 @@ pre.mine {
   font: inherit;
   font-size: 12px;
 }
+
+/* The bar down the game's right, the card out to its left. */
+#panel {
+  right: 72px !important;
+}
+
+#panel[hidden] {
+  display: none;
+}
+
+#bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 64px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: 18px;
+  background:
+    radial-gradient(120px 200px at 50% 0%, rgba(232, 115, 42, 0.18), transparent 70%),
+    var(--card);
+  border: 1px solid var(--line);
+}
+
+#bar button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 0 5px;
+  border-radius: 12px;
+  background: transparent;
+  border-color: transparent;
+}
+
+#bar button i {
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+}
+
+#bar button span {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+#bar button:hover {
+  background: var(--card-2);
+}
+
+#bar button.on {
+  background: rgba(232, 115, 42, 0.2);
+  border-color: var(--claude);
+}
+
+#bar button.on span {
+  color: var(--strong);
+}
+
+#bar button.busy i {
+  animation: bar-busy 1s ease-in-out infinite alternate;
+}
+
+@keyframes bar-busy {
+  to {
+    transform: scale(1.25);
+  }
+}
+
+#bar button.hide {
+  padding: 4px 0;
+  margin-top: 2px;
+}
+
+#bar button.hide i {
+  font-size: 13px;
+  color: var(--muted);
+}

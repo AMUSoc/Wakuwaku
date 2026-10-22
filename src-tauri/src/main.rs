@@ -1085,7 +1085,38 @@ async fn duel_card_arts(app: AppHandle, id: u64) -> Value {
 // Read again with a theme from her, the cards she marked right kept.
 #[tauri::command]
 async fn duel_deck_rescan(app: AppHandle, theme: String, kept: Vec<(String, String)>) {
-    duel::scan_deck(&shared(&app), &theme, kept);
+    duel::scan_deck(&shared(&app), &theme, kept, false);
+}
+
+// The bar's card out or in; its 掃描牌組; her saved decks.
+#[tauri::command]
+async fn duel_fly(app: AppHandle, open: bool) {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::fly(&sh, open)).await.ok();
+}
+
+#[tauri::command]
+async fn duel_scan(app: AppHandle) {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::scan(&sh)).await.ok();
+}
+
+#[tauri::command]
+async fn duel_deck_use(app: AppHandle, id: String) {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::use_deck(&sh, &id)).await.ok();
+}
+
+#[tauri::command]
+async fn duel_deck_drop(app: AppHandle, id: String) {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::drop_deck(&sh, &id)).await.ok();
+}
+
+#[tauri::command]
+async fn duel_deck_new(app: AppHandle) {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::new_deck(&sh)).await.ok();
 }
 
 #[tauri::command]
@@ -1504,6 +1535,11 @@ fn main() {
             duel_deck_open,
             duel_deck_save,
             duel_deck_rescan,
+            duel_fly,
+            duel_scan,
+            duel_deck_use,
+            duel_deck_drop,
+            duel_deck_new,
             duel_cards,
             duel_card_arts,
             duel_card_info,

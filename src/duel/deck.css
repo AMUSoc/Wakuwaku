@@ -585,3 +585,47 @@ header .title {
   font-size: 12px;
   color: var(--good);
 }
+
+/* Her saved decks: which, its name, a new one, one thrown away. */
+.lib {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.lib select,
+.lib input {
+  font: inherit;
+  color: var(--strong);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 9px;
+  outline: none;
+}
+
+.lib select {
+  font-size: 16px;
+  font-weight: 700;
+  max-width: 260px;
+}
+
+.lib select option {
+  background: #121726;
+}
+
+.lib input {
+  width: 170px;
+}
+
+.lib button {
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#dropDeck:not(:disabled):hover {
+  border-color: var(--bad);
+  color: var(--bad);
+}

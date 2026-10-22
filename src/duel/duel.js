@@ -1,9 +1,10 @@
 // Master Duel's helper (duel.rs): what the opponent plays and where to stop
 // it, as Claude read it off a picture of the game. While it looks, how long;
 // then the deck, its plan, the effects to stop (with what, when, why), what
-// to watch for, a tip, and the cards it saw. ✕ or its key puts it away;
-// 重新看 takes a new picture. Above it all the four, each pet with her part
-// and her line on it (軍師團): one clicked is asked, the agent itself
+// to watch for, a tip, and the cards it saw. Its key brings up a bar of her
+// tools down the game's right (看場面, 軍師團, 我的牌組, 掃描牌組); a card
+// slides out to its left for the look or for the four, each pet with her
+// part and her line on it (軍師團): one clicked is asked, the agent itself
 // answering (duel.rs ask).
 ;(function () {
   const { t } = window.I18n
@@ -22,6 +23,7 @@
   const secs = ms => Math.max(0, Math.round(ms / 1000))
   const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok', agy: 'Antigravity' }
   let asking = null // the agent whose question box is open
+  let mode = 'look' // the card beside the bar: the look or the four
   let typed = '' // what is typed in it, kept through redraws
 
   // A pet's head: the first cells of her sheet, idle, or running while she thinks.
@@ -56,7 +58,7 @@
       }
       return cell
     })
-    const parts = [el('h2', '', T('duel.crewTitle')), el('div', 'crew', cells)]
+    const parts = [el('div', 'crew', cells)]
     if (asking) {
       const box = el('input', 'askq')
       box.id = 'crewQ'
@@ -105,15 +107,20 @@
   function draw() {
     clearInterval(timer)
     const typing = document.activeElement && document.activeElement.id === 'crewQ'
-    $('panel').hidden = false
+    drawBar()
+    $('panel').hidden = !data.fly
     $('again').textContent = T('duel.again')
-    $('mydeck').textContent = T('deck.button')
+    $('again').hidden = mode !== 'look'
     $('again').disabled = data.state === 'looking'
     const body = $('body')
     const f = data.found || {}
     $('sure').hidden = true
     $('alt').textContent = ''
-    if (data.state === 'looking') {
+    if (mode === 'crew') {
+      $('label').textContent = T('duel.crewTitle')
+      $('deck').textContent = f.deck || T('duel.crewSub')
+      body.replaceChildren(...(crewBlock(data.found || null) || []))
+    } else if (data.state === 'looking') {
       $('label').textContent = T('duel.looking')
       $('deck').textContent = data.last && data.last.deck ? T('duel.wasDeck', { deck: data.last.deck }) : T('duel.lookingSub')
       const clock = el('div', 'clock')
@@ -125,7 +132,7 @@
       $('label').textContent = T('duel.oops')
       const known = ['picture', 'noGame', 'timeout'].includes(data.why)
       $('deck').textContent = T(known ? `duel.why.${data.why}` : 'duel.why.other')
-      body.replaceChildren(el('p', 'muted', known || !data.why ? '' : String(data.why)), el('p', 'muted', T('duel.howTo', { key: data.key })), ...(crewBlock(null) || []))
+      body.replaceChildren(el('p', 'muted', known || !data.why ? '' : String(data.why)), el('p', 'muted', T('duel.howTo', { key: data.key })))
     } else if (data.state === 'deck') {
       $('label').textContent = T('duel.deckRead')
       $('deck').textContent = T('duel.deckReadSub')
@@ -133,7 +140,7 @@
     } else if (data.state === 'ready' && !f.deck) {
       $('label').textContent = T('duel.nothing')
       $('deck').textContent = ''
-      body.replaceChildren(el('p', '', f.plan || ''), el('p', 'muted', T('duel.howTo', { key: data.key })), ...(crewBlock(f) || []))
+      body.replaceChildren(el('p', '', f.plan || ''), el('p', 'muted', T('duel.howTo', { key: data.key })))
     } else if (data.state === 'ready') {
       $('label').textContent = T('duel.deckLabel')
       $('deck').textContent = f.deck
@@ -147,7 +154,6 @@
       // Asked whether to chain: the answer first, above all else.
       if (f.chain && f.chain.answer) parts.push(el('div', 'chain', el('div', 'q', T('duel.chainQ', { card: f.chain.card || '' })), el('div', 'a', f.chain.answer)))
       if (f.plan) parts.push(el('p', 'plan', f.plan))
-      parts.push(...(crewBlock(f) || []))
       const stops = (f.stop || []).slice(0, 3)
       if (stops.length) {
         parts.push(el('h2', '', T('duel.stop')))
@@ -189,23 +195,56 @@
     } else {
       $('label').textContent = T('duel.title')
       $('deck').textContent = ''
-      body.replaceChildren(el('p', 'muted', T('duel.howTo', { key: data.key })), ...(crewBlock(null) || []))
+      body.replaceChildren(el('p', 'muted', T('duel.howTo', { key: data.key })))
     }
     // Thinking: her seconds go on.
     if (Object.values(data.asks || {}).some(a => a.state === 'asking') && data.state !== 'looking')
       timer = setInterval(() => document.querySelectorAll('.line.busy').forEach(l => (l.textContent = T('duel.crewThinking', { s: secs(Date.now() - l.since) }))), 1000)
-    const foot = [T('duel.keyHint', { key: data.key || 'Alt+D' })]
+    const foot = mode === 'crew' ? [] : [T('duel.keyHint', { key: data.key || 'Alt+D' })]
     if (data.state === 'ready' && data.took) foot.push(T('duel.took', { s: secs(data.took) }))
     if (data.hand) foot.push(T('duel.handSet'))
     $('foot').textContent = foot.join(' · ')
     if (typing && $('crewQ')) $('crewQ').focus()
   }
 
-  $('close').addEventListener('click', () => window.pet.duelClose())
+  // The bar: each button its tool; the card it opens out, again to put it in.
+  function drawBar() {
+    for (const [id, key] of [['bLook', 'duel.bar.look'], ['bCrew', 'duel.bar.crew'], ['bDeck', 'duel.bar.deck'], ['bScan', 'duel.bar.scan']]) $(id).querySelector('span').textContent = T(key)
+    $('bScan').title = T('duel.bar.scanTip')
+    $('bHide').title = T('duel.bar.hide')
+    $('bLook').classList.toggle('on', !!data.fly && mode === 'look')
+    $('bCrew').classList.toggle('on', !!data.fly && mode === 'crew')
+    $('bLook').classList.toggle('busy', data.state === 'looking')
+  }
+  const open = m => {
+    mode = m
+    data.fly = true
+    window.pet.duelFly(true)
+    draw()
+  }
+  const shut = () => {
+    data.fly = false
+    asking = null
+    window.pet.duelCrewTyping(false)
+    window.pet.duelFly(false)
+    draw()
+  }
+  // 看場面: a new look (the card shows it as it goes); out already, put away.
+  $('bLook').addEventListener('click', () => {
+    if (data.fly && mode === 'look' && data.state !== 'looking') return shut()
+    open('look')
+    if (data.state !== 'looking') window.pet.duelAgain()
+  })
+  $('bCrew').addEventListener('click', () => (data.fly && mode === 'crew' ? shut() : open('crew')))
+  $('bDeck').addEventListener('click', () => window.pet.duelDeckOpen())
+  $('bScan').addEventListener('click', () => window.pet.duelScan())
+  $('bHide').addEventListener('click', () => window.pet.duelClose())
+  $('close').addEventListener('click', shut)
   $('again').addEventListener('click', () => window.pet.duelAgain())
-  $('mydeck').addEventListener('click', () => window.pet.duelDeckOpen())
   window.pet.onDuel(payload => {
     data = payload || { state: 'none' }
+    // A look going: its card the one out.
+    if (data.state === 'looking') mode = 'look'
     document.documentElement.lang = data.lang || 'zh-TW'
     draw()
   })

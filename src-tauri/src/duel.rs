@@ -37,6 +37,12 @@ fn game_pid() -> Option<u32> {
 }
 // The panel, in logical pixels, and its gap to the display's edge.
 const SIZE: (f64, f64) = (380.0, 620.0);
+// The bar of her tools down the game's right (Alt+D brings it up, 2026-10-22:
+// "a small toolbar, not a chat window"); a card of what was asked for slides
+// out to its left (FLY), the window as large as both then.
+const BAR: (f64, f64) = (64.0, 318.0);
+const BAR_GAP: f64 = 8.0;
+static FLY: AtomicBool = AtomicBool::new(false);
 const MARGIN: f64 = 12.0;
 // The picture sent: so wide at most (a 2560 display halved).
 const MAX_WIDTH: usize = 1600;
@@ -78,12 +84,33 @@ pub fn press(sh: &Arc<Shared>) {
         return;
     }
     // Only with the game up: the key is someone else's elsewhere (Alt+D in a browser).
-    let Some(pid) = game_pid() else { return };
-    if LOOKING.load(Ordering::SeqCst) {
-        show(sh, true);
+    if game_pid().is_none() {
         return;
     }
-    look(sh, pid);
+    // The bar alone; a look is one of its buttons. Still looking: its card out.
+    FLY.store(LOOKING.load(Ordering::SeqCst), Ordering::SeqCst);
+    show(sh, true);
+}
+
+// The card beside the bar out or in (its page says which card).
+pub fn fly(sh: &Arc<Shared>, open: bool) {
+    FLY.store(open, Ordering::SeqCst);
+    if SHOWN.load(Ordering::SeqCst) {
+        apply(sh);
+    }
+}
+
+// The bar's 掃描牌組: the deck editor pictured and read card by card, a new deck.
+pub fn scan(sh: &Arc<Shared>) {
+    let Some(pid) = game_pid() else { return };
+    let Some((hwnd, rect)) = os::game_window(pid) else { return };
+    let Some((w, h, rgb)) = os::capture_game(hwnd, rect) else {
+        sh.log("duel: the game's window could not be pictured");
+        return;
+    };
+    let _ = std::fs::create_dir_all(dir(sh));
+    let _ = crate::deckscan::Image { w, h, rgb }.save(&dir(sh).join("full.png"));
+    scan_deck(sh, "", Vec::new(), true);
 }
 
 // Again, from its button: the panel out of the way of the picture first.
@@ -126,6 +153,7 @@ fn look(sh: &Arc<Shared>, pid: u32) {
     keep_shot(sh, &picture, started);
     *ASKS.lock().unwrap_or_else(|e| e.into_inner()) = None;
     publish(sh, json!({ "state": "looking", "since": started, "last": last_guess() }));
+    FLY.store(true, Ordering::SeqCst);
     show(sh, true);
     let sh = sh.clone();
     crate::spawn_named("duel", move || {
@@ -145,7 +173,7 @@ fn look(sh: &Arc<Shared>, pid: u32) {
                 show(&sh, false);
                 LOOKING.store(false, Ordering::SeqCst);
                 let theme = crate::deckscan::read_deck(&dir(&sh))["theme"].as_str().unwrap_or("").to_string();
-                scan_deck(&sh, &theme, Vec::new());
+                scan_deck(&sh, &theme, Vec::new(), true);
                 return;
             }
             Ok(found) => {
@@ -497,7 +525,7 @@ fn publish(sh: &Shared, view: Value) {
     *VIEW.lock().unwrap_or_else(|e| e.into_inner()) = view;
     push(sh);
     let sh = crate::shared(&sh.app);
-    apply_frames(&sh, SHOWN.load(Ordering::SeqCst));
+    apply_frames(&sh, SHOWN.load(Ordering::SeqCst) && FLY.load(Ordering::SeqCst));
 }
 
 fn push(sh: &Shared) {
@@ -510,6 +538,7 @@ fn push(sh: &Shared) {
         view["key"] = json!(key_name(sh));
         view["hand"] = json!(hand_of(sh));
         view["crew"] = crew(sh);
+        view["fly"] = json!(FLY.load(Ordering::SeqCst));
         view["asks"] = Value::Object(ASKS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default());
         let _ = sh.app.emit_to(LABEL, "duel:update", view);
     }
@@ -643,8 +672,13 @@ fn rect(sh: &Shared) -> Option<((i32, i32), (i32, i32), f64)> {
     let a = game.and_then(|r| sh.screens().near((r.l + r.r) / 2, (r.t + r.b) / 2)).or_else(|| crate::island::area(sh))?;
     let (gx, gy, gw, gh) = game.map_or((a.x, a.y, a.w, a.h), |r| (r.l, r.t, r.r - r.l, r.b - r.t));
     let margin = (MARGIN * a.sf).round() as i32;
-    let w = ((SIZE.0 * a.sf).round() as i32).min(gw / 3).max((260.0 * a.sf) as i32);
-    let h = ((SIZE.1 * a.sf).round() as i32).min(gh - 2 * margin);
+    let bar = (BAR.0 * a.sf).round() as i32;
+    let (w, h) = if FLY.load(Ordering::SeqCst) {
+        let card = ((SIZE.0 * a.sf).round() as i32).min(gw / 3).max((260.0 * a.sf) as i32);
+        (card + bar + (BAR_GAP * a.sf).round() as i32, ((SIZE.1 * a.sf).round() as i32).min(gh - 2 * margin))
+    } else {
+        (bar, ((BAR.1 * a.sf).round() as i32).min(gh - 2 * margin))
+    };
     // Below the opponent's LP and the turn's mark, which sit at the game's top right.
     let top = gy + (gh as f64 * 0.16) as i32;
     let h = h.min(gy + gh - margin - top);
@@ -701,7 +735,7 @@ fn create(sh: &Arc<Shared>) {
 // The deck editor's picture (duel/full.png) cut into its cards and read,
 // with her theme and the cards she has marked right (slot, name) kept; the
 // deck window told as it goes. One at a time.
-pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>) {
+pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>, fresh: bool) {
     {
         let mut scanning = SCANNING.lock().unwrap_or_else(|e| e.into_inner());
         if scanning.is_some() {
@@ -769,7 +803,10 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>) {
                 })
                 .collect();
             let theme = if theme.is_empty() { found["theme"].as_str().unwrap_or("").to_string() } else { theme.clone() };
-            let deck = json!({ "theme": theme, "cards": read, "at": crate::now_ms() });
+            // Read again from its window: still the deck it was (its name, its place among the saved).
+            let was = crate::deckscan::read_deck(&d);
+            let (name, lib) = if fresh { (json!(""), Value::Null) } else { (was["name"].clone(), was["lib"].clone()) };
+            let deck = json!({ "theme": theme, "cards": read, "at": crate::now_ms(), "name": name, "lib": lib });
             std::fs::write(crate::deckscan::deck_path(&d), deck.to_string()).map_err(|e| e.to_string())?;
             sh.change(json!({ "duelDeck": crate::deckscan::text_of(&deck) }));
             Ok(())
@@ -832,7 +869,7 @@ fn deck_view(sh: &Shared) -> Value {
         .iter()
         .map(|(slot, look)| (slot.clone(), json!(looks.iter().filter(|(s, l)| s != slot && crate::deckscan::alike(look, l) >= crate::deckscan::ALIKE).map(|(s, _)| s).collect::<Vec<_>>())))
         .collect();
-    json!({ "lang": sh.lang(), "deck": deck, "pictures": pictures, "alike": alike, "scanning": scanning, "hasPicture": d.join("full.png").is_file(), "text": deck_of(sh) })
+    json!({ "lang": sh.lang(), "deck": deck, "decks": decks(sh), "pictures": pictures, "alike": alike, "scanning": scanning, "hasPicture": d.join("full.png").is_file(), "text": deck_of(sh) })
 }
 
 // Up, in the middle of the display the game is on (it takes the keyboard: names are typed in it).
@@ -929,7 +966,81 @@ pub fn card_info(sh: &Shared, cards: &[(Option<u64>, String)]) -> Value {
     }
 }
 
-// Put right by hand: { theme, cards: [{ slot, name, sure }] }.
+// Her saved decks (duel/decks/<id>/: deck.json and its cards' pictures),
+// one of them the one in use (duel/decks/active): the deck window opens on
+// it and the helper's advice goes by it (she asked, 2026-10-22).
+fn decks_dir(sh: &Shared) -> PathBuf {
+    dir(sh).join("decks")
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    let _ = std::fs::remove_dir_all(to);
+    let _ = std::fs::create_dir_all(to);
+    for e in std::fs::read_dir(from).into_iter().flatten().flatten() {
+        let _ = std::fs::copy(e.path(), to.join(e.file_name()));
+    }
+}
+
+pub fn decks(sh: &Shared) -> Value {
+    let mut list: Vec<Value> = std::fs::read_dir(decks_dir(sh))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let deck = crate::deckscan::read_deck(&e.path());
+            let id = e.file_name().to_string_lossy().into_owned();
+            let main = deck["cards"].as_array().map_or(0, |a| a.iter().filter(|c| c["slot"].as_str().is_some_and(|s| s.starts_with('m'))).count());
+            Some(json!({ "id": id, "name": deck["name"].as_str().filter(|n| !n.is_empty()).unwrap_or(&id), "main": main, "saved": deck["saved"] }))
+        })
+        .collect();
+    list.sort_by(|a, b| b["saved"].as_u64().cmp(&a["saved"].as_u64()));
+    json!(list)
+}
+
+// One saved deck taken up: in the window, in use.
+pub fn use_deck(sh: &Arc<Shared>, id: &str) {
+    let from = decks_dir(sh).join(id);
+    if id.contains(['/', '\\', '.']) || !from.join("deck.json").is_file() {
+        return;
+    }
+    let d = dir(sh);
+    let mut deck = crate::deckscan::read_deck(&from);
+    deck["lib"] = json!(id);
+    deck["at"] = json!(crate::now_ms());
+    let _ = std::fs::write(crate::deckscan::deck_path(&d), deck.to_string());
+    copy_dir(&from.join("slots"), &d.join("slots"));
+    let _ = std::fs::write(decks_dir(sh).join("active"), id);
+    sh.change(json!({ "duelDeck": crate::deckscan::text_of(&deck) }));
+    let _ = sh.app.emit_to(DECK, "duel:deck", deck_view(sh));
+}
+
+// A saved deck thrown away (the one in the window stays, saved nowhere).
+pub fn drop_deck(sh: &Arc<Shared>, id: &str) {
+    if id.is_empty() || id.contains(['/', '\\', '.']) {
+        return;
+    }
+    let _ = std::fs::remove_dir_all(decks_dir(sh).join(id));
+    let d = dir(sh);
+    let mut deck = crate::deckscan::read_deck(&d);
+    if deck["lib"] == id {
+        deck["lib"] = Value::Null;
+        let _ = std::fs::write(crate::deckscan::deck_path(&d), deck.to_string());
+    }
+    let _ = sh.app.emit_to(DECK, "duel:deck", deck_view(sh));
+}
+
+// A new deck: the window empty, to be read from the game.
+pub fn new_deck(sh: &Arc<Shared>) {
+    let d = dir(sh);
+    let _ = std::fs::write(crate::deckscan::deck_path(&d), json!({ "theme": "", "cards": [], "name": "", "lib": null, "at": crate::now_ms() }).to_string());
+    let _ = std::fs::remove_dir_all(d.join("slots"));
+    let _ = std::fs::remove_file(d.join("full.png"));
+    let _ = sh.app.emit_to(DECK, "duel:deck", deck_view(sh));
+}
+
+// Put right by hand: { theme, name, cards: [{ slot, name, sure }] }; kept
+// among her saved decks by its name (the one it came from, or one so named).
 pub fn save_deck(sh: &Arc<Shared>, deck: &Value) {
     let cards: Vec<Value> = deck["cards"]
         .as_array()
@@ -943,9 +1054,24 @@ pub fn save_deck(sh: &Arc<Shared>, deck: &Value) {
         .take(80)
         .collect();
     let theme: String = deck["theme"].as_str().unwrap_or("").trim().chars().take(60).collect();
-    let deck = json!({ "theme": theme, "cards": cards, "at": crate::deckscan::read_deck(&dir(sh))["at"] });
+    let name: String = deck["name"].as_str().unwrap_or("").trim().chars().take(40).collect();
+    let name = if name.is_empty() { if theme.is_empty() { "我的牌組".to_string() } else { theme.clone() } } else { name };
+    let was = crate::deckscan::read_deck(&dir(sh));
+    // Where among the saved: the one it came from, else one of that name, else new.
+    let lib = was["lib"]
+        .as_str()
+        .filter(|id| decks_dir(sh).join(id).is_dir())
+        .map(str::to_string)
+        .or_else(|| decks(sh).as_array().into_iter().flatten().find(|d| d["name"] == name.as_str()).and_then(|d| d["id"].as_str().map(str::to_string)))
+        .unwrap_or_else(|| crate::now_ms().to_string());
+    let deck = json!({ "theme": theme, "name": name, "lib": lib, "cards": cards, "at": was["at"], "saved": crate::now_ms() });
     let _ = std::fs::create_dir_all(dir(sh));
     let _ = std::fs::write(crate::deckscan::deck_path(&dir(sh)), deck.to_string());
+    let keep = decks_dir(sh).join(&lib);
+    let _ = std::fs::create_dir_all(&keep);
+    let _ = std::fs::write(crate::deckscan::deck_path(&keep), deck.to_string());
+    copy_dir(&dir(sh).join("slots"), &keep.join("slots"));
+    let _ = std::fs::write(decks_dir(sh).join("active"), &lib);
     sh.change(json!({ "duelDeck": crate::deckscan::text_of(&deck) }));
     // Each card she marked right, its look learnt: known the next time it is read.
     let slots = dir(sh).join("slots");
@@ -1062,7 +1188,8 @@ pub fn ready(sh: &Arc<Shared>) {
 
 fn apply(sh: &Arc<Shared>) {
     let want = SHOWN.load(Ordering::SeqCst);
-    apply_frames(sh, want);
+    // The frames on the game go with the look's card.
+    apply_frames(sh, want && FLY.load(Ordering::SeqCst));
     if want && !CREATED.load(Ordering::SeqCst) {
         create(sh);
         return;

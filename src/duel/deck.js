@@ -11,7 +11,10 @@
 ;(function () {
   const { t } = window.I18n
   let lang = 'zh-TW'
-  let deck = { theme: '', cards: [] }
+  let deck = { theme: '', name: '', lib: null, cards: [] }
+  // Her saved decks ({ id, name, main }); the one in the window is deck.lib.
+  let decks = []
+  let dropping = 0
   let pictures = {}
   // Slot → the slots that look like it (copies of the card, duel.rs).
   let alike = {}
@@ -368,8 +371,23 @@
     })
   }
 
+  // The saved decks: one picked is taken up; a name; a new one; one thrown away (pressed twice).
+  function drawLib() {
+    const sel = $('decks')
+    const options = decks.map(d => Object.assign(el('option', '', T('deck.libItem', { name: d.name, n: d.main })), { value: d.id }))
+    if (!deck.lib) options.unshift(Object.assign(el('option', '', T('deck.unsaved')), { value: '' }))
+    sel.replaceChildren(...options)
+    sel.value = deck.lib || ''
+    if (document.activeElement !== $('deckName')) $('deckName').value = deck.name || ''
+    $('deckName').placeholder = T('deck.namePh2')
+    $('newDeck').textContent = T('deck.newDeck')
+    $('dropDeck').textContent = dropping ? T('deck.dropAgain') : T('deck.dropDeck')
+    $('dropDeck').disabled = !deck.lib
+  }
+
   function draw() {
     clearInterval(timer)
+    drawLib()
     learn()
     $('tools').replaceChildren(tools())
     $('theme').value = deck.theme || ''
@@ -396,7 +414,20 @@
 
   $('close').onclick = () => window.pet.duelDeckClose()
   $('cancel').onclick = () => window.pet.duelDeckClose()
-  $('save').onclick = () => window.pet.duelDeckSave({ theme: $('theme').value.trim(), cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure, id: c.id || null, remembered: !!c.remembered })) })
+  $('decks').onchange = e => e.target.value && window.pet.duelDeckUse(e.target.value)
+  $('deckName').addEventListener('input', e => (deck.name = e.target.value))
+  $('newDeck').onclick = () => window.pet.duelDeckNew()
+  $('dropDeck').onclick = () => {
+    if (!deck.lib) return
+    if (!dropping) {
+      dropping = setTimeout(() => ((dropping = 0), drawLib()), 3000)
+      return drawLib()
+    }
+    clearTimeout(dropping)
+    dropping = 0
+    window.pet.duelDeckDrop(deck.lib)
+  }
+  $('save').onclick = () => window.pet.duelDeckSave({ theme: $('theme').value.trim(), name: $('deckName').value.trim(), cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure, id: c.id || null, remembered: !!c.remembered })) })
   $('allok').onclick = () => {
     for (const c of deck.cards) (c.sure = true), (c.remembered = false)
     draw()
@@ -415,17 +446,18 @@
   })
   // Dragged by its top (Tauri's drag region: on the header and what is
   // written in it, not its buttons and boxes).
-  for (const id of ['head', 'label']) $(id).setAttribute('data-tauri-drag-region', '')
+  $('label').setAttribute('data-tauri-drag-region', '')
   document.querySelector('header').setAttribute('data-tauri-drag-region', '')
   document.querySelector('.title').setAttribute('data-tauri-drag-region', '')
 
   window.pet.onDuelDeck(p => {
     lang = p.lang || 'zh-TW'
     document.documentElement.lang = lang
-    for (const [id, key] of [['label', 'deck.label'], ['head', 'deck.title'], ['cancel', 'deck.cancel'], ['save', 'deck.save'], ['allok', 'deck.allOk'], ['rescan', 'deck.rescan'], ['themeLabel', 'deck.theme']]) $(id).textContent = T(key)
+    for (const [id, key] of [['label', 'deck.label'], ['cancel', 'deck.cancel'], ['save', 'deck.save'], ['allok', 'deck.allOk'], ['rescan', 'deck.rescan'], ['themeLabel', 'deck.theme']]) $(id).textContent = T(key)
     $('theme').placeholder = T('deck.themePh')
     const d = p.deck || {}
-    deck = { theme: d.theme || '', cards: (d.cards || []).map(c => ({ slot: String(c.slot), name: String(c.name || ''), sure: c.sure !== false, id: c.id || null, remembered: !!c.remembered })) }
+    decks = p.decks || []
+    deck = { theme: d.theme || '', name: d.name || '', lib: d.lib || null, cards: (d.cards || []).map(c => ({ slot: String(c.slot), name: String(c.name || ''), sure: c.sure !== false, id: c.id || null, remembered: !!c.remembered })) }
     pictures = p.pictures || {}
     alike = p.alike || {}
     scanning = p.scanning || null
