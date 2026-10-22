@@ -65,6 +65,7 @@
     duelDeckSave: deck => send('duel_deck_save', { deck }),
     duelDeckRescan: (theme, kept) => send('duel_deck_rescan', { theme: String(theme || ''), kept: (kept || []).map(([s, n]) => [String(s), String(n)]) }),
     duelDeckClose: () => send('duel_deck_close'),
+    duelCards: q => invoke('duel_cards', { q: String(q || '') }).catch(() => null),
     duelClose: () => send('duel_close'),
     duelAgain: () => send('duel_again'),
     // The folder the phone's files go to (mobile.rs drop).

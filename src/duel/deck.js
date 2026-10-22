@@ -55,7 +55,10 @@
     return el('section', '', el('h2', '', T(key === 'm' ? 'deck.main' : 'deck.extra', { n: named(list).length })), el('div', 'grid', list.map(tile), add))
   }
 
-  // The card picked, large, to put right.
+  // The card picked, large, to put right: its picture beside the official
+  // one of the card chosen, the name typed with the cards it may be listed
+  // under it (the card database, cards.rs); one picked is the name.
+  let asking = 0
   function side() {
     const c = deck.cards.find(x => x.slot === picked)
     if (!c) {
@@ -63,25 +66,68 @@
       return el('aside', 'side', el('h3', '', T('deck.howTitle')), el('p', 'muted', T('deck.how')), unsure ? el('p', 'warnline', T('deck.unsure', { n: unsure })) : el('p', 'okline', T('deck.allSure')))
     }
     const url = pictures[c.slot]
+    const pics = el('div', 'pics', el('figure', '', url ? Object.assign(el('img', 'big'), { src: url }) : el('div', 'bigblank', '＋'), el('figcaption', '', T('deck.scanned'))))
+    if (c.id) pics.append(el('figure', '', Object.assign(el('img', 'big'), { src: `https://images.ygoprodeck.com/images/cards_small/${c.id}.jpg` }), el('figcaption', '', T('deck.official'))))
     const name = el('input', 'name')
     name.id = 'pickName'
     name.value = c.name
     name.placeholder = T('deck.namePh')
+    name.autocomplete = 'off'
+    const list = el('div', 'picks')
+    let found = []
+    let at = -1
     const was = c.name
+    const choose = card => {
+      c.name = card.name
+      c.id = card.id
+      c.sure = true
+      draw()
+    }
+    const showFound = () => {
+      list.replaceChildren(
+        ...found.map((card, i) => {
+          const row = el('button', `pick${i === at ? ' on' : ''}`, Object.assign(el('img'), { src: card.img, alt: '', loading: 'lazy' }), el('span', 'pn', el('b', '', card.name), el('small', '', [card.jp, card.en].filter(Boolean).join(' · '))))
+          row.onmousedown = e => (e.preventDefault(), choose(card))
+          return row
+        }),
+      )
+    }
     name.addEventListener('input', () => {
       c.name = name.value
-      c.sure = true
-      const n = box.querySelector('.tile.picked .nm')
+      c.id = null
+      const n = $('grids').querySelector('.tile.picked .nm')
       if (n) n.textContent = c.name || T('deck.unnamed')
+      const q = name.value.trim()
+      const mine = ++asking
+      if (!q) return ((found = []), showFound())
+      setTimeout(() => {
+        if (mine !== asking) return
+        window.pet.duelCards(q).then(got => {
+          if (mine !== asking || !got) return
+          found = got.cards || []
+          at = found.length ? 0 : -1
+          if (got.loading && !found.length) list.replaceChildren(el('p', 'muted', T('deck.dbLoading')))
+          else if (!found.length) list.replaceChildren(el('p', 'muted', T('deck.noMatch')))
+          else showFound()
+        })
+      }, 160)
     })
-    name.addEventListener('keydown', e => e.key === 'Enter' && ((picked = null), draw()))
+    name.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' && found.length) (e.preventDefault(), (at = (at + 1) % found.length), showFound())
+      else if (e.key === 'ArrowUp' && found.length) (e.preventDefault(), (at = (at - 1 + found.length) % found.length), showFound())
+      else if (e.key === 'Enter') {
+        e.preventDefault()
+        if (found[at]) choose(found[at])
+        else ((c.sure = true), (picked = null), draw())
+      }
+    })
     const alike = deck.cards.filter(x => x !== c && x.name.trim() && x.name.trim() === was.trim())
     const ok = el('button', 'act good', c.sure ? T('deck.markUnsure') : T('deck.ok'))
     ok.onclick = () => ((c.sure = !c.sure), draw())
     const same = alike.length ? el('button', 'act', T('deck.sameAll', { n: alike.length })) : null
     if (same)
       same.onclick = () => {
-        for (const x of deck.cards) if (x.name.trim() === was.trim()) Object.assign(x, { name: c.name, sure: true })
+        for (const x of deck.cards) if (x.name.trim() === was.trim()) Object.assign(x, { name: c.name, id: c.id, sure: true })
         draw()
       }
     const del = el('button', 'act bad', T('deck.remove'))
@@ -90,8 +136,7 @@
       picked = null
       draw()
     }
-    const box = $('grids')
-    return el('aside', 'side', url ? el('img', 'big') : el('div', 'bigblank', '＋'), el('label', 'th', T('deck.cardName')), name, el('div', 'acts', ok, same, del))
+    return el('aside', 'side', pics, el('label', 'th', T('deck.cardName')), name, list, el('p', 'hint', T('deck.typeHint')), el('div', 'acts', ok, same, del))
   }
 
   function draw() {
@@ -104,10 +149,7 @@
     } else {
       grids.replaceChildren(section('m'), section('e'))
     }
-    const s = side()
-    const big = s.querySelector('img.big')
-    if (big) big.src = pictures[picked]
-    $('side').replaceChildren(s)
+    $('side').replaceChildren(side())
     $('status').textContent = scanning ? '' : error ? T('deck.failed', { why: error }) : ''
     $('scan').hidden = !scanning
     if (scanning) {
@@ -121,7 +163,7 @@
 
   $('close').onclick = () => window.pet.duelDeckClose()
   $('cancel').onclick = () => window.pet.duelDeckClose()
-  $('save').onclick = () => window.pet.duelDeckSave({ theme: $('theme').value.trim(), cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure })) })
+  $('save').onclick = () => window.pet.duelDeckSave({ theme: $('theme').value.trim(), cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure, id: c.id || null })) })
   $('allok').onclick = () => {
     for (const c of deck.cards) c.sure = true
     draw()
@@ -145,7 +187,7 @@
     for (const [id, key] of [['label', 'deck.label'], ['head', 'deck.title'], ['cancel', 'deck.cancel'], ['save', 'deck.save'], ['allok', 'deck.allOk'], ['rescan', 'deck.rescan'], ['themeLabel', 'deck.theme']]) $(id).textContent = T(key)
     $('theme').placeholder = T('deck.themePh')
     const d = p.deck || {}
-    deck = { theme: d.theme || '', cards: (d.cards || []).map(c => ({ slot: String(c.slot), name: String(c.name || ''), sure: c.sure !== false })) }
+    deck = { theme: d.theme || '', cards: (d.cards || []).map(c => ({ slot: String(c.slot), name: String(c.name || ''), sure: c.sure !== false, id: c.id || null })) }
     pictures = p.pictures || {}
     scanning = p.scanning || null
     hasPicture = !!p.hasPicture

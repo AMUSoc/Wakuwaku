@@ -275,3 +275,91 @@ footer button {
 #status {
   color: var(--bad);
 }
+
+#side {
+  flex-basis: 300px;
+}
+
+.pics {
+  display: flex;
+  gap: 8px;
+}
+
+.pics figure {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+}
+
+.pics figcaption {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.picks {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  text-align: left;
+  border-radius: 8px;
+}
+
+.pick.on,
+.pick:hover {
+  border-color: var(--claude);
+  background: rgba(232, 115, 42, 0.14);
+}
+
+.pick img {
+  width: 34px;
+  height: 49px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex: none;
+}
+
+.pick .pn {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pick b {
+  font-size: 13px;
+  color: var(--strong);
+  font-weight: 600;
+}
+
+.pick small {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* The two pictures side by side, small enough to leave the list in sight. */
+.pics {
+  justify-content: center;
+}
+
+.pics figure {
+  flex: 0 1 120px;
+}

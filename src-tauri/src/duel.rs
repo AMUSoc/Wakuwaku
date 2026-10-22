@@ -605,7 +605,9 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>) {
             crate::deckscan::sheet(&cards).ok_or("no sheet")?.save(&work.join("sheet.png"))?;
             let main = cards.iter().filter(|(s, _)| s.starts_with('m')).count();
             let numbered: Vec<(usize, String)> = kept.iter().filter_map(|(slot, name)| cards.iter().position(|(s, _)| s == slot).map(|i| (i + 1, name.clone()))).collect();
-            let prompt = crate::deckscan::prompt_of(main, cards.len() - main, &theme, &numbered);
+            // The theme's cards from the card database, when it has any: picked among, no web search.
+            let theme_cards = if theme.is_empty() { Vec::new() } else { crate::cards::with_cards(&sh.dir, |all| crate::cards::theme_cards(all, &theme)).unwrap_or_default() };
+            let prompt = crate::deckscan::prompt_of(main, cards.len() - main, &theme, &theme_cards, &numbered);
             let text = run(&sh, &prompt, DECK_TIMEOUT)?;
             let found = answer_in(&text).ok_or_else(|| text.chars().take(120).collect::<String>())?;
             let read: Vec<Value> = cards
@@ -616,7 +618,10 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>) {
                         return json!({ "slot": slot, "name": name, "sure": true });
                     }
                     let c = found["cards"].as_array().and_then(|a| a.iter().find(|c| c["n"].as_u64() == Some(i as u64 + 1)));
-                    json!({ "slot": slot, "name": c.and_then(|c| c["name"].as_str()).unwrap_or(""), "sure": c.is_some_and(|c| c["sure"] != false) })
+                    let said = c.and_then(|c| c["name"].as_str()).unwrap_or("");
+                    // As the card database names it, when it names it so (English, Japanese, a "?").
+                    let name = crate::cards::with_cards(&sh.dir, |all| crate::cards::best_match(all, said)).flatten().unwrap_or_else(|| said.to_string());
+                    json!({ "slot": slot, "name": name, "sure": c.is_some_and(|c| c["sure"] != false) })
                 })
                 .collect();
             let theme = if theme.is_empty() { found["theme"].as_str().unwrap_or("").to_string() } else { theme.clone() };
@@ -668,6 +673,8 @@ fn deck_view(sh: &Shared) -> Value {
 // Up, in the middle of the display the game is on (it takes the keyboard: names are typed in it).
 pub fn open_deck(sh: &Arc<Shared>) {
     DECK_WANTED.store(true, Ordering::SeqCst);
+    // The card database ready by the time a name is typed (fetched the first time).
+    let _ = crate::cards::with_cards(&sh.dir, |_| ());
     let a = game_pid().and_then(os::window_rect).and_then(|r| sh.screens().near((r.l + r.r) / 2, (r.t + r.b) / 2)).or_else(|| crate::island::area(sh));
     let Some(a) = a else { return };
     let (w, h) = (((1080.0 * a.sf) as i32).min(a.w - 40), ((760.0 * a.sf) as i32).min(a.h - 40));
@@ -710,6 +717,15 @@ pub fn open_deck(sh: &Arc<Shared>) {
     }
 }
 
+// The deck window's drop-down: cards by what is typed (none while the
+// database is being fetched the first time: "loading").
+pub fn search_cards(sh: &Shared, q: &str) -> Value {
+    match crate::cards::with_cards(&sh.dir, |all| crate::cards::search(all, q, 12)) {
+        Some(found) => json!({ "cards": found }),
+        None => json!({ "cards": [], "loading": true }),
+    }
+}
+
 pub fn deck_ready(sh: &Arc<Shared>) {
     DECK_READY.store(true, Ordering::SeqCst);
     if DECK_WANTED.load(Ordering::SeqCst) {
@@ -733,7 +749,7 @@ pub fn save_deck(sh: &Arc<Shared>, deck: &Value) {
         .filter_map(|c| {
             let slot = c["slot"].as_str().filter(|s| s.len() <= 8 && (s.starts_with('m') || s.starts_with('e')))?;
             let name: String = c["name"].as_str().unwrap_or("").trim().chars().take(60).collect();
-            Some(json!({ "slot": slot, "name": name, "sure": c["sure"] != false }))
+            Some(json!({ "slot": slot, "name": name, "sure": c["sure"] != false, "id": c["id"].as_u64() }))
         })
         .take(80)
         .collect();

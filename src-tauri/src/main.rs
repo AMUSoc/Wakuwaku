@@ -68,6 +68,7 @@ mod screen;
 mod scout;
 mod duel;
 mod deckscan;
+mod cards;
 mod clip;
 mod history;
 mod maps;
@@ -1050,6 +1051,13 @@ async fn duel_deck_save(app: AppHandle, deck: Value) {
     duel::save_deck(&shared(&app), &deck);
 }
 
+// The deck window's drop-down: cards by what is typed.
+#[tauri::command]
+async fn duel_cards(app: AppHandle, q: String) -> Value {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::search_cards(&sh, &q)).await.unwrap_or(Value::Null)
+}
+
 // Read again with a theme from her, the cards she marked right kept.
 #[tauri::command]
 async fn duel_deck_rescan(app: AppHandle, theme: String, kept: Vec<(String, String)>) {
@@ -1472,6 +1480,7 @@ fn main() {
             duel_deck_open,
             duel_deck_save,
             duel_deck_rescan,
+            duel_cards,
             duel_deck_close,
             open_drops,
             duel_again,

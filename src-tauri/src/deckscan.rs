@@ -175,14 +175,20 @@ pub fn sheet(cards: &[(String, Image)]) -> Option<Image> {
     Some(out)
 }
 
-pub fn prompt_of(main: usize, extra: usize, theme: &str, kept: &[(usize, String)]) -> String {
+pub fn prompt_of(main: usize, extra: usize, theme: &str, theme_cards: &[String], kept: &[(usize, String)]) -> String {
     let mut p = format!(
         "用 Read 讀 sheet.png：這是遊戲王 Master Duel 牌組編輯畫面裡一張一張切出來放大的卡，每張上面有黃色編號。\
          1～{main} 是主要牌組，{}～{} 是額外牌組（有的話）。同一張卡放了幾張就會出現幾次。\n",
         main + 1,
         main + extra
     );
-    if !theme.trim().is_empty() {
+    if !theme_cards.is_empty() {
+        p.push_str(&format!(
+            "\n我說這副牌是「{}」。卡片資料庫裡這個主題的卡有：{}。主題卡從這份清單挑，名字照清單寫；不用上網查。其他的卡（手坑、泛用卡）照你認得的寫。\n",
+            theme.trim(),
+            theme_cards.join("、")
+        ));
+    } else if !theme.trim().is_empty() {
         p.push_str(&format!(
             "\n我說這副牌是「{}」。先用 WebSearch 查這個主題的卡表（最多查 2 次，不要打開網頁細讀），再拿每張的卡圖去比對：主題卡優先從那份清單裡挑。卡名一律寫台灣繁體中文譯名。\n",
             theme.trim()
@@ -261,7 +267,9 @@ mod tests {
         let s = sheet(&cards).unwrap();
         assert_eq!(s.w, (22 + 8) * 10);
         assert_eq!(s.h, (30 + LABEL_H) * 2);
-        let p = prompt_of(10, 2, "雷熱祀劍", &[(3, "灰流麗".into())]);
-        assert!(p.contains("1～10 是主要牌組，11～12 是額外牌組") && p.contains("「雷熱祀劍」") && p.contains("3=灰流麗"));
+        let p = prompt_of(10, 2, "雷熱祀劍", &[], &[(3, "灰流麗".into())]);
+        assert!(p.contains("1～10 是主要牌組，11～12 是額外牌組") && p.contains("「雷熱祀劍」") && p.contains("3=灰流麗") && p.contains("WebSearch"));
+        let p = prompt_of(10, 2, "雷熱", &["冰燃・雷熱渦爐".into(), "劍極・雷熱渦爐".into()], &[]);
+        assert!(p.contains("冰燃・雷熱渦爐、劍極・雷熱渦爐") && p.contains("不用上網查") && !p.contains("WebSearch 查"));
     }
 }

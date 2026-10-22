@@ -25,6 +25,8 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 getrandom = "0.3"
 # The Master Duel helper's picture of the game (duel.rs); already in the tree, under Tauri.
 png = "0.17"
+# The card database's zip opened (cards.rs); already in the tree, under png.
+miniz_oxide = "0.8"
 
 [features]
 default = ["custom-protocol"]
