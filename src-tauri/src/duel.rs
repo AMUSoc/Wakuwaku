@@ -45,7 +45,10 @@ const BAR_GAP: f64 = 8.0;
 static FLY: AtomicBool = AtomicBool::new(false);
 const MARGIN: f64 = 12.0;
 // The picture sent: so wide at most (a 2560 display halved).
-const MAX_WIDTH: usize = 1600;
+// The longest side Claude sees whole (larger is made smaller on its side).
+// It was 1600 by halving: a 2048-wide game went to Claude at 1024, its
+// cards too small to read, for every look until 2026-10-23.
+const MAX_WIDTH: usize = 1568;
 const TIMEOUT: Duration = Duration::from_secs(150);
 // Reading a deck card by card, a theme looked up first: longer (it took
 // 106 to 363 s, 2026-10-22; once or twice a deck, so waited for).
@@ -152,6 +155,11 @@ fn look_with(sh: &Arc<Shared>, pid: u32, quiet: bool) {
     let taken = std::fs::create_dir_all(dir(sh).join("work")).is_ok()
         && os::capture_game(hwnd, rect).is_some_and(|(w, h, rgb)| {
             let saved = save_png(&picture, w, h, &rgb).is_ok();
+            // Closer: the opponent's half, and my hand along the bottom.
+            let work = dir(sh).join("work");
+            let (top, low) = (h * 52 / 100, h * 80 / 100);
+            let _ = save_png(&work.join("top.png"), w, top, &rows(w, &rgb, 0, top));
+            let _ = save_png(&work.join("hand.png"), w, h - low, &rows(w, &rgb, low, h));
             *FULL.lock().unwrap_or_else(|e| e.into_inner()) = Some(crate::deckscan::Image { w, h, rgb });
             saved
         });
@@ -472,7 +480,8 @@ fn hand_of(sh: &Shared) -> String {
 
 pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>, known: &str) -> String {
     let mut p = String::from(
-        "你是遊戲王 Master Duel 的對戰助手。先用 Read 讀這張遊戲截圖：shot.png（在目前資料夾，就是遊戲畫面本身）。\n\n\
+        "你是遊戲王 Master Duel 的對戰助手。先用 Read 讀這張遊戲截圖：shot.png（在目前資料夾，就是遊戲畫面本身）。\
+         對戰畫面時再讀兩張放大的：top.png（畫面上半，對手那邊）、hand.png（畫面最下面，我的手牌）：認卡、看數字以放大的為準。\n\n\
          【如果這是牌組編輯畫面】（上面主要牌組、下面額外牌組的卡片格子）：只回 {\"screen\":\"deck\"}，不用認卡（之後會一張一張切出來再認）。\n\n\
          【如果這是對戰畫面】先搞清楚誰是誰（曾把我自己的卡全當成對手的，整場判斷都錯）：\n\
          - 我：左下角的頭像、名字和 LP；對手：右上角的頭像、名字和 LP。畫面上半是對手的場地，下半是我的。\n\
@@ -600,29 +609,37 @@ fn save_png(path: &std::path::Path, w: usize, h: usize, rgb: &[u8]) -> Result<()
 }
 
 pub fn shrink(w: usize, h: usize, rgb: &[u8], most: usize) -> (usize, usize, Vec<u8>) {
-    let step = w.div_ceil(most).max(1);
-    if step == 1 {
+    if w <= most || w == 0 || h == 0 {
         return (w, h, rgb.to_vec());
     }
-    let (w2, h2) = (w / step, h / step);
+    // To exactly `most` wide, each pixel the average of the pixels it covers.
+    let (w2, h2) = (most, (h * most / w).max(1));
     let mut out = vec![0u8; w2 * h2 * 3];
     for y in 0..h2 {
+        let (y0, y1) = (y * h / h2, ((y + 1) * h / h2).max(y * h / h2 + 1).min(h));
         for x in 0..w2 {
+            let (x0, x1) = (x * w / w2, ((x + 1) * w / w2).max(x * w / w2 + 1).min(w));
             let mut sum = [0u32; 3];
-            for dy in 0..step {
-                for dx in 0..step {
-                    let at = ((y * step + dy) * w + x * step + dx) * 3;
+            for sy in y0..y1 {
+                for sx in x0..x1 {
+                    let at = (sy * w + sx) * 3;
                     for c in 0..3 {
                         sum[c] += rgb[at + c] as u32;
                     }
                 }
             }
+            let n = ((y1 - y0) * (x1 - x0)) as u32;
             for c in 0..3 {
-                out[(y * w2 + x) * 3 + c] = (sum[c] / (step * step) as u32) as u8;
+                out[(y * w2 + x) * 3 + c] = (sum[c] / n) as u8;
             }
         }
     }
     (w2, h2, out)
+}
+
+// Rows y0..y1 of a picture, whole width.
+fn rows(w: usize, rgb: &[u8], y0: usize, y1: usize) -> Vec<u8> {
+    rgb[y0 * w * 3..y1 * w * 3].to_vec()
 }
 
 #[cfg(windows)]
@@ -1557,9 +1574,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_picture_made_smaller_to_what_claude_sees_whole() {
+        // 2048 wide: to 1568, not halved to 1024.
+        let (w, h) = (2048, 1152);
+        let rgb: Vec<u8> = (0..w * h).flat_map(|i| { let v = (i % w * 255 / w) as u8; [v, v, v] }).collect();
+        let (w2, h2, small) = shrink(w, h, &rgb, MAX_WIDTH);
+        assert_eq!((w2, h2), (1568, 882));
+        assert_eq!(small.len(), w2 * h2 * 3);
+        // Left dark, right light, as it was.
+        assert!(small[0] < 5 && small[(w2 - 1) * 3] > 250);
+        assert_eq!(shrink(800, 450, &vec![7; 800 * 450 * 3], MAX_WIDTH).0, 800);
+        assert_eq!(rows(4, &(0..48).collect::<Vec<u8>>(), 1, 3).len(), 24);
+    }
+
+    #[test]
     fn what_claude_is_asked() {
         let p = prompt_of("", "", None, "");
-        assert!(p.contains("shot.png") && p.contains("\"stop\"") && !p.contains("我的牌組帶的"));
+        assert!(p.contains("shot.png") && p.contains("top.png") && p.contains("hand.png") && p.contains("\"stop\"") && !p.contains("我的牌組帶的"));
         let last = json!({ "deck": "蛇眼", "seen": ["蛇眼灰燼", "原罪寶-蛇眼"] });
         let p = prompt_of("灰流麗、增殖的G", "巳劍：天叢雲之巳劍×2", Some(&last), "{\"deck\":\"蛇眼\"}");
         assert!(p.contains("剛上網查的") && p.contains("\"turn\"") && p.contains("fresh"));
