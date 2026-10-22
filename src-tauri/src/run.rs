@@ -15,7 +15,10 @@
 //   agy     agy -p <words>                            (agy.exe takes them only so;
 //                                                      an .exe: no cmd.exe between)
 //
-// No flag that skips a permission. Grok's --permission-mode default is the
+// No flag that skips a permission; only reading is let through without a
+// yes (Claude Code's Read, Glob and Grep; Grok's read_file and grep; Codex's
+// exec reads in its read-only sandbox anyway; Antigravity has no rule for
+// reading alone). Grok's --permission-mode default is the
 // other way: the person's config may approve everything (always-approve),
 // and a task from the phone must not inherit that. What each does with a
 // tool that would ask (tried 2026-10-17; README): Claude Code asks through
@@ -304,12 +307,14 @@ pub fn command(agent: &str, prompt_file: &str, prompt: &str, mode: &Mode) -> (&'
         // check, that it be a git repository, would refuse a plain one.
         ("codex", Mode::Resume(id)) => ("codex", v(&["exec", "resume", "--skip-git-repo-check", id, "-"]), true),
         ("codex", _) => ("codex", v(&["exec", "--skip-git-repo-check", "-"]), true),
-        ("grok", Mode::Resume(id)) => ("grok", v(&["-r", id, "--prompt-file", prompt_file, "--permission-mode", "default"]), false),
-        ("grok", _) => ("grok", v(&["--prompt-file", prompt_file, "--permission-mode", "default"]), false),
+        // Reading needs no yes (READS): away from the computer, a task that
+        // only had to look at files stopped at every one (the user, 2026-10-22).
+        ("grok", Mode::Resume(id)) => ("grok", v(&["-r", id, "--prompt-file", prompt_file, "--permission-mode", "default", "--allow", "read_file", "--allow", "grep"]), false),
+        ("grok", _) => ("grok", v(&["--prompt-file", prompt_file, "--permission-mode", "default", "--allow", "read_file", "--allow", "grep"]), false),
         ("agy", Mode::Resume(id)) => ("agy", v(&["--conversation", id, "-p", prompt]), false),
         ("agy", _) => ("agy", v(&["-p", prompt]), false),
-        (_, Mode::Resume(id)) => ("claude", v(&["--resume", id, "-p"]), true),
-        _ => ("claude", v(&["-p"]), true),
+        (_, Mode::Resume(id)) => ("claude", v(&["--resume", id, "--allowedTools", "Read", "Glob", "Grep", "-p"]), true),
+        _ => ("claude", v(&["--allowedTools", "Read", "Glob", "Grep", "-p"]), true),
     }
 }
 
@@ -446,9 +451,9 @@ mod tests {
     #[test]
     fn each_agent_s_non_interactive_command_and_no_skipping() {
         let new = Mode::New;
-        assert_eq!(command("claude", "p.txt", "hi", &new), ("claude", vec!["-p".to_string()], true));
+        assert_eq!(command("claude", "p.txt", "hi", &new), ("claude", ["--allowedTools", "Read", "Glob", "Grep", "-p"].map(String::from).to_vec(), true));
         assert_eq!(command("codex", "p.txt", "hi", &new), ("codex", vec!["exec".to_string(), "--skip-git-repo-check".into(), "-".into()], true));
-        assert_eq!(command("grok", "p.txt", "hi", &new).1, ["--prompt-file", "p.txt", "--permission-mode", "default"]);
+        assert_eq!(command("grok", "p.txt", "hi", &new).1, ["--prompt-file", "p.txt", "--permission-mode", "default", "--allow", "read_file", "--allow", "grep"]);
         assert_eq!(command("agy", "p.txt", "a \"quoted\" & piped | thing", &new), ("agy", vec!["-p".to_string(), "a \"quoted\" & piped | thing".to_string()], false));
         for agent in crate::data::AGENTS {
             for mode in [Mode::New, Mode::Resume("s1".into()), Mode::Queue("s1".into())] {
@@ -461,9 +466,9 @@ mod tests {
     #[test]
     fn words_for_a_session_by_each_agent_s_resume() {
         let id = Mode::Resume("01a1-b2".into());
-        assert_eq!(command("claude", "p.txt", "hi", &id), ("claude", vec!["--resume".to_string(), "01a1-b2".into(), "-p".into()], true));
+        assert_eq!(command("claude", "p.txt", "hi", &id), ("claude", ["--resume", "01a1-b2", "--allowedTools", "Read", "Glob", "Grep", "-p"].map(String::from).to_vec(), true));
         assert_eq!(command("codex", "p.txt", "hi", &id), ("codex", vec!["exec".to_string(), "resume".into(), "--skip-git-repo-check".into(), "01a1-b2".into(), "-".into()], true));
-        assert_eq!(command("grok", "p.txt", "hi", &id).1, ["-r", "01a1-b2", "--prompt-file", "p.txt", "--permission-mode", "default"]);
+        assert_eq!(command("grok", "p.txt", "hi", &id).1, ["-r", "01a1-b2", "--prompt-file", "p.txt", "--permission-mode", "default", "--allow", "read_file", "--allow", "grep"]);
         assert_eq!(command("agy", "p.txt", "hi", &id).1, ["--conversation", "01a1-b2", "-p", "hi"]);
         assert_eq!(command("codex", "p.txt", "a & b", &Mode::Queue("t".into())), ("codex", vec!["queue".to_string(), "--thread".into(), "t".into(), "--message".into(), "a & b".into()], false));
     }
