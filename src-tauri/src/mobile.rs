@@ -14,6 +14,7 @@
 //   GET  /mobile/api/job       ?agent=<a>&started=<ms>: how a run from the phone goes, its session (run.rs)
 //   POST /mobile/api/notice    { pkg, app, title, text }: a notification on the phone, shown on the island (notice)
 //   POST /mobile/api/clip      { text }: the phone's text onto the computer's clipboard
+//   GET  /mobile/api/history   ?agent=&q=&offset=&limit=: every conversation the agents keep, the latest first (history.rs)
 //   GET  /mobile/api/ask       asking her (ask.rs): the questions and answers, what is under way
 //   POST /mobile/api/ask       { agent, text }: a question; POST /mobile/api/ask/clear: a new one
 //   POST /mobile/api/drop      a file shared from the phone (its name in x-wakuwaku-name): into Downloads\Wakuwaku
@@ -447,8 +448,18 @@ fn state(sh: &Shared) -> Value {
 // A session's whole conversation, and how the phone may add to it: { session,
 // agent, messages: [{ role, text, clipped }], truncated, live, canSay, how
 // (resume | queue), why (live, busy, noCwd) }.
+// A session as the phone's conversation needs it: one she has seen, else
+// one of the agents' own records (history.rs).
+fn talk_of(sh: &Shared, id: &str) -> Option<crate::state::Talk> {
+    if let Some(t) = sh.pet.lock().unwrap().talk_of(id) {
+        return Some(t);
+    }
+    let e = crate::history::find(id)?;
+    Some(crate::state::Talk { agent: e.agent.to_string(), transcript: e.transcript, cwd: e.cwd, chain: Vec::new(), reply: String::new(), mood: "idle".into() })
+}
+
 fn conversation(sh: &Shared, id: &str) -> Option<Value> {
-    let t = sh.pet.lock().unwrap().talk_of(id)?;
+    let t = talk_of(sh, id)?;
     let hidden = sh.setting("details") == false;
     let (messages, truncated, summary_only) = match (!hidden && !t.transcript.is_empty()).then(|| crate::talk::conversation(&t.agent, &t.transcript)).flatten() {
         Some((m, cut)) if !m.is_empty() => (Value::Array(m), cut, false),
@@ -479,7 +490,7 @@ fn conversation(sh: &Shared, id: &str) -> Option<Value> {
 // The phone's words for a session: resumed, or queued into it while it is
 // open (Codex); refused where they would fork it.
 fn say(sh: &Shared, id: &str, text: &str) -> Result<Value, &'static str> {
-    let t = sh.pet.lock().unwrap().talk_of(id).ok_or("no such session")?;
+    let t = talk_of(sh, id).ok_or("no such session")?;
     let live = crate::talk::is_live(&t.agent, id, &t.chain);
     let busy = crate::run::running(&t.agent).is_some();
     let dir = std::path::PathBuf::from(&t.cwd);
@@ -739,8 +750,8 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
         ("GET", "/mobile/icon-192.png") => respond(req, 200, "image/png", ICON_192.to_vec(), &[("cache-control", "max-age=86400".into())]),
         ("GET", "/mobile/icon-512.png") => respond(req, 200, "image/png", ICON_512.to_vec(), &[("cache-control", "max-age=86400".into())]),
         // Phone access on and the token, wherever they come from.
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job" | "/mobile/api/ask") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop" | "/mobile/api/ask" | "/mobile/api/ask/clear") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job" | "/mobile/api/ask") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop" | "/mobile/api/ask" | "/mobile/api/ask/clear") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job" | "/mobile/api/ask" | "/mobile/api/history") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop" | "/mobile/api/ask" | "/mobile/api/ask/clear") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job" | "/mobile/api/ask" | "/mobile/api/history") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop" | "/mobile/api/ask" | "/mobile/api/ask/clear") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
         ("GET", "/mobile/api/conversation") => {
             let id = query_of(req.url(), "session").map(decode).unwrap_or_default();
             match conversation(sh, &id) {
@@ -778,6 +789,15 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
             }
         }
         ("GET", "/mobile/api/ask") => json_reply(req, 200, crate::ask::view(sh)),
+        ("GET", "/mobile/api/history") => {
+            let q = |k: &str| query_of(req.url(), k).map(decode).unwrap_or_default();
+            let agent = q("agent");
+            let agent = if crate::data::AGENTS.contains(&agent.as_str()) { agent } else { String::new() };
+            let offset = q("offset").parse().unwrap_or(0);
+            let limit = q("limit").parse::<usize>().unwrap_or(50).clamp(1, 200);
+            let body = crate::history::list(sh, &agent, &q("q"), offset, limit);
+            json_reply(req, 200, body)
+        }
         ("POST", "/mobile/api/ask") if header(&req, "x-wakuwaku").is_some() => {
             let Some(body) = read_json(&mut req) else { return json_reply(req, 400, json!({ "error": "bad json" })) };
             let ok = crate::ask::send(&crate::shared(&sh.app), body["agent"].as_str().unwrap_or("claude"), body["text"].as_str().unwrap_or(""));
