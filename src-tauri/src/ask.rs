@@ -184,13 +184,12 @@ fn window(sh: &Shared) -> Option<WebviewWindow> {
     sh.app.get_webview_window(LABEL)
 }
 
-fn push(sh: &Shared) {
-    if !READY.load(Ordering::SeqCst) {
-        return;
-    }
+// What has been asked and answered, what is under way: for the box, and
+// for the phone (mobile.rs: the same conversation on both).
+pub fn view(sh: &Shared) -> Value {
     let turns: Vec<Value> = TURNS.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|t| json!({ "agent": t.agent, "q": t.question, "a": t.answer })).collect();
     let pending = PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(a, q, at)| json!({ "agent": a, "q": q, "since": at }));
-    let view = json!({
+    json!({
         "lang": sh.lang(),
         "key": key_name(sh),
         "agent": sh.setting("askAgent").as_str().filter(|a| AGENTS.contains(a)).unwrap_or("claude"),
@@ -198,8 +197,13 @@ fn push(sh: &Shared) {
         "pending": pending,
         "error": *ERROR.lock().unwrap_or_else(|e| e.into_inner()),
         "shown": SHOWN.load(Ordering::SeqCst),
-    });
-    let _ = sh.app.emit_to(LABEL, "ask:update", view);
+    })
+}
+
+fn push(sh: &Shared) {
+    if READY.load(Ordering::SeqCst) {
+        let _ = sh.app.emit_to(LABEL, "ask:update", view(sh));
+    }
 }
 
 // Near the top of the island's display, in the middle.

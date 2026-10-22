@@ -14,6 +14,8 @@
 //   GET  /mobile/api/job       ?agent=<a>&started=<ms>: how a run from the phone goes, its session (run.rs)
 //   POST /mobile/api/notice    { pkg, app, title, text }: a notification on the phone, shown on the island (notice)
 //   POST /mobile/api/clip      { text }: the phone's text onto the computer's clipboard
+//   GET  /mobile/api/ask       asking her (ask.rs): the questions and answers, what is under way
+//   POST /mobile/api/ask       { agent, text }: a question; POST /mobile/api/ask/clear: a new one
 //   POST /mobile/api/drop      a file shared from the phone (its name in x-wakuwaku-name): into Downloads\Wakuwaku
 //
 // On this computer (127.0.0.1) the page needs nothing. With "phone access"
@@ -74,6 +76,12 @@ static RING: AtomicU64 = AtomicU64::new(0);
 // list (and mute an app from): in memory alone, gone as she quits.
 static NOTICES: Mutex<std::collections::VecDeque<Value>> = Mutex::new(std::collections::VecDeque::new());
 const NOTICES_KEPT: usize = 20;
+// The island opened for a notification at most once in so long; those
+// between wait and are counted ("另外還有 3 則") with the next, so a busy
+// group chat does not open and close it over and over (the user saw her
+// "twitch", 2026-10-22). A one-time code opens it at once, always.
+static POPPED: Mutex<(u64, u32)> = Mutex::new((0, 0));
+const POP_EVERY_MS: u64 = 20_000;
 // The clipboard's change count last given to the phone (or set from it): a
 // change since is sent with its next ask; 0 until first looked at.
 static CLIP_SEEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -504,11 +512,30 @@ fn notice(sh: &Shared, body: &Value) -> bool {
         return false;
     }
     let code = code_of(&format!("{title} {text}"));
+    let held = {
+        let mut popped = POPPED.lock().unwrap();
+        let now = now_ms();
+        if !may_pop(now, popped.0, code.is_some()) {
+            popped.1 += 1;
+            return false;
+        }
+        let held = popped.1;
+        *popped = (now, 0);
+        held
+    };
     let words = if text.is_empty() { title.clone() } else { text.clone() };
-    let label = [app.as_str(), if text.is_empty() { "" } else { title.as_str() }].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · ");
+    let mut label = [app.as_str(), if text.is_empty() { "" } else { title.as_str() }].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · ");
+    if held > 0 {
+        label.push_str(&crate::i18n::t(sh.lang(), "phone.more").replace("{n}", &held.to_string()));
+    }
     let value = code.as_ref().map(|c| format!("{c} · {}", crate::i18n::t(sh.lang(), "phone.copy"))).unwrap_or_default();
     sh.to_pages("pet:nudge", json!({ "id": "phone", "icon": "phone", "words": words, "label": label, "value": value, "private": true, "open": code.map(|c| json!({ "copy": c })) }));
     true
+}
+
+// Whether a notification may open the island now (the last opened at `last`).
+pub fn may_pop(now: u64, last: u64, is_code: bool) -> bool {
+    is_code || last == 0 || now.saturating_sub(last) >= POP_EVERY_MS
 }
 
 fn clip_chars(s: &str, most: usize) -> String {
@@ -712,8 +739,8 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
         ("GET", "/mobile/icon-192.png") => respond(req, 200, "image/png", ICON_192.to_vec(), &[("cache-control", "max-age=86400".into())]),
         ("GET", "/mobile/icon-512.png") => respond(req, 200, "image/png", ICON_512.to_vec(), &[("cache-control", "max-age=86400".into())]),
         // Phone access on and the token, wherever they come from.
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
-        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job" | "/mobile/api/ask") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop" | "/mobile/api/ask" | "/mobile/api/ask/clear") if !sh.flag("mobile") => json_reply(req, 403, json!({ "error": "phone access off" })),
+        ("GET", "/mobile/api/reply" | "/mobile/api/conversation" | "/mobile/api/job" | "/mobile/api/ask") | ("POST", "/mobile/api/run" | "/mobile/api/say" | "/mobile/api/notice" | "/mobile/api/clip" | "/mobile/api/drop" | "/mobile/api/ask" | "/mobile/api/ask/clear") if !has_token(sh, &req) => json_reply(req, 401, json!({ "error": "token" })),
         ("GET", "/mobile/api/conversation") => {
             let id = query_of(req.url(), "session").map(decode).unwrap_or_default();
             match conversation(sh, &id) {
@@ -749,6 +776,16 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
                 Ok(saved) => json_reply(req, 200, json!({ "ok": true, "name": saved })),
                 Err(why) => json_reply(req, 400, json!({ "error": why })),
             }
+        }
+        ("GET", "/mobile/api/ask") => json_reply(req, 200, crate::ask::view(sh)),
+        ("POST", "/mobile/api/ask") if header(&req, "x-wakuwaku").is_some() => {
+            let Some(body) = read_json(&mut req) else { return json_reply(req, 400, json!({ "error": "bad json" })) };
+            let ok = crate::ask::send(&crate::shared(&sh.app), body["agent"].as_str().unwrap_or("claude"), body["text"].as_str().unwrap_or(""));
+            json_reply(req, if ok { 200 } else { 409 }, json!({ "ok": ok }))
+        }
+        ("POST", "/mobile/api/ask/clear") if header(&req, "x-wakuwaku").is_some() => {
+            crate::ask::clear(&crate::shared(&sh.app));
+            json_reply(req, 200, json!({ "ok": true }))
         }
         ("GET", "/mobile/api/job") => {
             let agent = query_of(req.url(), "agent").map(decode).unwrap_or_default();
@@ -894,6 +931,14 @@ pub fn push_test(sh: &Shared) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_busy_chat_opens_the_island_once_in_a_while() {
+        assert!(may_pop(1_000, 0, false));
+        assert!(!may_pop(10_000, 1_000, false));
+        assert!(may_pop(10_000, 1_000, true));
+        assert!(may_pop(21_000, 1_000, false));
+    }
 
     #[test]
     fn a_file_name_windows_takes() {
