@@ -165,7 +165,7 @@ fn look(sh: &Arc<Shared>, pid: u32) {
     let sh = sh.clone();
     crate::spawn_named("duel", move || {
         let prompt = prompt_of(&hand_of(&sh), &deck_of(&sh), last_guess().as_ref());
-        let answer = run(&sh, &prompt, TIMEOUT).and_then(|text| answer_in(&text).ok_or_else(|| text.chars().take(120).collect()));
+        let answer = run(&sh, &prompt, TIMEOUT, false).and_then(|text| answer_in(&text).ok_or_else(|| text.chars().take(120).collect()));
         let took = crate::now_ms().saturating_sub(started);
         match answer {
             Ok(found) if found["screen"] == "deck" => {
@@ -247,7 +247,7 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
          請：\n\
          0. 先認出我現在手上的每一張牌（myHand），和我場上蓋著、能用的卡。認不出的寫「?」，不要用牌組清單去猜。\n\
          1. 認出看得到的對手的卡（卡名用台灣 Master Duel 的繁體中文官方譯名；左邊或上方有卡片說明時以說明為準；不確定就寫日文或英文名）。\n\
-         2. 判斷對手是什麼牌組。不確定時用 WebSearch 查目前的環境和這個牌組的打法（日文、英文的資料都可以）。\n\
+         2. 判斷對手是什麼牌組，憑你自己對 Master Duel 的了解（不能上網，要快：玩家正在等）。\n\
          3. 告訴我要斷哪裡：關鍵展開點、哪張卡的哪個效果、什麼時機、在哪一格。\
          「用什麼斷」（with）只能寫我現在手上或場上真的有的卡（第 0 步認出來的）；\
          我手上沒有能斷它的，with 寫「手上沒有」，why 說我這回合怎麼撐過去或下回合怎麼反打。絕對不要叫我用手上沒有的卡。\n\
@@ -282,14 +282,17 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
     p
 }
 
-fn run(sh: &Shared, prompt: &str, timeout: Duration) -> Result<String, String> {
+// A look, or a deck read (`web`: it may search the web, for a theme's card
+// list; a look may not: it took 20 s and more, and a duel does not wait,
+// 2026-10-23 — the meta is Antigravity's part among the four).
+fn run(sh: &Shared, prompt: &str, timeout: Duration, web: bool) -> Result<String, String> {
     let folder = dir(sh).join("work");
     let prompt_file = folder.join("prompt.txt");
     std::fs::write(&prompt_file, prompt).map_err(|e| e.to_string())?;
     let exe = crate::run::find("claude").ok_or("claude not found")?;
     let mut cmd = std::process::Command::new(&exe);
     // The words on its input, never on a command line (claude is a .cmd shim).
-    cmd.args(["-p", "--allowedTools", "Read", "WebSearch", "WebFetch"])
+    cmd.args(if web { &["-p", "--allowedTools", "Read", "WebSearch", "WebFetch"][..] } else { &["-p", "--allowedTools", "Read"][..] })
         .args(crate::run::quiet(&folder))
         .current_dir(&folder)
         .stdin(std::fs::File::open(&prompt_file).map_err(|e| e.to_string())?)
@@ -794,7 +797,7 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>, fre
             let found = if numbered.len() == cards.len() {
                 json!({ "cards": [] })
             } else {
-                let text = run(&sh, &prompt, DECK_TIMEOUT)?;
+                let text = run(&sh, &prompt, DECK_TIMEOUT, true)?;
                 answer_in(&text).ok_or_else(|| text.chars().take(120).collect::<String>())?
             };
             let read: Vec<Value> = cards
