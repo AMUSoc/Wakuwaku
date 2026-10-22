@@ -19,6 +19,38 @@ const REFRESH: Duration = Duration::from_secs(7 * 24 * 3600);
 const S2T: &str = include_str!("s2t.txt");
 const WHOLE: &str = include_str!("cards_tw.txt");
 
+// The cards played from the hand on the other's turn to stop her ("手坑"),
+// the ones met in Master Duel, by their English names: told from their
+// text, a guess called 551 cards so (any "from the hand" with "the
+// opponent"), most of them not.
+const HAND_TRAPS: [&str; 25] = [
+    "Ash Blossom & Joyous Spring",
+    "Maxx \"C\"",
+    "Effect Veiler",
+    "Ghost Ogre & Snow Rabbit",
+    "Ghost Belle & Haunted Mansion",
+    "Ghost Mourner & Moonlit Chill",
+    "Ghost Reaper & Winter Cherries",
+    "Ghost Sister & Spooky Dogwood",
+    "Nibiru, the Primal Being",
+    "D.D. Crow",
+    "PSY-Framegear Gamma",
+    "Droll & Lock Bird",
+    "Dimension Shifter",
+    "Artifact Lancea",
+    "Mulcharmy Fuwalos",
+    "Mulcharmy Purulia",
+    "Mulcharmy Meowls",
+    "Retaliating \"C\"",
+    "Skull Meister",
+    "Gnomaterial",
+    "Herald of Orange Light",
+    "Infinite Impermanence",
+    "Evenly Matched",
+    "Dominus Impulse",
+    "Dominus Purge",
+];
+
 #[derive(Clone)]
 pub struct Card {
     pub id: u64,
@@ -27,6 +59,19 @@ pub struct Card {
     pub en: String,
     // Lowercased, for finding.
     key: String,
+    // What the game sorts and filters by (YGOPro's numbers: `kind` its type
+    // bits, `level` the level, rank or link rating with the pendulum scale
+    // in the top byte, `race` and `attr` one bit each, `def` a link's
+    // arrows), and its text, Traditional.
+    pub kind: u32,
+    pub atk: i32,
+    pub def: i32,
+    pub level: u32,
+    pub race: u32,
+    pub attr: u32,
+    pub desc: String,
+    // One of the hand traps (HAND_TRAPS).
+    pub hand: bool,
 }
 
 static CARDS: Mutex<Option<Vec<Card>>> = Mutex::new(None);
@@ -64,7 +109,27 @@ pub fn parse(json_text: &str) -> Vec<Card> {
                 return None;
             }
             let key = format!("{}\n{}\n{}\n{}", name, sc, jp, en).to_lowercase();
-            Some(Card { id, name: if name.is_empty() { en.clone() } else { name }, jp, en, key })
+            let n = |k: &str| v["data"][k].as_i64().unwrap_or(0);
+            let kind = n("type") as u32;
+            let text = &v["text"];
+            let raw = [s(text, "pdesc"), s(text, "desc")].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n");
+            let hand = HAND_TRAPS.iter().any(|h| h.eq_ignore_ascii_case(&en));
+            let desc = traditional(&raw.replace("\r\n", "\n"), &map);
+            Some(Card {
+                id,
+                name: if name.is_empty() { en.clone() } else { name },
+                jp,
+                en,
+                key,
+                kind,
+                atk: n("atk") as i32,
+                def: n("def") as i32,
+                level: n("level") as u32,
+                race: n("race") as u32,
+                attr: n("attribute") as u32,
+                desc,
+                hand,
+            })
         })
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -185,6 +250,37 @@ pub fn search(cards: &[Card], q: &str, most: usize) -> Vec<Value> {
     hits.into_iter().take(most).map(|(_, _, c)| json!({ "id": c.id, "name": c.name, "jp": c.jp, "en": c.en, "img": picture(c.id) })).collect()
 }
 
+// What the deck window shows of a card and sorts and filters it by: found
+// by its passcode, or by its name when it was read without one.
+pub fn info(cards: &[Card], id: Option<u64>, name: &str) -> Option<Value> {
+    let name = name.trim().to_lowercase();
+    let c = id
+        .and_then(|id| cards.iter().find(|c| c.id == id))
+        .or_else(|| (!name.is_empty()).then(|| cards.iter().find(|c| c.name.to_lowercase() == name || c.jp.to_lowercase() == name || c.en.to_lowercase() == name)).flatten())
+        // Written a little otherwise ("I:P偽裝舞會蓮" for "I：P偽裝舞會蓮"): its spaces and dots aside.
+        .or_else(|| {
+            let bare = |t: &str| t.to_lowercase().chars().filter(|c| !c.is_whitespace() && !"・·.:：-－「」\"".contains(*c)).collect::<String>();
+            let want = bare(&name);
+            (want.chars().count() >= 3).then(|| cards.iter().find(|c| bare(&c.name) == want || bare(&c.jp) == want || bare(&c.en) == want)).flatten()
+        })?;
+    Some(json!({
+        "id": c.id,
+        "name": c.name,
+        "jp": c.jp,
+        "en": c.en,
+        "kind": c.kind,
+        "atk": c.atk,
+        "def": c.def,
+        "level": c.level & 0xff,
+        "scale": (c.level >> 24) & 0xff,
+        "race": c.race,
+        "attr": c.attr,
+        "desc": c.desc,
+        "hand": c.hand,
+        "img": picture(c.id),
+    }))
+}
+
 // A theme's cards: those whose names hold a word of it ("雷熱祀劍" holds
 // 雷熱, which 12 cards' names hold; a word of two characters at least that
 // three cards share, when the whole is no card's).
@@ -235,11 +331,15 @@ mod tests {
     fn db() -> Vec<Card> {
         parse(
             &json!({
-                "1": { "id": 14558127, "md_name": "灰流丽", "jp_name": "灰流うらら", "en_name": "Ash Blossom & Joyous Spring" },
+                "1": { "id": 14558127, "md_name": "灰流丽", "jp_name": "灰流うらら", "en_name": "Ash Blossom & Joyous Spring",
+                       "text": { "desc": "①：包含以下其中任意种效果的魔法·陷阱·怪兽的效果发动时，把这张卡从手卡丢弃才能发动。那个效果无效。" },
+                       "data": { "type": 4129, "atk": 0, "def": 1800, "level": 3, "race": 16, "attribute": 4 } },
                 "2": { "id": "8633261", "md_name": "冰燃・雷热涡炉", "jp_name": "アイス・ライゼオル", "en_name": "Ice Ryzeal" },
                 "3": { "id": 35844557, "md_name": "剑极・雷热涡炉", "en_name": "Sword Ryzeal" },
                 "4": { "id": 72238166, "md_name": "节极・雷热涡炉", "en_name": "Node Ryzeal" },
-                "5": { "id": 19899073, "md_name": "天丛云之巳剑", "en_name": "Ame no Murakumo no Mitsurugi" }
+                "5": { "id": 19899073, "md_name": "天丛云之巳剑", "en_name": "Ame no Murakumo no Mitsurugi",
+                       "text": { "types": "[怪兽|效果|仪式] 爬虫类/暗\n[★8] 3200/800", "desc": "「巳剑降临」降临\r\n①：这张卡特殊召唤的场合才能发动。" },
+                       "data": { "type": 161, "atk": 3200, "def": 800, "level": 8, "race": 524288, "attribute": 32 } }
             })
             .to_string(),
         )
@@ -255,6 +355,18 @@ mod tests {
         assert_eq!(found[0]["img"], "https://images.ygoprodeck.com/images/cards_small/14558127.jpg");
         assert_eq!(search(&cards, "ryzeal", 5).len(), 3);
         assert!(search(&cards, "  ", 5).is_empty());
+    }
+
+    #[test]
+    fn what_the_game_sorts_a_card_by() {
+        let cards = db();
+        let ame = info(&cards, None, "天叢雲之巳劍").unwrap();
+        assert_eq!((ame["atk"].as_i64(), ame["level"].as_u64(), ame["race"].as_u64(), ame["hand"].as_bool()), (Some(3200), Some(8), Some(0x80000), Some(false)));
+        assert!(ame["desc"].as_str().unwrap().starts_with("「巳劍降臨」降臨\n①：這張卡"),"{}", ame["desc"]);
+        let ash = info(&cards, Some(14558127), "").unwrap();
+        assert_eq!((ash["kind"].as_u64(), ash["hand"].as_bool()), (Some(4129), Some(true)));
+        assert!(info(&cards, None, "沒有這張").is_none());
+        assert_eq!(info(&cards, None, "冰燃雷熱渦爐").unwrap()["id"], 8633261);
     }
 
     #[test]

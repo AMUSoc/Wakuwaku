@@ -391,3 +391,178 @@ footer button {
 .art.on {
   border-color: var(--claude);
 }
+
+/* Moved by its top. */
+header,
+header .title {
+  cursor: grab;
+}
+
+/* The sort and the filters, as the game's deck editor has them. */
+#tools .tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+#tools select,
+#tools input.q {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 6px;
+  outline: none;
+}
+
+#tools select.on {
+  border-color: var(--claude);
+  color: var(--strong);
+}
+
+#tools select option {
+  background: #121726;
+}
+
+#tools input.q {
+  width: 150px;
+}
+
+.chips {
+  display: flex;
+  gap: 3px;
+}
+
+.chip {
+  padding: 4px 9px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
+.chip.on {
+  background: var(--claude);
+  border-color: var(--claude);
+  color: #fff;
+}
+
+.match {
+  font-size: 12px;
+  color: var(--claude);
+}
+
+.tile.dim {
+  opacity: 0.22;
+}
+
+.tile .st {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tile .ht {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  background: rgba(139, 124, 216, 0.9);
+  color: #fff;
+}
+
+/* The card's own word: what it is, its numbers, its text. */
+.about {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.about b {
+  color: var(--strong);
+}
+
+.about .what {
+  font-size: 12px;
+  color: var(--claude);
+}
+
+.about .nums {
+  font-size: 12px;
+  color: var(--strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.about .desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: var(--fg);
+  max-height: 180px;
+  overflow-y: auto;
+  user-select: text;
+}
+
+/* The deck's numbers. */
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.stats p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.stats .good {
+  color: var(--good);
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 64px;
+  margin-top: 4px;
+}
+
+.bar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+.bar i {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.bar i span {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: var(--claude);
+}
+
+.bar small,
+.bar em {
+  font-size: 10px;
+  color: var(--muted);
+  font-style: normal;
+}

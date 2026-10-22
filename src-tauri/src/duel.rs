@@ -124,6 +124,7 @@ fn look(sh: &Arc<Shared>, pid: u32) {
     }
     let started = crate::now_ms();
     keep_shot(sh, &picture, started);
+    *ASKS.lock().unwrap_or_else(|e| e.into_inner()) = None;
     publish(sh, json!({ "state": "looking", "since": started, "last": last_guess() }));
     show(sh, true);
     let sh = sh.clone();
@@ -139,6 +140,8 @@ fn look(sh: &Arc<Shared>, pid: u32) {
                     let _ = std::fs::create_dir_all(dir(&sh));
                     let _ = full.save(&dir(&sh).join("full.png"));
                 }
+                // Not left "looking" for the next time it is opened.
+                publish(&sh, json!({ "state": "none" }));
                 show(&sh, false);
                 LOOKING.store(false, Ordering::SeqCst);
                 let theme = crate::deckscan::read_deck(&dir(&sh))["theme"].as_str().unwrap_or("").to_string();
@@ -231,7 +234,9 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
          \"chain\":{\"card\":\"對手正在發動的卡\",\"answer\":\"要不要連鎖、用哪張，一句話\"},\
          \"stop\":[{\"card\":\"要斷的卡\",\"zone\":\"M3|S1|F|EL|hand|gy|chain…\",\"effect\":\"哪個效果\",\"with\":\"用什麼斷\",\"when\":\"時機\",\"why\":\"為什麼，20字內\"}],\
          \"me\":{\"first\":\"先攻怎麼打，一句\",\"second\":\"後攻怎麼打，一句\",\"now\":[\"這回合第一步\",\"第二步\"]},\
-         \"watch\":[\"要小心它的什麼，15字內\"],\"tip\":\"一句建議\"}\n\
+         \"watch\":[\"要小心它的什麼，15字內\"],\"tip\":\"一句建議\",\
+         \"crew\":{\"claude\":\"總指揮：現在最該做的一件事\",\"codex\":\"算數字：生命值、打點、還差多少傷害或資源張數\",\"grok\":\"看對手：它可能還藏著什麼（蓋牌、手坑、墓地效果）\",\"agy\":\"查環境：這牌組在目前環境的地位、常帶的卡\"}}\n\
+         crew 是四位軍師各說一句、各 25 字內、口氣像隊友在旁邊講話；看不出來的那位就說她要你注意什麼。\
          沒在問連鎖時 chain 寫 null；看不到我的手牌時 now 寫 []。stop 最多 3 個，照重要程度排；now 最多 4 步；watch 最多 3 個。\
          看不出對手的卡時 deck 寫空字串、plan 說看到了什麼。全部繁體中文、台灣用語。\n",
     );
@@ -504,7 +509,129 @@ fn push(sh: &Shared) {
         view["lang"] = json!(sh.lang());
         view["key"] = json!(key_name(sh));
         view["hand"] = json!(hand_of(sh));
+        view["crew"] = crew(sh);
+        view["asks"] = Value::Object(ASKS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default());
         let _ = sh.app.emit_to(LABEL, "duel:update", view);
+    }
+}
+
+// --- The four, each with a part ("軍師團", the user's word, 2026-10-22) ----------------------
+
+// Each one's part, as her line in the panel says and as she is asked.
+const PARTS: [(&str, &str); 4] = [
+    ("claude", "總指揮：綜合大家的看法，告訴我現在最該做什麼"),
+    ("codex", "算數字：生命值、攻擊力、打點、還差多少傷害、雙方資源張數"),
+    ("grok", "看對手：對手可能還藏著什麼（蓋牌、手坑、墓地效果），它下一步想幹嘛"),
+    ("agy", "查環境：這個牌組在目前環境的地位、常見構築和常帶的卡、怎麼對付"),
+];
+
+// Each asked by her (agent → { q, state: asking | done | failed, a, since, stood_in }).
+static ASKS: Mutex<Option<serde_json::Map<String, Value>>> = Mutex::new(None);
+// The window that had the keyboard before she typed in the panel.
+static TYPED_FROM: Mutex<isize> = Mutex::new(0);
+
+// The four, with what each pet is drawn from.
+fn crew(sh: &Shared) -> Value {
+    let settings = sh.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let found = crate::data::pets(&sh.dir);
+    json!(PARTS
+        .iter()
+        .map(|&(agent, _)| {
+            let sprite = crate::data::pet_of(&settings, Some(agent), &found);
+            json!({
+                "agent": agent,
+                "sprite": sprite.map(|p| crate::data::asset_url(&p.sheet)),
+                "color": sprite.and_then(|p| p.color.clone()).unwrap_or_else(|| crate::data::agent_color(agent).to_string()),
+            })
+        })
+        .collect::<Vec<_>>())
+}
+
+// What one of them is asked: her part, the duel as Claude read it off the
+// last picture, her deck, the question; no tools, short.
+pub fn ask_prompt(agent: &str, q: &str, found: &Value, deck: &str) -> String {
+    let part = PARTS.iter().find(|p| p.0 == agent).map_or(PARTS[0].1, |p| p.1);
+    let mut p = format!(
+        "你是遊戲王 Master Duel 軍師團的一員，四位軍師各管一塊，你負責「{part}」。玩家在對戰中問你：「{q}」
+         規則：只根據下面的資料和你自己對遊戲王的了解回答，不要使用任何工具、不要讀寫檔案、不要上網；         繁體中文、台灣 Master Duel 的卡名和用語；從你負責的角度回答，最多 3 行、100 字內，直接講結論，不要開場白。
+"
+    );
+    if found.is_object() {
+        p.push_str(&format!("
+=== 目前對局（另一位軍師剛看遊戲截圖整理的）===
+{}
+", serde_json::to_string_pretty(found).unwrap_or_default()));
+    } else {
+        p.push_str("
+（還沒看過對局畫面。）
+");
+    }
+    if !deck.is_empty() {
+        p.push_str(&format!("
+=== 我的牌組 ===
+{deck}
+"));
+    }
+    p
+}
+
+// She asks one of them: that agent itself answers (Claude for one not
+// installed here, said so), the panel told as it goes.
+pub fn ask(sh: &Arc<Shared>, agent: &str, q: &str) {
+    let q: String = q.trim().chars().take(200).collect();
+    let Some(&(agent, _)) = PARTS.iter().find(|p| p.0 == agent) else { return };
+    if q.is_empty() {
+        return;
+    }
+    let since = crate::now_ms();
+    ASKS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(agent.into(), json!({ "q": q, "state": "asking", "since": since }));
+    push(sh);
+    let found = VIEW.lock().unwrap_or_else(|e| e.into_inner()).get("found").cloned().unwrap_or(Value::Null);
+    let prompt = ask_prompt(agent, &q, &found, &deck_of(sh));
+    let sh = sh.clone();
+    crate::spawn_named("duel-ask", move || {
+        let folder = dir(&sh).join("work");
+        let _ = std::fs::create_dir_all(&folder);
+        let installed = crate::run::find(match agent {
+            "codex" => "codex",
+            "grok" => "grok",
+            "agy" => "agy",
+            _ => "claude",
+        })
+        .is_some();
+        let by = if installed { agent } else { "claude" };
+        let got = crate::review::ask(by, &folder, &prompt);
+        let entry = match got {
+            Ok(a) => json!({ "q": q, "state": "done", "a": a, "since": since, "stoodIn": !installed }),
+            Err(why) => json!({ "q": q, "state": "failed", "a": why, "since": since }),
+        };
+        {
+            let mut asks = ASKS.lock().unwrap_or_else(|e| e.into_inner());
+            let asks = asks.get_or_insert_with(Default::default);
+            // Asked again meanwhile (or a new picture): not this answer.
+            if asks.get(agent).and_then(|a| a["since"].as_u64()) != Some(since) {
+                return;
+            }
+            asks.insert(agent.into(), entry);
+        }
+        push(&sh);
+    });
+}
+
+// The panel takes the keyboard while she types a question, and gives it
+// back to the game after.
+pub fn typing(sh: &Shared, on: bool) {
+    let Some(win) = window(sh) else { return };
+    if on {
+        *TYPED_FROM.lock().unwrap_or_else(|e| e.into_inner()) = crate::focus::foreground();
+        let _ = win.set_focusable(true);
+        let _ = win.set_focus();
+    } else {
+        let _ = win.set_focusable(false);
+        let from = std::mem::take(&mut *TYPED_FROM.lock().unwrap_or_else(|e| e.into_inner()));
+        if from != 0 {
+            crate::focus::set_foreground(from);
+        }
     }
 }
 
@@ -648,6 +775,18 @@ pub const DECK: &str = "dueldeck";
 static DECK_MADE: AtomicBool = AtomicBool::new(false);
 static DECK_READY: AtomicBool = AtomicBool::new(false);
 static DECK_WANTED: AtomicBool = AtomicBool::new(false);
+// Where she put the deck window (dragged by its top, sized by its edges:
+// she wanted the game's own deck beside it, 2026-10-22), kept for the next
+// time in duel/deckwin.json.
+static DECK_SPOT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
+
+fn deck_spot(sh: &Shared) -> Option<(i32, i32, i32, i32)> {
+    let mut spot = DECK_SPOT.lock().unwrap_or_else(|e| e.into_inner());
+    if spot.is_none() {
+        *spot = std::fs::read_to_string(dir(sh).join("deckwin.json")).ok().and_then(|t| serde_json::from_str(&t).ok());
+    }
+    *spot
+}
 
 fn deck_view(sh: &Shared) -> Value {
     let d = dir(sh);
@@ -677,8 +816,12 @@ pub fn open_deck(sh: &Arc<Shared>) {
     let _ = crate::cards::with_cards(&sh.dir, |_| ());
     let a = game_pid().and_then(os::window_rect).and_then(|r| sh.screens().near((r.l + r.r) / 2, (r.t + r.b) / 2)).or_else(|| crate::island::area(sh));
     let Some(a) = a else { return };
-    let (w, h) = (((1080.0 * a.sf) as i32).min(a.w - 40), ((760.0 * a.sf) as i32).min(a.h - 40));
-    let pos = (a.x + (a.w - w) / 2, a.y + (a.h - h) / 2);
+    let (mut w, mut h) = (((1080.0 * a.sf) as i32).min(a.w - 40), ((760.0 * a.sf) as i32).min(a.h - 40));
+    let mut pos = (a.x + (a.w - w) / 2, a.y + (a.h - h) / 2);
+    // Where she left it, while its top is still on a display.
+    if let Some((x, y, sw, sh_)) = deck_spot(sh).filter(|&(x, y, sw, _)| sh.screens().near(x + sw / 2, y + 20).is_some()) {
+        (pos, w, h) = ((x, y), sw.max(400), sh_.max(300));
+    }
     if !DECK_MADE.swap(true, Ordering::SeqCst) {
         let sh = sh.clone();
         let sf = a.sf;
@@ -690,7 +833,8 @@ pub fn open_deck(sh: &Arc<Shared>) {
                 .data_directory(crate::webview_dir(&sh))
                 .transparent(true)
                 .decorations(false)
-                .resizable(false)
+                .resizable(true)
+                .min_inner_size(560.0, 420.0)
                 .skip_taskbar(true)
                 .shadow(false)
                 .always_on_top(true)
@@ -741,7 +885,21 @@ pub fn deck_ready(sh: &Arc<Shared>) {
 pub fn close_deck(sh: &Shared) {
     DECK_WANTED.store(false, Ordering::SeqCst);
     if let Some(win) = sh.app.get_webview_window(DECK) {
+        if let (Ok(p), Ok(s)) = (win.outer_position(), win.outer_size()) {
+            let spot = (p.x, p.y, s.width as i32, s.height as i32);
+            *DECK_SPOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(spot);
+            let _ = std::fs::write(dir(sh).join("deckwin.json"), json!([spot.0, spot.1, spot.2, spot.3]).to_string());
+        }
         let _ = win.hide();
+    }
+}
+
+// What the deck window sorts and filters by and shows of each card: its
+// ATK, DEF, level, attribute, type, kind and text, from the database.
+pub fn card_info(sh: &Shared, cards: &[(Option<u64>, String)]) -> Value {
+    match crate::cards::with_cards(&sh.dir, |all| cards.iter().map(|(id, name)| crate::cards::info(all, *id, name).unwrap_or(Value::Null)).collect::<Vec<_>>()) {
+        Some(found) => json!({ "cards": found }),
+        None => json!({ "cards": [], "loading": true }),
     }
 }
 

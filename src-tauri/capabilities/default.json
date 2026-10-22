@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Her page and the island's: events from the Rust side",
   "windows": ["pet-*", "island", "dock", "scout", "duel", "duelframes", "dueldeck"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

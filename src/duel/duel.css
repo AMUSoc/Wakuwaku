@@ -373,3 +373,150 @@ pre.mine {
   background: var(--card-2);
   user-select: text;
 }
+
+/* The four (軍師團): each pet's head, her part, her line; one asked. */
+.crew {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.mate {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  grid-template-rows: auto 1fr;
+  column-gap: 6px;
+  align-items: start;
+  padding: 6px;
+  text-align: left;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  color: var(--fg);
+  font: inherit;
+}
+
+.mate:hover,
+.mate.on {
+  border-color: var(--c);
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+}
+
+.mate .head {
+  grid-row: 1 / 3;
+}
+
+.head {
+  width: 40px;
+  height: 43px;
+  background-repeat: no-repeat;
+  background-size: 320px auto;
+  background-position: 0 0;
+  animation: idle 1.56s steps(6) infinite;
+  display: grid;
+  place-items: center;
+}
+
+.head:not([style*='background-image']) {
+  border-radius: 50%;
+  background: var(--c);
+  animation: none;
+  color: #fff;
+  font-weight: 800;
+}
+
+.head.busy {
+  background-position-y: -303.3px;
+  animation-duration: 0.84s;
+}
+
+@keyframes idle {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: -240px;
+  }
+}
+
+.mate .who {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.mate .who b {
+  font-size: 12px;
+  color: var(--strong);
+}
+
+.mate .role {
+  font-size: 11px;
+  color: var(--c);
+  white-space: nowrap;
+}
+
+.mate .line {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg);
+  white-space: pre-line;
+}
+
+.mate .line .q {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.mate .line.busy {
+  color: var(--c);
+}
+
+.mate .line.bad {
+  color: var(--bad);
+}
+
+.askbox {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.askrow {
+  display: flex;
+  gap: 5px;
+}
+
+.askq {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--strong);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--claude);
+  border-radius: 9px;
+  padding: 6px 9px;
+  outline: none;
+  user-select: text;
+}
+
+.askbox .send {
+  padding: 5px 12px;
+}
+
+.askbox .quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.askbox .chip {
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}

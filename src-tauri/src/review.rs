@@ -218,6 +218,11 @@ fn command_of(agent: &str, prompt_file: &str, prompt: &str) -> (&'static str, Ve
     }
 }
 
+// One of them asked something else (the duel's four, duel.rs): the same way, the same shortness.
+pub fn ask(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, String> {
+    run(agent, folder, prompt)
+}
+
 fn run(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, String> {
     let prompt_file = folder.join(format!("{agent}.prompt.txt"));
     std::fs::write(&prompt_file, prompt).map_err(|e| e.to_string())?;

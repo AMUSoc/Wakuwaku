@@ -4,6 +4,10 @@
 // clicked opens on the right, large, to rename, mark right, put the same
 // name on the others read alike, or remove. A theme from her ("雷熱祀劍")
 // has the cards read again among that theme's, the ones marked right kept.
+// Each card's ATK, DEF, level, attribute, type and kind from the card
+// database (cards.rs), to sort and filter by as Master Duel does, its text
+// when picked, and the deck's numbers when none is (she asked for the
+// game's own sorting, 2026-10-22). The window moves by its top.
 ;(function () {
   const { t } = window.I18n
   let lang = 'zh-TW'
@@ -14,6 +18,10 @@
   let error = null
   let picked = null
   let timer = 0
+  // The database's word on each card, by "id|name"; what is sorted and kept.
+  const infos = new Map()
+  let sortBy = 'game'
+  const filter = { type: '', attr: '', race: '', kind: '', level: '', q: '' }
   const T = (key, vars) => t(lang, key, vars)
   const $ = id => document.getElementById(id)
 
@@ -27,12 +35,91 @@
   const part = c => (c.slot.startsWith('e') ? 'e' : 'm')
   const named = list => list.filter(c => c.name.trim())
 
+  // YGOPro's numbers (cards.rs): the type bits, attributes and types one bit each.
+  const MONSTER = 0x1
+  const SPELL = 0x2
+  const TRAP = 0x4
+  const KINDS = [0x10, 0x20, 0x80, 0x40, 0x2000, 0x800000, 0x4000000, 0x1000000, 0x1000, 0x200000, 0x200, 0x400, 0x800, 0x400000]
+  const SPELL_KINDS = [0, 0x10000, 0x20000, 0x40000, 0x80000, 0x80]
+  const TRAP_KINDS = [0, 0x20000, 0x100000]
+  const words = key => T(key).split(',')
+  const bitIndex = n => (n > 0 ? Math.round(Math.log2(n & -n)) : -1)
+  const infoOf = c => infos.get(`${c.id || ''}|${c.name.trim()}`) || null
+  const subOf = (i, list) => list.slice(1).find(b => i.kind & b) || 0
+
+  // What a card is, in a line: "光・炎族・超量／效果" or "速攻魔法".
+  function whatIs(i) {
+    if (i.kind & MONSTER) {
+      const kinds = KINDS.filter(b => i.kind & b).map(b => words('deckc.kinds')[KINDS.indexOf(b)])
+      return [words('deckc.attrs')[bitIndex(i.attr)], words('deckc.races')[bitIndex(i.race)], kinds.join('／')].filter(Boolean).join('・')
+    }
+    if (i.kind & SPELL) return T('deckc.spellOf', { k: words('deckc.spellKinds')[SPELL_KINDS.indexOf(subOf(i, SPELL_KINDS))] })
+    return T('deckc.trapOf', { k: words('deckc.trapKinds')[TRAP_KINDS.indexOf(subOf(i, TRAP_KINDS))] })
+  }
+
+  // Its level, rank or link and its ATK / DEF, for a monster.
+  function stars(i) {
+    if (!(i.kind & MONSTER)) return ''
+    const link = i.kind & 0x4000000
+    const lv = link ? `LINK-${i.level}` : `${i.kind & 0x800000 ? '☆' : '★'}${i.level}`
+    const n = v => (v < 0 ? '?' : v)
+    return link ? `${lv}  ${n(i.atk)}` : `${lv}  ${n(i.atk)}/${n(i.def)}`
+  }
+
+  function passes(c) {
+    const i = infoOf(c)
+    const f = filter
+    if (!f.type && !f.attr && !f.race && !f.kind && !f.level && !f.q) return true
+    if (!i) return false
+    if (f.type === 'monster' && !(i.kind & MONSTER)) return false
+    if (f.type === 'spell' && !(i.kind & SPELL)) return false
+    if (f.type === 'trap' && !(i.kind & TRAP)) return false
+    if (f.type === 'hand' && !i.hand) return false
+    if (f.attr && !(i.kind & MONSTER && i.attr === Number(f.attr))) return false
+    if (f.race && !(i.kind & MONSTER && i.race === Number(f.race))) return false
+    if (f.kind && !(i.kind & MONSTER && i.kind & Number(f.kind))) return false
+    if (f.level && !(i.kind & MONSTER && i.level === Number(f.level))) return false
+    const q = f.q.trim().toLowerCase()
+    if (q && ![i.name, i.jp, i.en, i.desc].join('\n').toLowerCase().includes(q)) return false
+    return true
+  }
+
+  // As the game orders a deck: monsters, then spells, then traps; the
+  // extra deck fusion, synchro, Xyz, link; each by level high to low, then
+  // name. Or by level, ATK, DEF, name, or where it was read.
+  function rank(i) {
+    if (!i) return 9
+    if (i.kind & MONSTER) {
+      const extra = [0x40, 0x2000, 0x800000, 0x4000000].findIndex(b => i.kind & b)
+      return extra >= 0 ? 1 + extra : i.kind & 0x80 ? 1 : 0
+    }
+    return i.kind & SPELL ? 5 + SPELL_KINDS.indexOf(subOf(i, SPELL_KINDS)) / 10 : 7 + TRAP_KINDS.indexOf(subOf(i, TRAP_KINDS)) / 10
+  }
+
+  function sorted(list) {
+    if (sortBy === 'slot') return list
+    const by = {
+      game: (a, b) => rank(a) - rank(b) || (b?.level || 0) - (a?.level || 0),
+      level: (a, b) => (b?.kind & MONSTER ? b.level : -1) - (a?.kind & MONSTER ? a.level : -1),
+      atk: (a, b) => (b?.kind & MONSTER ? b.atk : -2) - (a?.kind & MONSTER ? a.atk : -2),
+      def: (a, b) => (b?.kind & MONSTER && !(b.kind & 0x4000000) ? b.def : -2) - (a?.kind & MONSTER && !(a.kind & 0x4000000) ? a.def : -2),
+      name: () => 0,
+    }[sortBy]
+    return list
+      .map((c, n) => ({ c, i: infoOf(c), n }))
+      .sort((a, b) => by(a.i, b.i) || (a.i?.name || a.c.name).localeCompare(b.i?.name || b.c.name, lang) || a.n - b.n)
+      .map(x => x.c)
+  }
+
   function tile(c) {
-    const box = el('button', `tile${c.sure ? '' : ' unsure'}${picked === c.slot ? ' picked' : ''}`)
-    const url = pictures[c.slot]
+    const i = infoOf(c)
+    const box = el('button', `tile${c.sure ? '' : ' unsure'}${picked === c.slot ? ' picked' : ''}${passes(c) ? '' : ' dim'}${i?.hand ? ' hand' : ''}`)
+    const url = pictures[c.slot] || (c.slot.includes('+') && i ? i.img : null)
     box.append(url ? Object.assign(el('img'), { src: url, alt: '' }) : el('div', 'blank', '＋'))
     if (!c.sure) box.append(el('span', 'q', '?'))
+    if (i?.hand) box.append(el('span', 'ht', T('deckc.handTrap')))
     box.append(el('span', 'nm', c.name.trim() || T('deck.unnamed')))
+    if (i) box.append(el('span', 'st', i.kind & MONSTER ? stars(i) : whatIs(i)))
     box.onclick = () => {
       picked = c.slot
       draw()
@@ -52,7 +139,7 @@
       draw()
       setTimeout(() => $('pickName')?.focus(), 0)
     }
-    return el('section', '', el('h2', '', T(key === 'm' ? 'deck.main' : 'deck.extra', { n: named(list).length })), el('div', 'grid', list.map(tile), add))
+    return el('section', '', el('h2', '', T(key === 'm' ? 'deck.main' : 'deck.extra', { n: named(list).length })), el('div', 'grid', sorted(list).map(tile), add))
   }
 
   // The card picked, large, to put right: its picture beside the official
@@ -63,7 +150,7 @@
     const c = deck.cards.find(x => x.slot === picked)
     if (!c) {
       const unsure = deck.cards.filter(x => !x.sure && x.name.trim()).length
-      return el('aside', 'side', el('h3', '', T('deck.howTitle')), el('p', 'muted', T('deck.how')), unsure ? el('p', 'warnline', T('deck.unsure', { n: unsure })) : el('p', 'okline', T('deck.allSure')))
+      return el('aside', 'side', stats(), el('h3', '', T('deck.howTitle')), el('p', 'muted', T('deck.how')), unsure ? el('p', 'warnline', T('deck.unsure', { n: unsure })) : el('p', 'okline', T('deck.allSure')))
     }
     const url = pictures[c.slot]
     const pics = el('div', 'pics', el('figure', '', url ? Object.assign(el('img', 'big'), { src: url }) : el('div', 'bigblank', '＋'), el('figcaption', '', T('deck.scanned'))))
@@ -157,19 +244,134 @@
       picked = null
       draw()
     }
-    return el('aside', 'side', pics, arts, el('label', 'th', T('deck.cardName')), name, list, el('p', 'hint', T('deck.typeHint')), el('div', 'acts', ok, same, del))
+    const i = infoOf(c)
+    const about = i
+      ? el('div', 'about', el('b', '', i.name), el('span', 'what', whatIs(i)), i.kind & MONSTER ? el('span', 'nums', stars(i).replace('  ', '　ATK ').replace('/', ' / DEF ')) : null, i.scale ? el('span', 'what', T('deckc.scale', { n: i.scale })) : null, el('p', 'desc', i.desc))
+      : null
+    return el('aside', 'side', pics, arts, about, el('label', 'th', T('deck.cardName')), name, list, el('p', 'hint', T('deck.typeHint')), el('div', 'acts', ok, same, del))
+  }
+
+  // The deck's numbers: how many of each, the levels, and the chance of a
+  // hand trap in the opening hand (5 cards first, 6 second).
+  function stats() {
+    const main = deck.cards.filter(c => part(c) === 'm' && c.name.trim())
+    const extra = deck.cards.filter(c => part(c) === 'e' && c.name.trim())
+    const of = list => list.map(infoOf).filter(Boolean)
+    const mi = of(main)
+    const count = f => mi.filter(f).length
+    const hands = count(i => i.hand)
+    const chance = n => {
+      const N = main.length
+      if (!hands || N < n) return 0
+      let none = 1
+      for (let k = 0; k < n; k++) none *= (N - hands - k) / (N - k)
+      return Math.round((1 - Math.max(0, none)) * 100)
+    }
+    const levels = new Map()
+    for (const i of mi) if (i.kind & MONSTER) levels.set(i.level, (levels.get(i.level) || 0) + 1)
+    const most = Math.max(1, ...levels.values())
+    const bars = el(
+      'div',
+      'bars',
+      [...levels.entries()].sort((a, b) => a[0] - b[0]).map(([lv, n]) => el('div', 'bar', el('i', '', Object.assign(el('span'), { style: `height:${(n / most) * 100}%` })), el('small', '', `★${lv}`), el('em', '', String(n)))),
+    )
+    const ex = of(extra)
+    const exKinds = [0x40, 0x2000, 0x800000, 0x4000000].map(b => [words('deckc.kinds')[KINDS.indexOf(b)], ex.filter(i => i.kind & b).length]).filter(x => x[1])
+    const missing = main.length + extra.length - mi.length - ex.length
+    return el(
+      'div',
+      'stats',
+      el('h3', '', T('deckc.statsTitle')),
+      el('p', '', T('deckc.split', { m: count(i => i.kind & MONSTER), s: count(i => i.kind & SPELL), t: count(i => i.kind & TRAP) })),
+      el('p', '', T('deckc.hands', { n: hands }), '　', T('deckc.tuners', { n: count(i => i.kind & 0x1000) })),
+      hands ? el('p', 'good', T('deckc.open', { p: chance(5), q: chance(6) })) : null,
+      levels.size ? el('div', '', el('span', 'th', T('deckc.levels')), bars) : null,
+      exKinds.length ? el('p', '', exKinds.map(([k, n]) => `${k} ${n}`).join('・')) : null,
+      missing ? el('p', 'muted', T('deckc.noInfo', { n: missing })) : null,
+    )
+  }
+
+  // The sort and the filters, as the game's deck editor has them.
+  function tools() {
+    const select = (key, options, label) => {
+      const s = el('select', '', el('option', '', label), ...options.map(([v, text]) => Object.assign(el('option', '', text), { value: String(v) })))
+      s.firstChild.value = ''
+      s.value = filter[key]
+      s.onchange = () => ((filter[key] = s.value), draw())
+      if (filter[key]) s.classList.add('on')
+      return s
+    }
+    const sort = el('select', 'sort', ...['game', 'level', 'atk', 'def', 'name', 'slot'].map(v => Object.assign(el('option', '', T(`deckc.sort.${v}`)), { value: v })))
+    sort.value = sortBy
+    sort.onchange = () => ((sortBy = sort.value), draw())
+    const types = el(
+      'div',
+      'chips',
+      [['', T('deckc.all')], ['monster', T('deckc.monster')], ['spell', T('deckc.spell')], ['trap', T('deckc.trap')], ['hand', T('deckc.handTrap')]].map(([v, text]) => {
+        const b = el('button', `chip${filter.type === v ? ' on' : ''}`, text)
+        b.onclick = () => ((filter.type = v), draw())
+        return b
+      }),
+    )
+    const q = el('input', 'q')
+    q.id = 'filterQ'
+    q.placeholder = T('deckc.search')
+    q.value = filter.q
+    q.oninput = () => {
+      filter.q = q.value
+      draw()
+      const again = $('filterQ')
+      again.focus()
+      again.setSelectionRange(again.value.length, again.value.length)
+    }
+    const shown = deck.cards.filter(c => c.name.trim())
+    const on = Object.values(filter).some(Boolean)
+    const clear = on ? el('button', 'chip', T('deckc.clear')) : null
+    if (clear) clear.onclick = () => (Object.keys(filter).forEach(k => (filter[k] = '')), draw())
+    return el(
+      'div',
+      'tools',
+      el('label', 'th', T('deckc.sort')),
+      sort,
+      types,
+      select('attr', words('deckc.attrs').slice(0, 6).map((w, n) => [1 << n, w]), T('deckc.attr')),
+      select('race', words('deckc.races').map((w, n) => [1 << n, w]).filter((_, n) => n !== 21 && n !== 22), T('deckc.race')),
+      select('kind', KINDS.map((b, n) => [b, words('deckc.kinds')[n]]), T('deckc.kind')),
+      select('level', Array.from({ length: 13 }, (_, n) => [n, `★${n}`]).slice(1), T('deckc.level')),
+      q,
+      on ? el('span', 'match', T('deckc.matching', { n: shown.filter(passes).length })) : null,
+      clear,
+    )
+  }
+
+  // The database's word on the deck's cards, asked for those not yet known.
+  let infoAsked = 0
+  function learn() {
+    const want = deck.cards.filter(c => c.name.trim() && !infos.has(`${c.id || ''}|${c.name.trim()}`))
+    if (!want.length) return
+    const mine = ++infoAsked
+    window.pet.duelCardInfo(want.map(c => [c.id || null, c.name.trim()])).then(got => {
+      if (!got || mine !== infoAsked) return
+      if (got.loading) return void setTimeout(learn, 3000)
+      want.forEach((c, n) => infos.set(`${c.id || ''}|${c.name.trim()}`, got.cards[n] || null))
+      draw()
+    })
   }
 
   function draw() {
     clearInterval(timer)
+    learn()
+    $('tools').replaceChildren(tools())
     $('theme').value = deck.theme || ''
     $('rescan').disabled = !!scanning || !hasPicture
     const grids = $('grids')
+    const scroll = grids.scrollTop
     if (!deck.cards.length && !scanning) {
       grids.replaceChildren(el('div', 'empty', T(hasPicture ? 'deck.notRead' : 'deck.noPic')), section('m'), section('e'))
     } else {
       grids.replaceChildren(section('m'), section('e'))
     }
+    grids.scrollTop = scroll
     $('side').replaceChildren(side())
     $('status').textContent = scanning ? '' : error ? T('deck.failed', { why: error }) : ''
     $('scan').hidden = !scanning
@@ -201,6 +403,11 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') picked ? ((picked = null), draw()) : window.pet.duelDeckClose()
   })
+  // Dragged by its top (Tauri's drag region: on the header and what is
+  // written in it, not its buttons and boxes).
+  for (const id of ['head', 'label']) $(id).setAttribute('data-tauri-drag-region', '')
+  document.querySelector('header').setAttribute('data-tauri-drag-region', '')
+  document.querySelector('.title').setAttribute('data-tauri-drag-region', '')
 
   window.pet.onDuelDeck(p => {
     lang = p.lang || 'zh-TW'
