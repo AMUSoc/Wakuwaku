@@ -414,7 +414,7 @@
     }
     grids.scrollTop = scroll
     $('side').replaceChildren(side())
-    $('status').textContent = scanning ? '' : error === 'noGame' ? T('deck.noGame') : error === 'picture' ? T('deck.noShot') : error ? T('deck.failed', { why: error }) : ''
+    $('status').textContent = scanning ? '' : error === 'noGame' ? T('deck.noGame') : error === 'picture' ? T('deck.noShot') : error === 'notDeck' ? T('deck.notDeckScreen') : error ? T('deck.failed', { why: error }) : ''
 
     $('scan').hidden = !scanning
     if (scanning) {
@@ -484,7 +484,17 @@
     window.pet.duelDeckDrop(deck.lib)
   }
   $('save').onclick = save
+  // Every card marked right: pressed twice (once marked a whole deck of wrong names right).
+  let allArmed = 0
   $('allok').onclick = () => {
+    if (!allArmed) {
+      $('allok').textContent = T('deck.allOkAgain')
+      allArmed = setTimeout(() => ((allArmed = 0), ($('allok').textContent = T('deck.allOk'))), 3000)
+      return
+    }
+    clearTimeout(allArmed)
+    allArmed = 0
+    $('allok').textContent = T('deck.allOk')
     for (const c of deck.cards) (c.sure = true), (c.remembered = false)
     draw()
   }

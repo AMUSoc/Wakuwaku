@@ -1096,6 +1096,12 @@ async fn duel_fly(app: AppHandle, open: bool) {
 }
 
 #[tauri::command]
+async fn duel_fit(app: AppHandle, height: u32) {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::fit(&sh, height)).await.ok();
+}
+
+#[tauri::command]
 async fn duel_watch(app: AppHandle, on: bool) {
     let sh = shared(&app);
     tauri::async_runtime::spawn_blocking(move || duel::watch(&sh, on)).await.ok();
@@ -1544,6 +1550,7 @@ fn main() {
             duel_fly,
             duel_scan,
             duel_watch,
+            duel_fit,
             duel_deck_use,
             duel_deck_drop,
             duel_deck_new,

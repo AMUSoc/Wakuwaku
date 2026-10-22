@@ -715,3 +715,19 @@ header .title {
 .lib {
   flex-wrap: wrap;
 }
+
+/* The theme, rarely needed now, small in the bottom row. */
+footer .themebox {
+  margin-left: auto;
+}
+
+footer .themebox #theme {
+  width: 150px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+footer .themebox button {
+  padding: 5px 10px;
+  font-size: 12px;
+}

@@ -40,9 +40,12 @@ const SIZE: (f64, f64) = (380.0, 620.0);
 // The bar of her tools down the game's right (Alt+D brings it up, 2026-10-22:
 // "a small toolbar, not a chat window"); a card of what was asked for slides
 // out to its left (FLY), the window as large as both then.
-const BAR: (f64, f64) = (64.0, 376.0);
+const BAR: (f64, f64) = (64.0, 386.0);
 const BAR_GAP: f64 = 8.0;
 static FLY: AtomicBool = AtomicBool::new(false);
+// How tall the card wants to be (logical px, its page measures it): no
+// taller, so no empty glass over the game catching its clicks (2026-10-23).
+static FIT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 const MARGIN: f64 = 12.0;
 // The picture sent: so wide at most (a 2560 display halved).
 // The longest side Claude sees whole (larger is made smaller on its side).
@@ -100,6 +103,16 @@ pub fn fly(sh: &Arc<Shared>, open: bool) {
     FLY.store(open, Ordering::SeqCst);
     if SHOWN.load(Ordering::SeqCst) {
         apply(sh);
+    }
+}
+
+// The card's page: how tall it wants to be.
+pub fn fit(sh: &Arc<Shared>, height: u32) {
+    let height = height.clamp(1, 2000);
+    if FIT.swap(height, Ordering::SeqCst) != height && SHOWN.load(Ordering::SeqCst) && FLY.load(Ordering::SeqCst) {
+        if let (Some(win), Some((pos, size, _))) = (window(sh), rect(sh)) {
+            lay(&win, pos, size);
+        }
     }
 }
 
@@ -959,7 +972,10 @@ fn rect(sh: &Shared) -> Option<((i32, i32), (i32, i32), f64)> {
     let bar = (BAR.0 * a.sf).round() as i32;
     let (w, h) = if FLY.load(Ordering::SeqCst) {
         let card = ((SIZE.0 * a.sf).round() as i32).min(gw / 3).max((260.0 * a.sf) as i32);
-        (card + bar + (BAR_GAP * a.sf).round() as i32, ((SIZE.1 * a.sf).round() as i32).min(gh - 2 * margin))
+        let most = ((SIZE.1 * a.sf).round() as i32).min(gh - 2 * margin);
+        let fit = FIT.load(Ordering::SeqCst) as f64;
+        let h = if fit > 0.0 { ((fit * a.sf).round() as i32).clamp((BAR.1 * a.sf).round() as i32, most.max(1)) } else { most };
+        (card + bar + (BAR_GAP * a.sf).round() as i32, h)
     } else {
         (bar, ((BAR.1 * a.sf).round() as i32).min(gh - 2 * margin))
     };
@@ -1036,8 +1052,9 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>, fre
             let d = dir(&sh);
             let full = crate::deckscan::Image::load(&d.join("full.png")).ok_or("no picture of the deck editor")?;
             let cards = crate::deckscan::slots(&full);
-            if cards.is_empty() {
-                return Err("no cards".into());
+            // Not the deck editor (a duel, a menu): said so, not a deck of nonsense.
+            if cards.len() < 20 {
+                return Err("notDeck".into());
             }
             let slots_dir = d.join("slots");
             let _ = std::fs::remove_dir_all(&slots_dir);
@@ -1542,9 +1559,12 @@ fn apply(sh: &Arc<Shared>) {
                 // Onto a display of another scale, Windows sizes it again a
                 // moment later (as scout.rs found): laid again once it has.
                 let again = win.clone();
+                let sh = sh.clone();
                 std::thread::spawn(move || {
                     for _ in 0..3 {
                         std::thread::sleep(Duration::from_millis(200));
+                        // Where it should be now (the card may have told its height meanwhile).
+                        let Some((pos, size, _)) = rect(&sh) else { return };
                         let now = again.outer_size().map(|s| (s.width as i32, s.height as i32)).unwrap_or(size);
                         let at = again.outer_position().map(|p| (p.x, p.y)).unwrap_or(pos);
                         if (now, at) != (size, pos) {

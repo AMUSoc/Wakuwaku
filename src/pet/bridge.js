@@ -71,6 +71,7 @@
     duelFly: open => send('duel_fly', { open: !!open }),
     duelScan: () => send('duel_scan'),
     duelWatch: on => send('duel_watch', { on: !!on }),
+    duelFit: height => send('duel_fit', { height: Math.max(1, Math.round(height)) }),
     duelDeckUse: id => send('duel_deck_use', { id: String(id) }),
     duelDeckDrop: id => send('duel_deck_drop', { id: String(id) }),
     duelDeckNew: () => send('duel_deck_new'),

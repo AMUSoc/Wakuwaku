@@ -750,3 +750,11 @@ pre.mine {
     box-shadow: 0 0 0 0 transparent;
   }
 }
+
+/* The duel's tools, then the deck's. */
+#bar .sep {
+  width: 70%;
+  margin: 2px auto;
+  border: 0;
+  border-top: 1px solid var(--line);
+}

@@ -240,9 +240,32 @@
       timer = setInterval(() => document.querySelectorAll('.line.busy').forEach(l => (l.textContent = T('duel.crewThinking', { s: secs(Date.now() - l.since) }))), 1000)
     const foot = mode === 'crew' ? [] : [T('duel.keyHint', { key: data.key || 'Alt+D' })]
     if (data.state === 'ready' && data.took) foot.push(T('duel.took', { s: secs(data.took) }))
+    // An answer some minutes old: said so, not taken for now.
+    const age = data.state === 'ready' && data.at ? Math.floor((Date.now() - data.at) / 60000) : 0
+    if (age >= 1) foot.push(T('duel.age', { n: age }))
     if (data.hand) foot.push(T('duel.handSet'))
     $('foot').textContent = foot.join(' · ')
     if (typing && $('crewQ')) $('crewQ').focus()
+    fitCard()
+  }
+
+  // The card as tall as what it holds (header, body, footer, its padding).
+  let fitted = 0
+  function fitCard() {
+    if (!data.fly) return
+    requestAnimationFrame(() => {
+      const p = $('panel')
+      const head = p.querySelector('header').offsetHeight
+      const foot = p.querySelector('footer').offsetHeight
+      // The body stretches to fill: its contents measured instead.
+      const r = document.createRange()
+      r.selectNodeContents($('body'))
+      const want = Math.ceil(head + r.getBoundingClientRect().height + foot + 16 + 12 + 12 + 16)
+      if (Math.abs(want - fitted) > 4) {
+        fitted = want
+        window.pet.duelFit(want)
+      }
+    })
   }
 
   // The bar: each button its tool; the card it opens out, again to put it in.
@@ -250,6 +273,10 @@
     for (const [id, key] of [['bWatch', 'duel.bar.watch'], ['bLook', 'duel.bar.look'], ['bCrew', 'duel.bar.crew'], ['bDeck', 'duel.bar.deck'], ['bScan', 'duel.bar.scan']]) $(id).querySelector('span').textContent = T(key)
     $('bScan').title = T('duel.bar.scanTip')
     $('bHide').title = T('duel.bar.hide')
+    $('bLook').title = T('duel.tip.look')
+    $('bWatch').title = T('duel.tip.watch')
+    $('bCrew').title = T('duel.tip.crew')
+    $('bDeck').title = T('duel.tip.deck')
     $('bLook').classList.toggle('on', !!data.fly && mode === 'look')
     $('bCrew').classList.toggle('on', !!data.fly && mode === 'crew')
     $('bLook').classList.toggle('busy', data.state === 'looking' || !!data.updating)
@@ -270,8 +297,8 @@
     draw()
   }
   // 看場面: a new look (the card shows it as it goes); out already, put away.
+  // 看場面: always a new look (its card's ✕ puts the card away).
   $('bLook').addEventListener('click', () => {
-    if (data.fly && mode === 'look' && data.state !== 'looking') return shut()
     open('look')
     if (data.state !== 'looking') window.pet.duelAgain()
   })
