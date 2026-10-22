@@ -286,6 +286,7 @@ fn run(sh: &Shared, prompt: &str, timeout: Duration) -> Result<String, String> {
     let mut cmd = std::process::Command::new(&exe);
     // The words on its input, never on a command line (claude is a .cmd shim).
     cmd.args(["-p", "--allowedTools", "Read", "WebSearch", "WebFetch"])
+        .args(crate::run::quiet(&folder))
         .current_dir(&folder)
         .stdin(std::fs::File::open(&prompt_file).map_err(|e| e.to_string())?)
         .stdout(std::process::Stdio::piped())

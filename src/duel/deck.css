@@ -701,3 +701,17 @@ header .title {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   z-index: 11;
 }
+
+/* The top row wraps, never runs into itself. */
+.deckpanel header {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.deckpanel header .title {
+  flex: 1 1 520px;
+}
+
+.lib {
+  flex-wrap: wrap;
+}

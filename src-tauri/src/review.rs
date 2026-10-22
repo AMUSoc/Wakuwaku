@@ -219,15 +219,32 @@ fn command_of(agent: &str, prompt_file: &str, prompt: &str) -> (&'static str, Ve
 }
 
 // One of them asked something else (the duel's four, duel.rs): the same way, the same shortness.
+// Its answer whole (its lines tidied, none cut short: she could not read
+// them cut, 2026-10-23), at most six lines.
 pub fn ask(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, String> {
-    run(agent, folder, prompt)
+    run_whole(agent, folder, prompt).map(|text| {
+        text.lines()
+            .map(|l| l.trim().trim_start_matches(['-', '*', '•', '·', ' ']).replace("**", ""))
+            .filter(|l| !l.is_empty())
+            .take(6)
+            .collect::<Vec<_>>()
+            .join("
+")
+    })
 }
 
 fn run(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, String> {
+    run_whole(agent, folder, prompt).map(|text| short(&text))
+}
+
+fn run_whole(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, String> {
     let prompt_file = folder.join(format!("{agent}.prompt.txt"));
     std::fs::write(&prompt_file, prompt).map_err(|e| e.to_string())?;
     let file = prompt_file.to_string_lossy().into_owned();
-    let (name, args, on_input) = command_of(agent, &file, prompt);
+    let (name, mut args, on_input) = command_of(agent, &file, prompt);
+    if name == "claude" {
+        args.extend(crate::run::quiet(folder));
+    }
     let exe = crate::run::find(name).ok_or(format!("{name} not found"))?;
     // Words as an argument never through cmd.exe.
     if agent == "agy" && !exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
@@ -277,7 +294,7 @@ fn run(agent: &str, folder: &std::path::Path, prompt: &str) -> Result<String, St
     if !ok {
         return Err(text.lines().next().unwrap_or("").chars().take(120).collect());
     }
-    Ok(short(text))
+    Ok(text.to_string())
 }
 
 // What is shown, whatever was written: its first three lines with words,

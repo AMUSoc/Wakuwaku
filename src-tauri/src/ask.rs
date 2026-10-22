@@ -98,11 +98,14 @@ fn run(sh: &Shared, agent: &str, prompt: &str) -> Result<String, String> {
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let prompt_file = folder.join("prompt.txt");
     std::fs::write(&prompt_file, prompt).map_err(|e| e.to_string())?;
-    let (name, args, on_input): (&str, Vec<String>, bool) = match agent {
+    let (name, mut args, on_input): (&str, Vec<String>, bool) = match agent {
         // agy takes the words only as an argument; it is an .exe (run.rs).
         "agy" => ("agy", vec!["-p".into(), prompt.into()], false),
         _ => ("claude", ["-p", "--allowedTools", "WebSearch", "WebFetch"].iter().map(|s| s.to_string()).collect(), true),
     };
+    if name == "claude" {
+        args.extend(crate::run::quiet(&folder));
+    }
     let exe = crate::run::find(name).ok_or_else(|| format!("{name} not found"))?;
     if !on_input && !exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
         return Err(format!("{name} is not an .exe here"));

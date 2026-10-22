@@ -275,6 +275,16 @@ fn prune(runs: &Path) {
 // --- The helper (her exe again, out of her job) ---------------------------------------
 
 // An agent's command, as found: on the PATH, or where each installs itself.
+// Her own runs of Claude (the duel helper and its four, the LoL review,
+// OP.GG, the phone's ask): with no hooks, so the user's own (a Discord
+// post on each finished turn, seen 2026-10-23) do not fire for them.
+// A settings file in the folder it runs in, given by --settings.
+pub fn quiet(folder: &std::path::Path) -> [String; 2] {
+    let file = folder.join("quiet-settings.json");
+    let _ = std::fs::write(&file, r#"{"disableAllHooks":true}"#);
+    ["--settings".into(), file.to_string_lossy().into_owned()]
+}
+
 pub fn find(name: &str) -> Option<PathBuf> {
     let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();

@@ -210,6 +210,7 @@ fn run(sh: &Shared, prompt: &str) -> Result<String, String> {
     let exe = crate::run::find("claude").ok_or("claude not found")?;
     let mut args: Vec<String> = vec!["-p".into(), "--mcp-config".into(), mcp.to_string_lossy().into_owned(), "--strict-mcp-config".into(), "--allowedTools".into()];
     args.extend(TOOLS.iter().map(|t| t.to_string()));
+    args.extend(crate::run::quiet(&folder));
     let mut cmd = std::process::Command::new(&exe);
     // The words on its input, never on a command line (claude is a .cmd shim).
     cmd.args(&args)

@@ -602,3 +602,73 @@ pre.mine {
   font-size: 13px;
   color: var(--muted);
 }
+
+/* The four, larger (she could not read them, 2026-10-23): one a row, the
+   pet's head larger, her words whole. */
+.crew {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.mate {
+  grid-template-columns: 56px 1fr;
+  column-gap: 10px;
+  padding: 10px 12px;
+}
+
+.mate .head {
+  width: 56px;
+  height: 61px;
+  background-size: 448px auto;
+}
+
+.mate .head.busy {
+  background-position-y: -424.7px;
+}
+
+.mate .head {
+  animation-name: idle56;
+}
+
+@keyframes idle56 {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: -336px;
+  }
+}
+
+.mate .who b {
+  font-size: 15px;
+}
+
+.mate .role {
+  font-size: 13px;
+}
+
+.mate .line {
+  font-size: 15px;
+  line-height: 1.55;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.mate .line .q {
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.mate .line .muted {
+  display: block;
+  font-size: 12px;
+}
+
+.askq {
+  font-size: 15px;
+}
+
+.askbox .chip {
+  font-size: 13px;
+  padding: 5px 10px;
+}
