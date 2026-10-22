@@ -863,10 +863,6 @@ async fn pet_ready(app: AppHandle, window: WebviewWindow) {
         duel::ready(&sh);
         return;
     }
-    if window.label() == ask::LABEL {
-        ask::ready(&sh);
-        return;
-    }
     if is_dock(&window) {
         dock::ready(&sh);
         dock::push_asks(&sh);
@@ -1016,27 +1012,6 @@ async fn scout_close(app: AppHandle) {
     let sh = shared(&app);
     sh.log("scout: clicked away");
     scout::show(&sh, false);
-}
-
-// Asking her (ask.rs): the words sent, what was asked forgotten, the box put away.
-#[tauri::command]
-async fn ask_send(app: AppHandle, agent: String, text: String) -> bool {
-    ask::send(&shared(&app), &agent, &text)
-}
-
-#[tauri::command]
-async fn ask_open(app: AppHandle) {
-    ask::show(&shared(&app), true);
-}
-
-#[tauri::command]
-async fn ask_clear(app: AppHandle) {
-    ask::clear(&shared(&app));
-}
-
-#[tauri::command]
-async fn ask_close(app: AppHandle) {
-    ask::show(&shared(&app), false);
 }
 
 // The folder the phone's files go to (mobile.rs drop), from the island's word of one.
@@ -1462,10 +1437,6 @@ fn main() {
             scout_close,
             duel_close,
             open_drops,
-            ask_send,
-            ask_open,
-            ask_clear,
-            ask_close,
             duel_again,
             scout_game,
             scout_rows,

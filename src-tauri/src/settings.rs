@@ -144,7 +144,6 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // Where an update is downloaded from first (updates.rs gitee_first).
         // The key for the game's ten (scout.rs): one it can take.
         "duelKey" => v.as_str().is_some_and(|k| k.len() <= 30 && crate::scout::parse_key(k).is_some()),
-        "askKey" => v.as_str().is_some_and(|k| k.len() <= 30 && crate::scout::parse_key(k).is_some()),
         "askAgent" => v.as_str().is_some_and(|a| crate::ask::AGENTS.contains(&a)),
         "duelHand" => v.as_str().is_some_and(|h| h.chars().count() <= 300),
         "scoutKey" => v.as_str().is_some_and(|k| k.len() <= 30 && crate::scout::parse_key(k).is_some()),

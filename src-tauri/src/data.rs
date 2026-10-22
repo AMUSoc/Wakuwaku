@@ -140,8 +140,7 @@ fn defaults() -> Map<String, Value> {
         "duel": true,
         "duelKey": "Alt+D",
         "duelHand": "",
-        // Asking her (ask.rs): its key, and the agent last asked.
-        "askKey": "Alt+Q",
+        // Asking her from the phone (ask.rs): the agent last asked.
         "askAgent": "claude",
         // The phone's page from elsewhere (mobile.rs): off, or listened for
         // at Tailscale's address ("tailscale"), at 0.0.0.0, or at one set;
@@ -212,6 +211,8 @@ fn adopt_out(settings: &mut Map<String, Value>) {
 // taskbar home, its look, layout, tray and pins, and her island's look on
 // it; the mail; the Windows look and wallpaper pages kept nothing.
 const GONE: &[&str] = &[
+    // Alt+Q's box on the computer (ask.rs), gone 2026-10-22.
+    "askKey",
     // One pet out, and where: each agent's now (adopt_out).
     "out",
     "x",

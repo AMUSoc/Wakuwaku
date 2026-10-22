@@ -484,11 +484,12 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 - **条款**：只看屏幕、不读内存、不替人按任何东西（Konami 禁止外挂操作或读取游戏）。
 - **实测（2026-10-22）**：没开游戏，用 `WAKUWAKU_DUEL_EXE=python.exe` 让一个显示三张蛇眼卡图的 tkinter 窗口当游戏；SendKeys 送 Alt+D：截图正确，23 秒认出「蛇眼（可能混黑魔女）」，三个断点（蛇眼灰烬的检索、原罪宝-蛇眼、黑魔女）合理；再按一次收起。真的 Master Duel（全屏时截不截得到）还没测。
 
-## 问她（ask.rs、src/ask/）
+## 问她（ask.rs，手机的「问她」）
 
-- 按 `askKey`（默认 `Alt+Q`，同一个低级键盘钩子）或托盘菜单「问她…」，在岛所在屏幕上方中间弹出一个框（窗口标签 `ask`，可以拿键盘焦点，Esc／✕／再按一次收起）。选 Claude（`claude -p --allowedTools WebSearch WebFetch`，提示从 stdin 进）或 Antigravity（`agy -p <字>`，它自带 Google 搜索），在 `data/ask/work/` 跑；`server.rs` 的 `is_hers` 把 `data/lol`、`data/duel`、`data/ask` 下面的会话都当成她自己的，不显示在岛上。
+- 手机卡片下面的「问她」（`AskView.kt`）走 `GET/POST /mobile/api/ask`、`POST /mobile/api/ask/clear`。选 Claude（`claude -p --allowedTools WebSearch WebFetch`，提示从 stdin 进）或 Antigravity（`agy -p <字>`，自带 Google 搜索），在 `data/ask/work/` 跑；`server.rs` 的 `is_hers` 把 `data/lol`、`data/duel`、`data/ask` 下面的会话都当成她自己的，不显示在岛上。
 - 提示要求繁中台湾用语、先讲结论、约 300 字、要即时资讯就先上网查并附来源、不改文件不跑指令。最近 3 轮问答（答案截 1500 字）一起送，所以可以追问；「新问题」清掉。180 秒逾时。上次选的 agent 记在 `askAgent`。
-- 实测（2026-10-22，测试实例）：Claude 12 秒答出台北气温（附来源）；接着用 Antigravity 问「那高雄呢？」，21 秒答出高雄气温，懂得接上一题。
+- 电脑上曾经有个 Alt+Q 的框（2026-10-22 做了一天），使用者说电脑上用不到，拿掉了；旧设定 `askKey` 在 `GONE` 里。
+- 实测（2026-10-22）：电脑上 Claude 12 秒答出台北气温、Antigravity 接着答高雄；手机上问「明天新北会不会下雨」，Claude 24 秒答出并附来源。
 
 ## 手机页（mobile.rs、src/mobile/）
 

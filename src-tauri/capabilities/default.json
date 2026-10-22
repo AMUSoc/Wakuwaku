@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Her page and the island's: events from the Rust side",
-  "windows": ["pet-*", "island", "dock", "scout", "duel", "ask"],
+  "windows": ["pet-*", "island", "dock", "scout", "duel"],
   "permissions": ["core:default"]
 }

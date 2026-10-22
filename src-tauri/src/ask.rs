@@ -1,26 +1,19 @@
-// Asking her a question: on a key (askKey, Alt+Q unless set) or her menu, a
-// box near the top of the island's display (src/ask/); the words go to
-// Claude (with the web to look things up) or Antigravity (Google's search
-// built in), the person's pick, as their non-interactive mode in her own
-// folder (data/ask/, not shown as a session: server.rs is_hers), and the
-// answer comes back in the box. The last few questions and answers go with
-// the next one, so it can be asked about further; 新問題 forgets them. Esc,
-// ✕ or the key again puts it away; what was asked stays until then.
+// Asking her a question, from the phone (mobile.rs /mobile/api/ask): the
+// words go to Claude (with the web to look things up) or Antigravity
+// (Google's search built in), the person's pick, as their non-interactive
+// mode in her own folder (data/ask/, not shown as a session: server.rs
+// is_hers). The last few questions and answers go with the next one, so it
+// can be asked about further; 新問題 forgets them. (The computer had a box of
+// its own on Alt+Q for a day: the user had no use for it there, 2026-10-22.)
 use std::io::Read;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use tauri::utils::config::BackgroundThrottlingPolicy;
-use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::Shared;
 
-pub const LABEL: &str = "ask";
-pub const DEFAULT_KEY: &str = "Alt+Q";
-const SIZE: (f64, f64) = (660.0, 540.0);
 const TIMEOUT: Duration = Duration::from_secs(180);
 // So many questions and answers go with the next one, each answer cut to so much.
 const KEPT: usize = 3;
@@ -37,27 +30,9 @@ static TURNS: Mutex<Vec<Turn>> = Mutex::new(Vec::new());
 // What is under way: the question, its agent and when it was sent.
 static PENDING: Mutex<Option<(String, String, u64)>> = Mutex::new(None);
 static ERROR: Mutex<Option<String>> = Mutex::new(None);
-static SHOWN: AtomicBool = AtomicBool::new(false);
-static READY: AtomicBool = AtomicBool::new(false);
-static CREATED: AtomicBool = AtomicBool::new(false);
-
-pub fn key_name(sh: &Shared) -> String {
-    sh.setting("askKey").as_str().filter(|k| crate::scout::parse_key(k).is_some()).unwrap_or(DEFAULT_KEY).to_string()
-}
 
 fn dir(sh: &Shared) -> PathBuf {
     sh.dir.join("ask").join("work")
-}
-
-// Its key, or her menu: up (with the keyboard), or away.
-pub fn press(sh: &Arc<Shared>) {
-    let on = !SHOWN.load(Ordering::SeqCst);
-    show(sh, on);
-}
-
-pub fn show(sh: &Arc<Shared>, on: bool) {
-    SHOWN.store(on, Ordering::SeqCst);
-    apply(sh);
 }
 
 // The words sent: to the agent picked, with the last few turns.
@@ -74,8 +49,7 @@ pub fn send(sh: &Arc<Shared>, agent: &str, question: &str) -> bool {
         *pending = Some((agent.to_string(), question.clone(), crate::now_ms()));
     }
     *ERROR.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    let _ = sh.change(json!({ "askAgent": agent }));
-    push(sh);
+    sh.change(json!({ "askAgent": agent }));
     let sh = sh.clone();
     let agent = agent.to_string();
     crate::spawn_named("ask", move || {
@@ -93,19 +67,17 @@ pub fn send(sh: &Arc<Shared>, agent: &str, question: &str) -> bool {
             Err(why) => *ERROR.lock().unwrap_or_else(|e| e.into_inner()) = Some(why),
         }
         *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        push(&sh);
     });
     true
 }
 
 // 新問題: what was asked forgotten.
-pub fn clear(sh: &Arc<Shared>) {
+pub fn clear() {
     if PENDING.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
         return;
     }
     TURNS.lock().unwrap_or_else(|e| e.into_inner()).clear();
     *ERROR.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    push(sh);
 }
 
 fn prompt_of(question: &str, turns: &[Turn]) -> String {
@@ -178,113 +150,17 @@ fn run(sh: &Shared, agent: &str, prompt: &str) -> Result<String, String> {
     Ok(text)
 }
 
-// --- The box -------------------------------------------------------------------------
-
-fn window(sh: &Shared) -> Option<WebviewWindow> {
-    sh.app.get_webview_window(LABEL)
-}
-
-// What has been asked and answered, what is under way: for the box, and
-// for the phone (mobile.rs: the same conversation on both).
+// What has been asked and answered, what is under way, for the phone.
 pub fn view(sh: &Shared) -> Value {
     let turns: Vec<Value> = TURNS.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|t| json!({ "agent": t.agent, "q": t.question, "a": t.answer })).collect();
     let pending = PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(a, q, at)| json!({ "agent": a, "q": q, "since": at }));
     json!({
         "lang": sh.lang(),
-        "key": key_name(sh),
         "agent": sh.setting("askAgent").as_str().filter(|a| AGENTS.contains(a)).unwrap_or("claude"),
         "turns": turns,
         "pending": pending,
         "error": *ERROR.lock().unwrap_or_else(|e| e.into_inner()),
-        "shown": SHOWN.load(Ordering::SeqCst),
     })
-}
-
-fn push(sh: &Shared) {
-    if READY.load(Ordering::SeqCst) {
-        let _ = sh.app.emit_to(LABEL, "ask:update", view(sh));
-    }
-}
-
-// Near the top of the island's display, in the middle.
-fn rect(sh: &Shared) -> Option<((i32, i32), (i32, i32), f64)> {
-    let a = crate::island::area(sh)?;
-    let w = ((SIZE.0 * a.sf).round() as i32).min(a.w);
-    let h = ((SIZE.1 * a.sf).round() as i32).min(a.h);
-    Some(((a.x + (a.w - w) / 2, a.y + (a.h as f64 * 0.12) as i32), (w, h), a.sf))
-}
-
-fn lay(win: &WebviewWindow, (x, y): (i32, i32), (w, h): (i32, i32)) {
-    let _ = win.set_position(PhysicalPosition::new(x, y));
-    let _ = win.set_size(PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
-    let _ = win.set_position(PhysicalPosition::new(x, y));
-}
-
-fn create(sh: &Arc<Shared>) {
-    if CREATED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let Some((pos, size, sf)) = rect(sh) else {
-        CREATED.store(false, Ordering::SeqCst);
-        return;
-    };
-    let sh = sh.clone();
-    std::thread::spawn(move || {
-        let built = WebviewWindowBuilder::new(&sh.app, LABEL, WebviewUrl::App("ask/index.html".into()))
-            .title("wakuwaku ask")
-            .inner_size(size.0 as f64 / sf, size.1 as f64 / sf)
-            .additional_browser_args(crate::browser_args(&sh))
-            .data_directory(crate::webview_dir(&sh))
-            .transparent(true)
-            .decorations(false)
-            .resizable(false)
-            .maximizable(false)
-            .minimizable(false)
-            .skip_taskbar(true)
-            .shadow(false)
-            .always_on_top(true)
-            .visible(false)
-            .background_throttling(BackgroundThrottlingPolicy::Disabled)
-            .build();
-        match built {
-            Ok(win) => {
-                lay(&win, pos, size);
-                let _ = win.set_ignore_cursor_events(false);
-                sh.own_window(&win);
-            }
-            Err(err) => sh.log(&format!("ask: could not make its window: {err}")),
-        }
-    });
-}
-
-// Its page is up: drawn, and shown if it was asked for meanwhile.
-pub fn ready(sh: &Arc<Shared>) {
-    READY.store(true, Ordering::SeqCst);
-    push(sh);
-    apply(sh);
-}
-
-fn apply(sh: &Arc<Shared>) {
-    let want = SHOWN.load(Ordering::SeqCst);
-    if want && !CREATED.load(Ordering::SeqCst) {
-        create(sh);
-        return;
-    }
-    if !READY.load(Ordering::SeqCst) {
-        return;
-    }
-    let Some(win) = window(sh) else { return };
-    if want {
-        if let Some((pos, size, _)) = rect(sh) {
-            lay(&win, pos, size);
-        }
-        let _ = win.show();
-        // The keyboard to its box (the page puts the caret in it on ask:update's shown).
-        let _ = win.set_focus();
-    } else {
-        let _ = win.hide();
-    }
-    push(sh);
 }
 
 #[cfg(test)]

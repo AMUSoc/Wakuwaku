@@ -32,22 +32,33 @@
   // --- The pets' frames -------------------------------------------------------
 
   const films = new Map() // agent -> { film, mood }
+  // Each agent's pet, kept from one drawing to the next (while its sheet is
+  // the same): made anew each time, it showed the sheet's first cell until
+  // the next tick put it on its frame, a jerk at every redraw, once a second
+  // while one worked (the user saw them "shake", 2026-10-22).
+  const kept = new Map() // agent -> { film, sprite }
   let frame = 0
+  function place(film, mood) {
+    const clip = CLIPS[MOOD_CLIP[mood] || 'idle']
+    const at = Math.floor(frame / Math.max(1, Math.round(clip.ms / 100))) % clip.frames
+    film.style.transform = `translate(${-at * CELL_W * SCALE}px, ${-clip.row * CELL_H * SCALE}px)`
+  }
   setInterval(() => {
     frame++
-    for (const { film, mood } of films.values()) {
-      const clip = CLIPS[MOOD_CLIP[mood] || 'idle']
-      const at = Math.floor(frame / Math.max(1, Math.round(clip.ms / 100))) % clip.frames
-      film.style.transform = `translate(${-at * CELL_W * SCALE}px, ${-clip.row * CELL_H * SCALE}px)`
-    }
+    for (const { film, mood } of films.values()) place(film, mood)
   }, 100)
 
   function head(row, mood) {
     const box = el('div', { class: 'head' })
     if (row.sprite) {
-      const film = el('div', { class: 'film' })
-      film.style.backgroundImage = `url("${row.sprite}")`
-      film.style.setProperty('--sheet-h', `${row.spriteVersion === 1 ? 1872 : 2288}px`)
+      let film = kept.get(row.agent)?.sprite === row.sprite ? kept.get(row.agent).film : null
+      if (!film) {
+        film = el('div', { class: 'film' })
+        film.style.backgroundImage = `url("${row.sprite}")`
+        film.style.setProperty('--sheet-h', `${row.spriteVersion === 1 ? 1872 : 2288}px`)
+        kept.set(row.agent, { film, sprite: row.sprite })
+      }
+      place(film, mood)
       box.append(film)
       films.set(row.agent, { film, mood })
     } else {

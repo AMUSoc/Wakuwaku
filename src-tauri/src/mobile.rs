@@ -784,7 +784,7 @@ pub fn handle(sh: &Shared, mut req: Request, local: bool) {
             json_reply(req, if ok { 200 } else { 409 }, json!({ "ok": ok }))
         }
         ("POST", "/mobile/api/ask/clear") if header(&req, "x-wakuwaku").is_some() => {
-            crate::ask::clear(&crate::shared(&sh.app));
+            crate::ask::clear();
             json_reply(req, 200, json!({ "ok": true }))
         }
         ("GET", "/mobile/api/job") => {
