@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: asset: http://asset.localhost; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>wakuwaku duel deck</title>
+    <link rel="stylesheet" href="duel.css" />
+    <link rel="stylesheet" href="deck.css" />
+  </head>
+  <body>
+    <div id="panel" class="deckpanel">
+      <header>
+        <div class="title">
+          <span id="label"></span>
+          <h1 id="head"></h1>
+        </div>
+        <button id="close" type="button" aria-label="close">✕</button>
+      </header>
+      <div class="cols">
+        <figure id="pic"></figure>
+        <main id="body"></main>
+      </div>
+      <footer>
+        <span id="foot"></span>
+        <button id="cancel" type="button"></button>
+        <button id="save" type="button" class="primary"></button>
+      </footer>
+    </div>
+    <script src="../pet/bridge.js"></script>
+    <script src="../shared/i18n.js"></script>
+    <script src="deck.js"></script>
+  </body>
+</html>

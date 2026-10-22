@@ -1,0 +1,134 @@
+/* Her deck to put right (deck.js): the picture read on the left, the rows on
+   the right; the unsure in yellow. */
+.deckpanel {
+  padding: 16px 18px 12px;
+  /* Solid: the game under it made the rows hard to read. */
+  background: #121726 !important;
+}
+
+.cols {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+#pic {
+  flex: 0 0 44%;
+  margin: 0;
+  overflow: auto;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+#pic img {
+  display: block;
+  width: 100%;
+  cursor: zoom-in;
+}
+
+#pic.zoom img {
+  width: 200%;
+  cursor: zoom-out;
+}
+
+#pic figcaption {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.cols main {
+  flex: 1;
+  margin: 0;
+  user-select: text;
+}
+
+.th {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+input.theme,
+input.name {
+  font: inherit;
+  color: var(--strong);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 8px;
+  outline: none;
+}
+
+input.theme {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+input:focus {
+  border-color: var(--claude);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  border-radius: 10px;
+}
+
+.row.unsure {
+  background: rgba(255, 179, 64, 0.14);
+  border: 1px solid rgba(255, 179, 64, 0.45);
+}
+
+.row input.name {
+  flex: 1;
+  min-width: 0;
+}
+
+.row .n {
+  width: 18px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--strong);
+}
+
+.row .step,
+.row .del {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.row .ok {
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--warn);
+  border-color: rgba(255, 179, 64, 0.5);
+}
+
+.row .del:hover {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.add {
+  margin: 4px 0 4px 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+footer button {
+  padding: 7px 16px;
+  font-size: 13px;
+}
+
+button.primary {
+  background: var(--claude);
+  border-color: var(--claude);
+  color: #fff;
+}

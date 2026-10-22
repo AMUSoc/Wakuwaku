@@ -869,6 +869,10 @@ async fn pet_ready(app: AppHandle, window: WebviewWindow) {
         duel::frames_ready(&sh);
         return;
     }
+    if window.label() == duel::DECK {
+        duel::deck_ready(&sh);
+        return;
+    }
     if is_dock(&window) {
         dock::ready(&sh);
         dock::push_asks(&sh);
@@ -1032,6 +1036,22 @@ async fn open_drops() {
 #[tauri::command]
 async fn duel_close(app: AppHandle) {
     duel::show(&shared(&app), false);
+}
+
+// Her deck to look over and put right (duel.rs).
+#[tauri::command]
+async fn duel_deck_open(app: AppHandle) {
+    duel::open_deck(&shared(&app));
+}
+
+#[tauri::command]
+async fn duel_deck_save(app: AppHandle, text: String) {
+    duel::save_deck(&shared(&app), &text);
+}
+
+#[tauri::command]
+async fn duel_deck_close(app: AppHandle) {
+    duel::close_deck(&shared(&app));
 }
 
 #[tauri::command]
@@ -1442,6 +1462,9 @@ fn main() {
             pet_answer,
             scout_close,
             duel_close,
+            duel_deck_open,
+            duel_deck_save,
+            duel_deck_close,
             open_drops,
             duel_again,
             scout_game,

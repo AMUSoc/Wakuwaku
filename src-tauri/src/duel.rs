@@ -122,12 +122,17 @@ fn look(sh: &Arc<Shared>, pid: u32) {
         let took = crate::now_ms().saturating_sub(started);
         match answer {
             Ok(found) if found["screen"] == "deck" => {
-                let deck: String = found["myDeck"].as_str().unwrap_or("").chars().take(1500).collect();
+                let deck = deck_text(&found);
                 sh.log(&format!("duel: her deck read in {} s", took / 1000));
+                // The picture it was read off, for her to check it by (the deck editor).
+                let _ = std::fs::copy(dir(&sh).join("work").join("shot.png"), dir(&sh).join("deck.png"));
                 if !deck.trim().is_empty() {
                     sh.change(json!({ "duelDeck": deck }));
                 }
                 publish(&sh, json!({ "state": "deck", "deck": deck, "took": took, "at": crate::now_ms() }));
+                // To look over at once.
+                show(&sh, false);
+                open_deck(&sh);
             }
             Ok(found) => {
                 sh.log(&format!("duel: {} in {} s", found["deck"].as_str().unwrap_or("?"), took / 1000));
@@ -174,6 +179,35 @@ fn last_guess() -> Option<Value> {
     LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(_, at)| crate::now_ms().saturating_sub(*at) < GUESS_MS).map(|(v, _)| v.clone())
 }
 
+// A deck as read, in the lines her deck editor (src/duel/deck.js) and the
+// prompt both read: 主題, then each card "name ×n", "？" after one not sure.
+pub fn deck_text(found: &Value) -> String {
+    let rows = |part: &Value| -> Vec<String> {
+        part.as_array()
+            .map(|cards| {
+                cards
+                    .iter()
+                    .filter_map(|c| {
+                        let name = c["name"].as_str()?.trim();
+                        let n = c["n"].as_u64().unwrap_or(1).clamp(1, 3);
+                        (!name.is_empty()).then(|| format!("{name} ×{n}{}", if c["sure"] == false { " ？" } else { "" }))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut lines = Vec::new();
+    if let Some(theme) = found["theme"].as_str().filter(|t| !t.trim().is_empty()) {
+        lines.push(format!("主題：{}", theme.trim()));
+    }
+    lines.push("【主要牌組】".to_string());
+    lines.extend(rows(&found["main"]));
+    lines.push("【額外牌組】".to_string());
+    lines.extend(rows(&found["extra"]));
+    let text = lines.join("\n");
+    text.chars().take(1500).collect()
+}
+
 fn deck_of(sh: &Shared) -> String {
     sh.setting("duelDeck").as_str().unwrap_or("").trim().chars().take(1500).collect()
 }
@@ -185,9 +219,9 @@ fn hand_of(sh: &Shared) -> String {
 pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
     let mut p = String::from(
         "你是遊戲王 Master Duel 的對戰助手。先用 Read 讀這張遊戲截圖：shot.png（在目前資料夾，就是遊戲畫面本身）。\n\n\
-         【如果這是牌組編輯畫面】（上面主要牌組、下面額外牌組的卡片格子）：這是「我」的牌組。盡量認出每張卡，只回\n\
-         {\"screen\":\"deck\",\"myDeck\":\"牌組主題：…\\n主要牌組：卡名×張數、…\\n額外牌組：…\"}\n\
-         認不出的卡寫「？」，不要猜很冷門的卡。\n\n\
+         【如果這是牌組編輯畫面】（上面主要牌組、下面額外牌組的卡片格子）：這是「我」的牌組。盡量認出每張卡（同一張多張就合併），只回\n\
+         {\"screen\":\"deck\",\"theme\":\"牌組主題\",\"main\":[{\"name\":\"卡名\",\"n\":張數,\"sure\":true}],\"extra\":[{\"name\":\"卡名\",\"n\":張數,\"sure\":false}]}\n\
+         沒把握的 sure 寫 false，名字寫你最有可能的猜測（我會自己對照截圖改）。\n\n\
          【如果這是對戰畫面】畫面上方是對手的場地，下方是我的；左邊可能打開著某張卡的說明，中間可能正跳出「是否連鎖」。\n\
          對手的格子這樣叫（照畫面上的左右）：上面那排魔法陷阱區 S1～S5（左到右），下一排怪獸區 M1～M5（左到右），\
          對手怪獸區右邊那格場地區 F，中間兩格額外怪獸區 EL（左）、ER（右）。在手牌、墓地、除外或連鎖中的寫 hand、gy、ban、chain。\n\
@@ -555,6 +589,90 @@ fn create(sh: &Arc<Shared>) {
     });
 }
 
+// --- Her deck, to look over ---------------------------------------------------------------
+
+pub const DECK: &str = "dueldeck";
+static DECK_MADE: AtomicBool = AtomicBool::new(false);
+static DECK_READY: AtomicBool = AtomicBool::new(false);
+static DECK_WANTED: AtomicBool = AtomicBool::new(false);
+
+fn deck_view(sh: &Shared) -> Value {
+    let picture = dir(sh).join("deck.png");
+    let url = picture.is_file().then(|| {
+        let _ = sh.app.asset_protocol_scope().allow_file(&picture);
+        // A new picture each time: its time in the address.
+        let at = std::fs::metadata(&picture).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+        format!("{}?v={at}", crate::data::asset_url(&picture))
+    });
+    json!({ "lang": sh.lang(), "deck": deck_of(sh), "picture": url })
+}
+
+// Up, in the middle of the display the game is on (it takes the keyboard: names are typed in it).
+pub fn open_deck(sh: &Arc<Shared>) {
+    DECK_WANTED.store(true, Ordering::SeqCst);
+    let a = game_pid().and_then(os::window_rect).and_then(|r| sh.screens().near((r.l + r.r) / 2, (r.t + r.b) / 2)).or_else(|| crate::island::area(sh));
+    let Some(a) = a else { return };
+    let (w, h) = (((920.0 * a.sf) as i32).min(a.w - 40), ((720.0 * a.sf) as i32).min(a.h - 40));
+    let pos = (a.x + (a.w - w) / 2, a.y + (a.h - h) / 2);
+    if !DECK_MADE.swap(true, Ordering::SeqCst) {
+        let sh = sh.clone();
+        let sf = a.sf;
+        std::thread::spawn(move || {
+            let built = WebviewWindowBuilder::new(&sh.app, DECK, WebviewUrl::App("duel/deck.html".into()))
+                .title("wakuwaku duel deck")
+                .inner_size(w as f64 / sf, h as f64 / sf)
+                .additional_browser_args(crate::browser_args(&sh))
+                .data_directory(crate::webview_dir(&sh))
+                .transparent(true)
+                .decorations(false)
+                .resizable(false)
+                .skip_taskbar(true)
+                .shadow(false)
+                .always_on_top(true)
+                .visible(false)
+                .build();
+            match built {
+                Ok(win) => {
+                    lay(&win, pos, (w, h));
+                    let _ = win.set_ignore_cursor_events(false);
+                    sh.own_window(&win);
+                }
+                Err(err) => sh.log(&format!("duel: could not make its deck window: {err}")),
+            }
+        });
+        return;
+    }
+    if let Some(win) = sh.app.get_webview_window(DECK) {
+        lay(&win, pos, (w, h));
+        if DECK_READY.load(Ordering::SeqCst) {
+            let _ = sh.app.emit_to(DECK, "duel:deck", deck_view(sh));
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    }
+}
+
+pub fn deck_ready(sh: &Arc<Shared>) {
+    DECK_READY.store(true, Ordering::SeqCst);
+    if DECK_WANTED.load(Ordering::SeqCst) {
+        open_deck(sh);
+    }
+}
+
+pub fn close_deck(sh: &Shared) {
+    DECK_WANTED.store(false, Ordering::SeqCst);
+    if let Some(win) = sh.app.get_webview_window(DECK) {
+        let _ = win.hide();
+    }
+}
+
+pub fn save_deck(sh: &Arc<Shared>, text: &str) {
+    let text: String = text.chars().take(1500).collect();
+    sh.change(json!({ "duelDeck": text }));
+    sh.log("duel: her deck put right by hand");
+    close_deck(sh);
+}
+
 // --- The frames on the game ------------------------------------------------------------
 
 // The zones to frame from an answer: each card to stop that is on the field,
@@ -704,6 +822,12 @@ mod tests {
         assert!(p.contains("我的牌組（我自己記的") && p.contains("天叢雲之巳劍×2") && p.contains("\"zone\""));
         assert!(p.contains("我的牌組帶的手坑／斷點卡：灰流麗、增殖的G"));
         assert!(p.contains("可能是「蛇眼」（看到：蛇眼灰燼、原罪寶-蛇眼）"));
+    }
+
+    #[test]
+    fn a_deck_read_as_lines_to_put_right() {
+        let found = json!({ "screen": "deck", "theme": "巳劍", "main": [ { "name": "灰流麗", "n": 3, "sure": true }, { "name": "天叢雲之巳劍", "n": 2, "sure": false }, { "name": " ", "n": 1 } ], "extra": [ { "name": "S:P 小夜騎士", "n": 9 } ] });
+        assert_eq!(deck_text(&found), "主題：巳劍\n【主要牌組】\n灰流麗 ×3\n天叢雲之巳劍 ×2 ？\n【額外牌組】\nS:P 小夜騎士 ×3");
     }
 
     #[test]

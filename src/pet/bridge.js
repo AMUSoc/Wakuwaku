@@ -60,6 +60,10 @@
     // Master Duel's helper (duel.rs), in its panel's window.
     onDuel: on('duel:update'),
     onDuelFrames: on('duel:frames'),
+    onDuelDeck: on('duel:deck'),
+    duelDeckOpen: () => send('duel_deck_open'),
+    duelDeckSave: text => send('duel_deck_save', { text: String(text || '') }),
+    duelDeckClose: () => send('duel_deck_close'),
     duelClose: () => send('duel_close'),
     duelAgain: () => send('duel_again'),
     // The folder the phone's files go to (mobile.rs drop).

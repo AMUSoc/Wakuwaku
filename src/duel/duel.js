@@ -25,6 +25,7 @@
     clearInterval(timer)
     $('panel').hidden = false
     $('again').textContent = T('duel.again')
+    $('mydeck').textContent = T('deck.button')
     $('again').disabled = data.state === 'looking'
     const body = $('body')
     const f = data.found || {}
@@ -115,6 +116,7 @@
 
   $('close').addEventListener('click', () => window.pet.duelClose())
   $('again').addEventListener('click', () => window.pet.duelAgain())
+  $('mydeck').addEventListener('click', () => window.pet.duelDeckOpen())
   window.pet.onDuel(payload => {
     data = payload || { state: 'none' }
     document.documentElement.lang = data.lang || 'zh-TW'

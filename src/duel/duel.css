@@ -311,7 +311,8 @@ footer {
   flex: 1;
 }
 
-#again {
+#again,
+#mydeck {
   padding: 6px 14px;
   font-size: 13px;
 }
