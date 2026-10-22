@@ -102,11 +102,18 @@ pub fn fly(sh: &Arc<Shared>, open: bool) {
 
 // The bar's 掃描牌組: the deck editor pictured and read card by card, a new deck.
 pub fn scan(sh: &Arc<Shared>) {
-    let Some(pid) = game_pid() else { return };
-    let Some((hwnd, rect)) = os::game_window(pid) else { return };
+    // Not done: the deck window says why.
+    let fail = |why: &str| {
+        open_deck(sh);
+        let mut view = deck_view(sh);
+        view["error"] = json!(why);
+        let _ = sh.app.emit_to(DECK, "duel:deck", view);
+    };
+    let Some(pid) = game_pid() else { return fail("noGame") };
+    let Some((hwnd, rect)) = os::game_window(pid) else { return fail("noGame") };
     let Some((w, h, rgb)) = os::capture_game(hwnd, rect) else {
         sh.log("duel: the game's window could not be pictured");
-        return;
+        return fail("picture");
     };
     let _ = std::fs::create_dir_all(dir(sh));
     let _ = crate::deckscan::Image { w, h, rgb }.save(&dir(sh).join("full.png"));
@@ -1088,7 +1095,9 @@ pub fn save_deck(sh: &Arc<Shared>, deck: &Value) {
     let n = learnt.len();
     crate::deckscan::remember(&dir(sh), learnt);
     sh.log(&format!("duel: her deck put right by hand, {n} cards' looks learnt"));
-    close_deck(sh);
+    let mut view = deck_view(sh);
+    view["saved"] = deck["name"].clone();
+    let _ = sh.app.emit_to(DECK, "duel:deck", view);
 }
 
 // --- The frames on the game ------------------------------------------------------------

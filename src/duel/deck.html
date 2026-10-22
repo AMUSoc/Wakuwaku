@@ -16,6 +16,7 @@
             <select id="decks"></select>
             <input id="deckName" spellcheck="false" autocomplete="off" />
             <button id="newDeck" type="button"></button>
+            <button id="scanGame" type="button" class="primary"></button>
             <button id="dropDeck" type="button"></button>
           </div>
         </div>
@@ -40,6 +41,8 @@
         <button id="save" type="button" class="primary"></button>
       </footer>
     </div>
+    <div id="ask" hidden><div class="askcard"><p id="askText"></p><div class="askbtns"><button id="askSave" type="button" class="primary"></button><button id="askDrop" type="button"></button><button id="askBack" type="button"></button></div></div></div>
+    <div id="toast" hidden></div>
     <script src="../pet/bridge.js"></script>
     <script src="../shared/i18n.js"></script>
     <script src="deck.js"></script>

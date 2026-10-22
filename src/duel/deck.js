@@ -15,6 +15,11 @@
   // Her saved decks ({ id, name, main }); the one in the window is deck.lib.
   let decks = []
   let dropping = 0
+  // The deck as last loaded or saved: anything else is not saved yet.
+  let kept = ''
+  const asSaved = () => JSON.stringify({ theme: (deck.theme || '').trim(), name: (deck.name || '').trim(), cards: deck.cards.map(c => [c.slot, c.name.trim(), c.sure, c.id || null]) })
+  // Changed since, or never kept among her decks at all.
+  const unsaved = () => (asSaved() !== kept || !deck.lib) && deck.cards.some(c => c.name.trim())
   let pictures = {}
   // Slot → the slots that look like it (copies of the card, duel.rs).
   let alike = {}
@@ -395,13 +400,17 @@
     const grids = $('grids')
     const scroll = grids.scrollTop
     if (!deck.cards.length && !scanning) {
-      grids.replaceChildren(el('div', 'empty', T(hasPicture ? 'deck.notRead' : 'deck.noPic')), section('m'), section('e'))
+      // Nothing yet: read it from the game, the big way in.
+      const go = el('button', 'primary bigscan', T('deck.scanGame'))
+      go.onclick = scanGame
+      grids.replaceChildren(el('div', 'empty', el('p', '', T('deck.emptyHow')), go), section('m'), section('e'))
     } else {
       grids.replaceChildren(section('m'), section('e'))
     }
     grids.scrollTop = scroll
     $('side').replaceChildren(side())
-    $('status').textContent = scanning ? '' : error ? T('deck.failed', { why: error }) : ''
+    $('status').textContent = scanning ? '' : error === 'noGame' ? T('deck.noGame') : error === 'picture' ? T('deck.noShot') : error ? T('deck.failed', { why: error }) : ''
+
     $('scan').hidden = !scanning
     if (scanning) {
       const tick = () => ($('scanText').textContent = T('deck.scanning', { s: Math.max(0, Math.round((Date.now() - scanning) / 1000)) }))
@@ -412,11 +421,53 @@
     $('foot').textContent = unsure ? T('deck.unsure', { n: unsure }) : T('deck.allSure')
   }
 
-  $('close').onclick = () => window.pet.duelDeckClose()
-  $('cancel').onclick = () => window.pet.duelDeckClose()
-  $('decks').onchange = e => e.target.value && window.pet.duelDeckUse(e.target.value)
+  // Before what would lose what is not saved: save it, leave it, or stay.
+  function leaving(then) {
+    if (!unsaved()) return then()
+    $('askText').textContent = T('deck.unsavedAsk', { name: (deck.name || '').trim() || T('deck.unsaved') })
+    $('askSave').textContent = T('deck.save')
+    $('askDrop').textContent = T('deck.dontSave')
+    $('askBack').textContent = T('deck.back')
+    $('ask').hidden = false
+    const done = () => ($('ask').hidden = true)
+    $('askSave').onclick = () => (done(), save(), then())
+    $('askDrop').onclick = () => (done(), then())
+    $('askBack').onclick = () => (done(), drawLib())
+  }
+
+  let toastTimer = 0
+  function toast(text) {
+    $('toast').textContent = text
+    $('toast').hidden = false
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => ($('toast').hidden = true), 2600)
+  }
+
+  function save() {
+    deck.name = $('deckName').value.trim()
+    window.pet.duelDeckSave({ theme: $('theme').value.trim(), name: deck.name, cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure, id: c.id || null, remembered: !!c.remembered })) })
+  }
+
+  // From the game: its deck editor pictured and read, a new deck.
+  function scanGame() {
+    leaving(() => {
+      scanning = Date.now()
+      error = null
+      draw()
+      window.pet.duelScan()
+    })
+  }
+
+  const close = () => leaving(() => window.pet.duelDeckClose())
+  $('close').onclick = close
+  $('cancel').onclick = close
+  $('decks').onchange = e => {
+    const id = e.target.value
+    if (id) leaving(() => window.pet.duelDeckUse(id))
+  }
   $('deckName').addEventListener('input', e => (deck.name = e.target.value))
-  $('newDeck').onclick = () => window.pet.duelDeckNew()
+  $('newDeck').onclick = () => leaving(() => window.pet.duelDeckNew())
+  $('scanGame').onclick = scanGame
   $('dropDeck').onclick = () => {
     if (!deck.lib) return
     if (!dropping) {
@@ -427,7 +478,7 @@
     dropping = 0
     window.pet.duelDeckDrop(deck.lib)
   }
-  $('save').onclick = () => window.pet.duelDeckSave({ theme: $('theme').value.trim(), name: $('deckName').value.trim(), cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure, id: c.id || null, remembered: !!c.remembered })) })
+  $('save').onclick = save
   $('allok').onclick = () => {
     for (const c of deck.cards) (c.sure = true), (c.remembered = false)
     draw()
@@ -442,7 +493,9 @@
   }
   $('theme').addEventListener('input', e => (deck.theme = e.target.value))
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') picked ? ((picked = null), draw()) : window.pet.duelDeckClose()
+    if (e.key !== 'Escape') return
+    if (!$('ask').hidden) return ($('ask').hidden = true)
+    picked ? ((picked = null), draw()) : close()
   })
   // Dragged by its top (Tauri's drag region: on the header and what is
   // written in it, not its buttons and boxes).
@@ -455,6 +508,8 @@
     document.documentElement.lang = lang
     for (const [id, key] of [['label', 'deck.label'], ['cancel', 'deck.cancel'], ['save', 'deck.save'], ['allok', 'deck.allOk'], ['rescan', 'deck.rescan'], ['themeLabel', 'deck.theme']]) $(id).textContent = T(key)
     $('theme').placeholder = T('deck.themePh')
+    $('scanGame').textContent = T('deck.scanGameShort')
+    $('scanGame').title = T('deck.emptyHow')
     const d = p.deck || {}
     decks = p.decks || []
     deck = { theme: d.theme || '', name: d.name || '', lib: d.lib || null, cards: (d.cards || []).map(c => ({ slot: String(c.slot), name: String(c.name || ''), sure: c.sure !== false, id: c.id || null, remembered: !!c.remembered })) }
@@ -464,6 +519,8 @@
     hasPicture = !!p.hasPicture
     error = p.error || null
     if (picked && !deck.cards.some(c => c.slot === picked)) picked = null
+    kept = asSaved()
+    if (p.saved) toast(T('deck.savedAs', { name: p.saved }))
     draw()
   })
 })()

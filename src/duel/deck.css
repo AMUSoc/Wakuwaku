@@ -629,3 +629,75 @@ header .title {
   border-color: var(--bad);
   color: var(--bad);
 }
+
+/* Nothing yet: the way to read it from the game. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.empty p {
+  margin: 0;
+}
+
+.bigscan {
+  padding: 10px 18px !important;
+  font-size: 15px;
+}
+
+/* Not saved: save, leave it, or stay. */
+#ask {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 10, 18, 0.6);
+  border-radius: 18px;
+  z-index: 10;
+}
+
+#ask[hidden],
+#toast[hidden] {
+  display: none;
+}
+
+.askcard {
+  max-width: 380px;
+  padding: 18px 20px;
+  border-radius: 16px;
+  background: #1a2034;
+  border: 1px solid var(--line);
+  color: var(--strong);
+}
+
+.askcard p {
+  margin: 0 0 14px;
+  line-height: 1.6;
+}
+
+.askbtns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.askbtns button {
+  padding: 7px 14px;
+}
+
+/* Saved: said so. */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  padding: 9px 18px;
+  border-radius: 999px;
+  background: var(--good);
+  color: #08200f;
+  font-weight: 700;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  z-index: 11;
+}
