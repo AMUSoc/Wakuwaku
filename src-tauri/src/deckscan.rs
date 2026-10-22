@@ -278,13 +278,16 @@ pub fn recall<'a>(known: &'a [Known], look: &[f32]) -> Option<&'a Known> {
     known.iter().map(|k| (alike(&k.look, look), k)).filter(|(s, _)| *s >= ALIKE).max_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, k)| k)
 }
 
-// These learnt: one like a known look puts it right (she knows better now),
-// others added; the last 3000 kept.
-pub fn remember(dir: &Path, learnt: Vec<Known>) {
+// These learnt, each with whether she put that card right herself: only
+// then does it change what a known look is (a save of names she had not
+// touched once taught it 25 wrong ones, 2026-10-23); otherwise only looks
+// not known yet are added. The last 3000 kept.
+pub fn remember(dir: &Path, learnt: Vec<(Known, bool)>) {
     let mut all = known(dir);
-    for k in learnt {
+    for (k, taught) in learnt {
         match all.iter_mut().find(|o| alike(&o.look, &k.look) >= ALIKE) {
-            Some(o) => *o = k,
+            Some(o) if taught => *o = k,
+            Some(_) => {}
             None => all.push(k),
         }
     }
@@ -349,12 +352,18 @@ mod tests {
         assert!(alike(&print(&card), &print(&other)) < ALIKE);
         let dir = std::env::temp_dir().join(format!("wakuwaku-known-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        remember(&dir, vec![Known { look: print(&card), name: "灰流麗".into(), id: Some(14558127) }]);
-        // Said again otherwise: put right, not added.
-        remember(&dir, vec![Known { look: print(&shiny), name: "灰流麗".into(), id: Some(14558127) }, Known { look: print(&other), name: "增殖的Z".into(), id: None }]);
+        remember(&dir, vec![(Known { look: print(&card), name: "灰流麗".into(), id: Some(14558127) }, false)]);
+        // Said again: put right, not added; a new look added.
+        remember(&dir, vec![(Known { look: print(&shiny), name: "灰流麗".into(), id: Some(14558127) }, true), (Known { look: print(&other), name: "增殖的Z".into(), id: None }, false)]);
         let k = known(&dir);
         assert_eq!(k.len(), 2);
         assert_eq!(recall(&k, &print(&card)).map(|k| k.id), Some(Some(14558127)));
+        // Saved under another name without her touching it: what is known stays.
+        remember(&dir, vec![(Known { look: print(&card), name: "巳劍之尊 佐士".into(), id: None }, false)]);
+        assert_eq!(recall(&known(&dir), &print(&card)).map(|k| k.name.clone()).as_deref(), Some("灰流麗"));
+        // Put right by her: it changes.
+        remember(&dir, vec![(Known { look: print(&card), name: "無限泡影".into(), id: None }, true)]);
+        assert_eq!(recall(&known(&dir), &print(&card)).map(|k| k.name.clone()).as_deref(), Some("無限泡影"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -15,6 +15,9 @@
   // Her saved decks ({ id, name, main }); the one in the window is deck.lib.
   let decks = []
   let dropping = 0
+  // The cards she put right herself since loading (their slots): only these
+  // may change what a card's look is known as (duel.rs save_deck).
+  const taught = new Set()
   // The deck as last loaded or saved: anything else is not saved yet.
   let kept = ''
   const asSaved = () => JSON.stringify({ theme: (deck.theme || '').trim(), name: (deck.name || '').trim(), cards: deck.cards.map(c => [c.slot, c.name.trim(), c.sure, c.id || null]) })
@@ -204,6 +207,7 @@
         if (x === c || (alike[c.slot] || []).includes(x.slot)) {
           if (x !== c && (x.name !== card.name || !x.sure)) alsoChanged++
           Object.assign(x, { name: card.name, id: card.id, sure: true, remembered: false })
+          taught.add(x.slot)
         }
       draw()
     }
@@ -217,6 +221,7 @@
       )
     }
     name.addEventListener('input', () => {
+      taught.add(c.slot)
       c.name = name.value
       c.id = null
       const n = $('grids').querySelector('.tile.picked .nm')
@@ -247,11 +252,11 @@
     })
     const namedAlike = deck.cards.filter(x => x !== c && x.name.trim() && x.name.trim() === was.trim())
     const ok = el('button', 'act good', c.sure ? T('deck.markUnsure') : T('deck.ok'))
-    ok.onclick = () => ((c.sure = !c.sure), (c.remembered = false), draw())
+    ok.onclick = () => ((c.sure = !c.sure), (c.remembered = false), taught.add(c.slot), draw())
     const same = namedAlike.length ? el('button', 'act', T('deck.sameAll', { n: namedAlike.length })) : null
     if (same)
       same.onclick = () => {
-        for (const x of deck.cards) if (x.name.trim() === was.trim()) Object.assign(x, { name: c.name, id: c.id, sure: true })
+        for (const x of deck.cards) if (x.name.trim() === was.trim()) Object.assign(x, { name: c.name, id: c.id, sure: true }), taught.add(x.slot)
         draw()
       }
     const del = el('button', 'act bad', T('deck.remove'))
@@ -445,7 +450,7 @@
 
   function save() {
     deck.name = $('deckName').value.trim()
-    window.pet.duelDeckSave({ theme: $('theme').value.trim(), name: deck.name, cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure, id: c.id || null, remembered: !!c.remembered })) })
+    window.pet.duelDeckSave({ theme: $('theme').value.trim(), name: deck.name, taught: [...taught], cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure, id: c.id || null, remembered: !!c.remembered })) })
   }
 
   // From the game: its deck editor pictured and read, a new deck.
@@ -521,6 +526,7 @@
     if (picked && !deck.cards.some(c => c.slot === picked)) picked = null
     kept = asSaved()
     if (p.saved) toast(T('deck.savedAs', { name: p.saved }))
+    taught.clear()
     draw()
   })
 })()

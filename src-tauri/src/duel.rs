@@ -1050,6 +1050,7 @@ pub fn new_deck(sh: &Arc<Shared>) {
 // Put right by hand: { theme, name, cards: [{ slot, name, sure }] }; kept
 // among her saved decks by its name (the one it came from, or one so named).
 pub fn save_deck(sh: &Arc<Shared>, deck: &Value) {
+    let deck_in = deck;
     let cards: Vec<Value> = deck["cards"]
         .as_array()
         .into_iter()
@@ -1081,16 +1082,20 @@ pub fn save_deck(sh: &Arc<Shared>, deck: &Value) {
     copy_dir(&dir(sh).join("slots"), &keep.join("slots"));
     let _ = std::fs::write(decks_dir(sh).join("active"), &lib);
     sh.change(json!({ "duelDeck": crate::deckscan::text_of(&deck) }));
-    // Each card she marked right, its look learnt: known the next time it is read.
+    // Each card she marked right, its look learnt: known the next time it is
+    // read. A look already known takes another name only from a card she put
+    // right herself in the window this time (`taught`, its slots).
+    let taught: Vec<&str> = deck_in["taught"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     let slots = dir(sh).join("slots");
-    let learnt: Vec<crate::deckscan::Known> = deck["cards"]
+    let learnt: Vec<(crate::deckscan::Known, bool)> = deck["cards"]
         .as_array()
         .into_iter()
         .flatten()
         .filter(|c| c["sure"] == true && !c["name"].as_str().unwrap_or("").is_empty())
         .filter_map(|c| {
             let img = crate::deckscan::Image::load(&slots.join(format!("{}.png", c["slot"].as_str()?)))?;
-            Some(crate::deckscan::Known { look: crate::deckscan::print(&img), name: c["name"].as_str()?.to_string(), id: c["id"].as_u64() })
+            let slot = c["slot"].as_str()?;
+            Some((crate::deckscan::Known { look: crate::deckscan::print(&img), name: c["name"].as_str()?.to_string(), id: c["id"].as_u64() }, taught.contains(&slot)))
         })
         .collect();
     let n = learnt.len();
