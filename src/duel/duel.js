@@ -24,6 +24,7 @@
   const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok', agy: 'Antigravity' }
   let asking = null // the agent whose question box is open
   let mode = 'look' // the card beside the bar: the look or the four
+  let lastAt = 0
   let typed = '' // what is typed in it, kept through redraws
 
   // A pet's head: the first cells of her sheet, idle, or running while she thinks.
@@ -33,6 +34,36 @@
     if (m.sprite) h.style.backgroundImage = `url("${m.sprite}")`
     else h.append(el('span', '', NAMES[m.agent][0]))
     return h
+  }
+
+  // The watch: on or resting, updating, and the cards the duel has shown.
+  function watchBlock() {
+    const w = data.watch || {}
+    if (!w.on) return []
+    const line = el('div', `watchline${w.resting ? ' resting' : ''}`, w.resting ? T('duel.watchResting') : T('duel.watchOn'))
+    if (data.updating) {
+      const up = el('span', 'updating', T('duel.updating', { s: secs(Date.now() - data.updating) }))
+      up.since = data.updating
+      line.append(up)
+    }
+    const out = [line]
+    if ((w.seen || []).length) out.push(el('div', 'seen', el('span', 'muted', T('duel.matchSeen')), w.seen.slice(-20).map(c => el('span', 'chip', c))))
+    return out
+  }
+
+  // The deck guessed, looked up on the web: how it plays, where to stop it.
+  function researchBlock() {
+    const r = (data.watch || {}).research
+    if (!r) return []
+    if (!r.found) return [el('p', 'muted', T('duel.researching', { deck: r.deck }))]
+    if (r.found.failed) return []
+    const v = r.found
+    return [
+      el('h2', '', T('duel.research', { deck: v.deck || r.deck })),
+      v.plan ? el('p', '', v.plan) : null,
+      ...(v.chokes || []).slice(0, 4).map(c => el('div', 'choke', el('b', '', c.card || ''), c.effect ? el('span', 'effect', `・${c.effect}`) : null, c.why ? el('div', 'why', c.why) : null)),
+      (v.traps || []).length ? el('p', 'muted', T('duel.theirTraps', { cards: v.traps.join('、') })) : null,
+    ].filter(Boolean)
   }
 
   function crewBlock(f) {
@@ -141,6 +172,7 @@
       $('label').textContent = T('duel.nothing')
       $('deck').textContent = ''
       body.replaceChildren(el('p', '', f.plan || ''), el('p', 'muted', T('duel.howTo', { key: data.key })))
+      body.prepend(...watchBlock())
     } else if (data.state === 'ready') {
       $('label').textContent = T('duel.deckLabel')
       $('deck').textContent = f.deck
@@ -153,6 +185,7 @@
       const parts = []
       // Asked whether to chain: the answer first, above all else.
       if (f.chain && f.chain.answer) parts.push(el('div', 'chain', el('div', 'q', T('duel.chainQ', { card: f.chain.card || '' })), el('div', 'a', f.chain.answer)))
+      parts.unshift(...watchBlock())
       if (f.plan) parts.push(el('p', 'plan', f.plan))
       // What she read as my hand (and my set cards): advice goes by these only.
       const mine = [...(f.myHand || []), ...(f.mySet || []).map(c => `${c}${T('duel.setMark')}`)]
@@ -192,6 +225,7 @@
         parts.push(el('ul', 'watch', watch.map(w => el('li', '', w))))
       }
       if (f.tip) parts.push(el('div', 'tip', f.tip))
+      parts.push(...researchBlock())
       const seen = (f.seen || []).slice(0, 12)
       if (seen.length) parts.push(el('div', 'seen', el('span', 'muted', T('duel.seen')), seen.map(c => el('span', 'chip', c))))
       body.replaceChildren(...parts)
@@ -201,7 +235,8 @@
       body.replaceChildren(el('p', 'muted', T('duel.howTo', { key: data.key })))
     }
     // Thinking: her seconds go on.
-    if (Object.values(data.asks || {}).some(a => a.state === 'asking') && data.state !== 'looking')
+    if (data.updating) timer = setInterval(() => document.querySelectorAll('.updating').forEach(u => (u.textContent = T('duel.updating', { s: secs(Date.now() - u.since) }))), 1000)
+    else if (Object.values(data.asks || {}).some(a => a.state === 'asking') && data.state !== 'looking')
       timer = setInterval(() => document.querySelectorAll('.line.busy').forEach(l => (l.textContent = T('duel.crewThinking', { s: secs(Date.now() - l.since) }))), 1000)
     const foot = mode === 'crew' ? [] : [T('duel.keyHint', { key: data.key || 'Alt+D' })]
     if (data.state === 'ready' && data.took) foot.push(T('duel.took', { s: secs(data.took) }))
@@ -212,12 +247,14 @@
 
   // The bar: each button its tool; the card it opens out, again to put it in.
   function drawBar() {
-    for (const [id, key] of [['bLook', 'duel.bar.look'], ['bCrew', 'duel.bar.crew'], ['bDeck', 'duel.bar.deck'], ['bScan', 'duel.bar.scan']]) $(id).querySelector('span').textContent = T(key)
+    for (const [id, key] of [['bWatch', 'duel.bar.watch'], ['bLook', 'duel.bar.look'], ['bCrew', 'duel.bar.crew'], ['bDeck', 'duel.bar.deck'], ['bScan', 'duel.bar.scan']]) $(id).querySelector('span').textContent = T(key)
     $('bScan').title = T('duel.bar.scanTip')
     $('bHide').title = T('duel.bar.hide')
     $('bLook').classList.toggle('on', !!data.fly && mode === 'look')
     $('bCrew').classList.toggle('on', !!data.fly && mode === 'crew')
-    $('bLook').classList.toggle('busy', data.state === 'looking')
+    $('bLook').classList.toggle('busy', data.state === 'looking' || !!data.updating)
+    $('bWatch').classList.toggle('on', !!(data.watch && data.watch.on))
+    $('bWatch').classList.toggle('resting', !!(data.watch && data.watch.on && data.watch.resting))
   }
   const open = m => {
     mode = m
@@ -238,6 +275,12 @@
     open('look')
     if (data.state !== 'looking') window.pet.duelAgain()
   })
+  // 盯場: on, the look's card out and kept fresh; off again by the same button.
+  $('bWatch').addEventListener('click', () => {
+    const on = !(data.watch && data.watch.on)
+    if (on) mode = 'look'
+    window.pet.duelWatch(on)
+  })
   $('bCrew').addEventListener('click', () => (data.fly && mode === 'crew' ? shut() : open('crew')))
   $('bDeck').addEventListener('click', () => window.pet.duelDeckOpen())
   $('bScan').addEventListener('click', () => window.pet.duelScan())
@@ -248,6 +291,13 @@
     data = payload || { state: 'none' }
     // A look going: its card the one out.
     if (data.state === 'looking') mode = 'look'
+    // The watch's new answer: the card flashes once.
+    if (data.quiet && data.at && data.at !== lastAt && mode === 'look') {
+      $('panel').classList.remove('flash')
+      void $('panel').offsetWidth
+      $('panel').classList.add('flash')
+    }
+    lastAt = data.at || lastAt
     document.documentElement.lang = data.lang || 'zh-TW'
     draw()
   })

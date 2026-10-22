@@ -691,3 +691,62 @@ pre.mine {
   background: rgba(255, 107, 107, 0.15) !important;
   color: var(--bad) !important;
 }
+
+/* The watch: its line, its button resting, a new answer flashing. */
+.watchline {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(79, 216, 143, 0.12);
+  color: var(--good);
+  font-size: 13px;
+}
+
+.watchline.resting {
+  background: rgba(255, 179, 64, 0.12);
+  color: var(--warn);
+}
+
+.watchline .updating {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+#bar button.resting {
+  border-color: var(--warn);
+  background: rgba(255, 179, 64, 0.15);
+}
+
+.choke {
+  margin: 0 0 6px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.choke b {
+  color: var(--strong);
+}
+
+.choke .why {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#panel.flash {
+  animation: flash 1.2s ease-out;
+}
+
+@keyframes flash {
+  0% {
+    box-shadow: 0 0 0 3px var(--claude);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}

@@ -40,7 +40,7 @@ const SIZE: (f64, f64) = (380.0, 620.0);
 // The bar of her tools down the game's right (Alt+D brings it up, 2026-10-22:
 // "a small toolbar, not a chat window"); a card of what was asked for slides
 // out to its left (FLY), the window as large as both then.
-const BAR: (f64, f64) = (64.0, 318.0);
+const BAR: (f64, f64) = (64.0, 376.0);
 const BAR_GAP: f64 = 8.0;
 static FLY: AtomicBool = AtomicBool::new(false);
 const MARGIN: f64 = 12.0;
@@ -137,6 +137,12 @@ pub fn again(sh: &Arc<Shared>) {
 }
 
 fn look(sh: &Arc<Shared>, pid: u32) {
+    look_with(sh, pid, false)
+}
+
+// A look; `quiet` (the watch): the card keeps its last answer, marked updating,
+// and the deck editor seen is left alone.
+fn look_with(sh: &Arc<Shared>, pid: u32, quiet: bool) {
     let Some((hwnd, rect)) = os::game_window(pid) else {
         sh.log("duel: the game's window not found");
         return;
@@ -151,6 +157,9 @@ fn look(sh: &Arc<Shared>, pid: u32) {
         });
     if !taken {
         LOOKING.store(false, Ordering::SeqCst);
+        if quiet {
+            return;
+        }
         sh.log("duel: the game's window could not be pictured");
         publish(sh, json!({ "state": "error", "why": "picture" }));
         show(sh, true);
@@ -158,16 +167,30 @@ fn look(sh: &Arc<Shared>, pid: u32) {
     }
     let started = crate::now_ms();
     keep_shot(sh, &picture, started);
-    *ASKS.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    publish(sh, json!({ "state": "looking", "since": started, "last": last_guess() }));
-    FLY.store(true, Ordering::SeqCst);
-    show(sh, true);
+    let has_answer = VIEW.lock().unwrap_or_else(|e| e.into_inner())["state"] == "ready";
+    if quiet && has_answer {
+        VIEW.lock().unwrap_or_else(|e| e.into_inner())["updating"] = json!(started);
+        push(sh);
+    } else {
+        if !quiet {
+            *ASKS.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+        publish(sh, json!({ "state": "looking", "since": started, "last": last_guess() }));
+        FLY.store(true, Ordering::SeqCst);
+        show(sh, true);
+    }
     let sh = sh.clone();
     crate::spawn_named("duel", move || {
-        let prompt = prompt_of(&hand_of(&sh), &deck_of(&sh), last_guess().as_ref());
+        let guess = if WATCH.load(Ordering::SeqCst) { match_guess() } else { None }.or_else(last_guess);
+        let prompt = prompt_of(&hand_of(&sh), &deck_of(&sh), guess.as_ref(), &match_known());
         let answer = run(&sh, &prompt, TIMEOUT, false).and_then(|text| answer_in(&text).ok_or_else(|| text.chars().take(120).collect()));
         let took = crate::now_ms().saturating_sub(started);
         match answer {
+            // The watch on the deck editor: nothing to do there.
+            Ok(found) if quiet && found["screen"] == "deck" => {
+                VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_object_mut().map(|v| v.remove("updating"));
+                push(&sh);
+            }
             Ok(found) if found["screen"] == "deck" => {
                 // The deck editor: its cards cut out and read one by one, in the deck window.
                 let full = FULL.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -186,7 +209,14 @@ fn look(sh: &Arc<Shared>, pid: u32) {
             Ok(found) => {
                 sh.log(&format!("duel: {} in {} s", found["deck"].as_str().unwrap_or("?"), took / 1000));
                 *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((found.clone(), crate::now_ms()));
-                publish(&sh, json!({ "state": "ready", "found": found, "took": took, "at": crate::now_ms() }));
+                take_in(&sh, &found);
+                publish(&sh, json!({ "state": "ready", "found": found, "took": took, "at": crate::now_ms(), "quiet": quiet }));
+            }
+            // The watch not answered: the last answer stays.
+            Err(why) if quiet && has_answer => {
+                sh.log(&format!("duel: no answer ({why})"));
+                VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_object_mut().map(|v| v.remove("updating"));
+                push(&sh);
             }
             Err(why) => {
                 sh.log(&format!("duel: no answer ({why})"));
@@ -195,6 +225,210 @@ fn look(sh: &Arc<Shared>, pid: u32) {
         }
         LOOKING.store(false, Ordering::SeqCst);
     });
+}
+
+// --- Watching the duel (盯場: she asked for it to keep looking through the
+// opponent's turn, 2026-10-23) ---------------------------------------------------------
+//
+// On from the bar's 👁: every 5 s the game is pictured small; changed since
+// the last look (or 20 s on) and no look running, a look, quietly: the card
+// keeps the last answer and says it is updating. Her own turn ("turn":
+// "mine") it rests, looking once in 30 s to see the turn come back. What the
+// duel has shown is kept (every opponent card seen, the deck guessed) and
+// asked with; the deck guessed is looked up on the web once (its plan, where
+// to stop it), and that too goes with every look. A fresh duel starts over.
+static WATCH: AtomicBool = AtomicBool::new(false);
+static WATCHING: AtomicBool = AtomicBool::new(false);
+static MATCH: Mutex<Option<Match>> = Mutex::new(None);
+const WATCH_EVERY: Duration = Duration::from_secs(5);
+const WATCH_ANYWAY_MS: u64 = 20_000;
+const WATCH_RESTING_MS: u64 = 30_000;
+
+#[derive(Default)]
+struct Match {
+    seen: Vec<String>,
+    deck: String,
+    mine: bool,
+    looked: u64,
+    frame: Vec<u8>,
+    // The deck looked up: its name, and what was found (null while looking).
+    research: Option<(String, Value)>,
+}
+
+pub fn watch(sh: &Arc<Shared>, on: bool) {
+    WATCH.store(on, Ordering::SeqCst);
+    if on {
+        *MATCH.lock().unwrap_or_else(|e| e.into_inner()) = Some(Match::default());
+        FLY.store(true, Ordering::SeqCst);
+        show(sh, true);
+        if !WATCHING.swap(true, Ordering::SeqCst) {
+            let sh = sh.clone();
+            crate::spawn_named("duel-watch", move || {
+                while WATCH.load(Ordering::SeqCst) {
+                    std::thread::sleep(WATCH_EVERY);
+                    watch_once(&sh);
+                }
+                WATCHING.store(false, Ordering::SeqCst);
+            });
+        }
+    }
+    push(sh);
+}
+
+// The game pictured small (32x18 grey) and how much it changed since.
+fn small(w: usize, h: usize, rgb: &[u8]) -> Vec<u8> {
+    let (sw, sh_) = (32, 18);
+    (0..sw * sh_)
+        .map(|i| {
+            let (x, y) = ((i % sw) * w / sw + w / sw / 2, (i / sw) * h / sh_ + h / sh_ / 2);
+            let p = (y.min(h - 1) * w + x.min(w - 1)) * 3;
+            ((rgb[p] as u32 * 3 + rgb[p + 1] as u32 * 6 + rgb[p + 2] as u32) / 10) as u8
+        })
+        .collect()
+}
+
+fn changed(a: &[u8], b: &[u8]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 255.0;
+    }
+    a.iter().zip(b).map(|(x, y)| (*x as f32 - *y as f32).abs()).sum::<f32>() / a.len() as f32
+}
+
+fn watch_once(sh: &Arc<Shared>) {
+    if !SHOWN.load(Ordering::SeqCst) || LOOKING.load(Ordering::SeqCst) {
+        return;
+    }
+    let Some(pid) = game_pid() else { return };
+    let Some((hwnd, rect)) = os::game_window(pid) else { return };
+    let Some((w, h, rgb)) = os::capture_game(hwnd, rect) else { return };
+    let now = crate::now_ms();
+    let frame = small(w, h, &rgb);
+    let go = {
+        let mut m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(m) = m.as_mut() else { return };
+        let since = now.saturating_sub(m.looked);
+        let go = if m.mine { since >= WATCH_RESTING_MS } else { changed(&frame, &m.frame) > 3.0 || since >= WATCH_ANYWAY_MS };
+        if go {
+            m.frame = frame;
+            m.looked = now;
+        }
+        go
+    };
+    if go {
+        look_with(sh, pid, true);
+    }
+}
+
+// What the duel has shown, for the prompt: the deck guessed and every card seen.
+fn match_guess() -> Option<Value> {
+    let m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
+    let m = m.as_ref().filter(|m| !m.seen.is_empty() || !m.deck.is_empty())?;
+    Some(json!({ "deck": if m.deck.is_empty() { "?" } else { m.deck.as_str() }, "seen": m.seen }))
+}
+
+fn match_known() -> String {
+    let m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
+    m.as_ref().and_then(|m| m.research.as_ref()).filter(|(_, v)| v.is_object()).map(|(_, v)| v.to_string()).unwrap_or_default()
+}
+
+// An answer taken in: the cards seen kept, whose turn, a fresh duel; the deck
+// guessed looked up when it is new.
+fn take_in(sh: &Arc<Shared>, found: &Value) {
+    let deck = found["deck"].as_str().unwrap_or("").trim().to_string();
+    let look_up = {
+        let mut m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(m) = m.as_mut() else { return };
+        if found["fresh"] == true && !m.seen.is_empty() {
+            let frame = std::mem::take(&mut m.frame);
+            *m = Match { frame, looked: m.looked, ..Match::default() };
+        }
+        for c in found["seen"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            let c = c.trim();
+            if !c.is_empty() && !c.starts_with('?') && !m.seen.iter().any(|s| s == c) {
+                m.seen.push(c.to_string());
+            }
+        }
+        m.mine = found["turn"] == "mine";
+        let sure = found["sure"] != "低";
+        if !deck.is_empty() && sure {
+            m.deck = deck.clone();
+        }
+        let new = !m.deck.is_empty() && m.research.as_ref().is_none_or(|(d, _)| *d != m.deck);
+        if new {
+            m.research = Some((m.deck.clone(), Value::Null));
+        }
+        new.then(|| (m.deck.clone(), m.seen.clone()))
+    };
+    if let Some((deck, seen)) = look_up {
+        research(sh, deck, seen);
+    }
+}
+
+// The opponent's deck looked up on the web (kept a week in duel/research/).
+fn research(sh: &Arc<Shared>, deck: String, seen: Vec<String>) {
+    let sh = sh.clone();
+    crate::spawn_named("duel-research", move || {
+        let name: String = deck.chars().filter(|c| !"\\/:*?\"<>|".contains(*c)).collect();
+        let file = dir(&sh).join("research").join(format!("{name}.json"));
+        let fresh = std::fs::metadata(&file).and_then(|m| m.modified()).ok().is_some_and(|t| t.elapsed().unwrap_or_default() < Duration::from_secs(7 * 24 * 3600));
+        let found = if fresh {
+            std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        } else {
+            let prompt = format!(
+                "遊戲王 Master Duel：我的對手用的應該是「{deck}」（這場看過的卡：{}）。用 WebSearch 查這副牌目前在 Master Duel 的構築和打法（最多查 3 次，日文、英文的資料都可以），\
+                 只回一個 JSON，不要其他文字：{{\"deck\":\"牌組名（台灣繁中）\",\"plan\":\"它怎麼展開，一兩句\",\"keys\":[\"展開的關鍵卡\"],\
+                 \"chokes\":[{{\"card\":\"最該斷的卡\",\"effect\":\"哪個效果\",\"why\":\"斷了會怎樣，20字內\"}}],\"traps\":[\"它常帶的手坑、泡影類\"]}}\n\
+                 chokes 最多 4 個、照重要程度排；卡名用台灣 Master Duel 繁體中文官方譯名。",
+                seen.join("、")
+            );
+            let got = run_in(&sh, "research", &prompt, TIMEOUT, true).ok().and_then(|t| answer_of(&t));
+            if let Some(v) = &got {
+                let _ = std::fs::create_dir_all(file.parent().unwrap_or(&file));
+                let _ = std::fs::write(&file, v.to_string());
+            }
+            got
+        };
+        sh.log(&format!("duel: {deck} looked up ({})", if found.is_some() { "found" } else { "nothing" }));
+        {
+            let mut m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(m) = m.as_mut().filter(|m| m.research.as_ref().is_some_and(|(d, _)| *d == deck)) {
+                m.research = Some((deck, found.unwrap_or(json!({ "failed": true }))));
+            }
+        }
+        push(&sh);
+    });
+}
+
+// The first JSON object in what was written, whatever it holds.
+fn answer_of(text: &str) -> Option<Value> {
+    let start = text.find('{')?;
+    let mut depth = 0;
+    for (i, c) in text[start..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return serde_json::from_str(&text[start..start + i + 1]).ok();
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn watch_view() -> Value {
+    let on = WATCH.load(Ordering::SeqCst);
+    let m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(m) = m.as_ref().filter(|_| on) else { return json!({ "on": false }) };
+    json!({
+        "on": true,
+        "resting": m.mine,
+        "seen": m.seen,
+        "deck": m.deck,
+        "research": m.research.as_ref().map(|(d, v)| json!({ "deck": d, "found": v })),
+    })
 }
 
 // Each picture kept too (duel/shots/, the last 60): what the game looks
@@ -236,7 +470,7 @@ fn hand_of(sh: &Shared) -> String {
     sh.setting("duelHand").as_str().unwrap_or("").trim().chars().take(300).collect()
 }
 
-pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
+pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>, known: &str) -> String {
     let mut p = String::from(
         "你是遊戲王 Master Duel 的對戰助手。先用 Read 讀這張遊戲截圖：shot.png（在目前資料夾，就是遊戲畫面本身）。\n\n\
          【如果這是牌組編輯畫面】（上面主要牌組、下面額外牌組的卡片格子）：只回 {\"screen\":\"deck\"}，不用認卡（之後會一張一張切出來再認）。\n\n\
@@ -260,21 +494,26 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
     if !hand.is_empty() {
         p.push_str(&format!("\n我的牌組帶的手坑／斷點卡：{hand}。只有我現在手上（或場上）真的有的才能叫我用。\n"));
     }
+    if !known.is_empty() {
+        p.push_str(&format!("\n對手這副牌的資料（剛上網查的，判斷要斷哪裡時參考）：\n{known}\n"));
+    }
     if let Some(last) = last {
         p.push_str(&format!(
-            "\n前一張截圖判斷對手可能是「{}」（看到：{}）。這張是同一場的新畫面：一起考慮，更新判斷。\n",
+            "\n這一場之前判斷對手可能是「{}」（到目前看過的對手卡：{}）。這張是同一場的新畫面：一起考慮，更新判斷；之前看過的卡也算對手有的。\n",
             last["deck"].as_str().unwrap_or("?"),
             last["seen"].as_array().map(|s| s.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("、")).unwrap_or_default()
         ));
     }
     p.push_str(
         "\n對戰畫面只回一個 JSON，不要其他文字：\n\
-         {\"screen\":\"duel\",\"myHand\":[\"我手上的牌，認不出寫?\"],\"mySet\":[\"我場上蓋著能用的卡\"],\"deck\":\"對手牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的對手卡名\"],\"plan\":\"它想做什麼，一句話\",\
+         {\"screen\":\"duel\",\"turn\":\"theirs|mine|?\",\"fresh\":false,\"myHand\":[\"我手上的牌，認不出寫?\"],\"mySet\":[\"我場上蓋著能用的卡\"],\"deck\":\"對手牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的對手卡名\"],\"plan\":\"它想做什麼，一句話\",\
          \"chain\":{\"card\":\"對手正在發動的卡\",\"answer\":\"要不要連鎖、用哪張，一句話\"},\
          \"stop\":[{\"card\":\"要斷的卡\",\"zone\":\"M3|S1|F|EL|hand|gy|chain…\",\"effect\":\"哪個效果\",\"with\":\"用什麼斷\",\"when\":\"時機\",\"why\":\"為什麼，20字內\"}],\
          \"me\":{\"first\":\"先攻怎麼打，一句\",\"second\":\"後攻怎麼打，一句\",\"now\":[\"這回合第一步\",\"第二步\"]},\
          \"watch\":[\"要小心它的什麼，15字內\"],\"tip\":\"一句建議\",\
          \"crew\":{\"claude\":\"總指揮：現在最該做的一件事\",\"codex\":\"算數字：生命值、打點、還差多少傷害或資源張數\",\"grok\":\"看對手：它可能還藏著什麼（蓋牌、手坑、墓地效果）\",\"agy\":\"查環境：這牌組在目前環境的地位、常帶的卡\"}}\n\
+         turn 是現在輪到誰（看畫面上的回合、階段標示和誰在動作）：對手的回合 theirs、我的回合 mine、看不出來 ?。\
+         fresh：這張看起來是一場剛開始的對決（第 1 回合、雙方 8000 分、場上幾乎沒卡）寫 true。\
          crew 是四位軍師各說一句、各 25 字內、口氣像隊友在旁邊講話；看不出來的那位就說她要你注意什麼。\
          沒在問連鎖時 chain 寫 null；看不到我的手牌時 now 寫 []。stop 最多 3 個，照重要程度排；now 最多 4 步；watch 最多 3 個。\
          看不出對手的卡時 deck 寫空字串、plan 說看到了什麼。全部繁體中文、台灣用語。\n",
@@ -286,7 +525,12 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
 // list; a look may not: it took 20 s and more, and a duel does not wait,
 // 2026-10-23 — the meta is Antigravity's part among the four).
 fn run(sh: &Shared, prompt: &str, timeout: Duration, web: bool) -> Result<String, String> {
-    let folder = dir(sh).join("work");
+    run_in(sh, "work", prompt, timeout, web)
+}
+
+fn run_in(sh: &Shared, sub: &str, prompt: &str, timeout: Duration, web: bool) -> Result<String, String> {
+    let folder = dir(sh).join(sub);
+    let _ = std::fs::create_dir_all(&folder);
     let prompt_file = folder.join("prompt.txt");
     std::fs::write(&prompt_file, prompt).map_err(|e| e.to_string())?;
     let exe = crate::run::find("claude").ok_or("claude not found")?;
@@ -554,6 +798,7 @@ fn push(sh: &Shared) {
         view["hand"] = json!(hand_of(sh));
         view["crew"] = crew(sh);
         view["fly"] = json!(FLY.load(Ordering::SeqCst));
+        view["watch"] = watch_view();
         view["asks"] = Value::Object(ASKS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default());
         let _ = sh.app.emit_to(LABEL, "duel:update", view);
     }
@@ -1293,6 +1538,9 @@ fn apply(sh: &Arc<Shared>) {
 
 pub fn show(sh: &Arc<Shared>, on: bool) {
     SHOWN.store(on, Ordering::SeqCst);
+    if !on {
+        WATCH.store(false, Ordering::SeqCst);
+    }
     apply(sh);
 }
 
@@ -1302,14 +1550,15 @@ mod tests {
 
     #[test]
     fn what_claude_is_asked() {
-        let p = prompt_of("", "", None);
+        let p = prompt_of("", "", None, "");
         assert!(p.contains("shot.png") && p.contains("\"stop\"") && !p.contains("我的牌組帶的"));
         let last = json!({ "deck": "蛇眼", "seen": ["蛇眼灰燼", "原罪寶-蛇眼"] });
-        let p = prompt_of("灰流麗、增殖的G", "巳劍：天叢雲之巳劍×2", Some(&last));
+        let p = prompt_of("灰流麗、增殖的G", "巳劍：天叢雲之巳劍×2", Some(&last), "{\"deck\":\"蛇眼\"}");
+        assert!(p.contains("剛上網查的") && p.contains("\"turn\"") && p.contains("fresh"));
         assert!(p.contains("牌組裡有不代表現在手上有") && p.contains("天叢雲之巳劍×2") && p.contains("\"zone\""));
         assert!(p.contains("我的牌組帶的手坑／斷點卡：灰流麗、增殖的G。只有我現在手上"));
         assert!(p.contains("\"myHand\"") && p.contains("手上沒有"));
-        assert!(p.contains("可能是「蛇眼」（看到：蛇眼灰燼、原罪寶-蛇眼）"));
+        assert!(p.contains("可能是「蛇眼」（到目前看過的對手卡：蛇眼灰燼、原罪寶-蛇眼）"));
     }
 
     #[test]
