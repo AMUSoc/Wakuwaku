@@ -26,6 +26,8 @@ use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, Webvie
 use crate::Shared;
 
 pub const LABEL: &str = "duel";
+// The frames laid on the game itself (src/duel/frames.html).
+pub const FRAMES: &str = "duelframes";
 pub const DEFAULT_KEY: &str = "Alt+D";
 const GAME: &str = "masterduel.exe";
 
@@ -34,8 +36,8 @@ fn game_pid() -> Option<u32> {
     crate::lol::pid_of(&std::env::var("WAKUWAKU_DUEL_EXE").unwrap_or_else(|_| GAME.to_string()))
 }
 // The panel, in logical pixels, and its gap to the display's edge.
-const SIZE: (f64, f64) = (440.0, 660.0);
-const MARGIN: f64 = 24.0;
+const SIZE: (f64, f64) = (380.0, 620.0);
+const MARGIN: f64 = 12.0;
 // The picture sent: so wide at most (a 2560 display halved).
 const MAX_WIDTH: usize = 1600;
 const TIMEOUT: Duration = Duration::from_secs(150);
@@ -47,6 +49,8 @@ static SHOWN: AtomicBool = AtomicBool::new(false);
 static READY: AtomicBool = AtomicBool::new(false);
 static CREATED: AtomicBool = AtomicBool::new(false);
 static LOOKING: AtomicBool = AtomicBool::new(false);
+static FRAMES_MADE: AtomicBool = AtomicBool::new(false);
+static FRAMES_READY: AtomicBool = AtomicBool::new(false);
 // The last answer and when: the next picture is asked with it.
 static LAST: Mutex<Option<(Value, u64)>> = Mutex::new(None);
 
@@ -93,13 +97,13 @@ pub fn again(sh: &Arc<Shared>) {
 }
 
 fn look(sh: &Arc<Shared>, pid: u32) {
-    let Some(rect) = os::window_rect(pid) else {
+    let Some((hwnd, rect)) = os::game_window(pid) else {
         sh.log("duel: the game's window not found");
         return;
     };
     LOOKING.store(true, Ordering::SeqCst);
     let picture = dir(sh).join("work").join("shot.png");
-    let taken = std::fs::create_dir_all(dir(sh).join("work")).is_ok() && os::capture(rect).is_some_and(|(w, h, rgb)| save_png(&picture, w, h, &rgb).is_ok());
+    let taken = std::fs::create_dir_all(dir(sh).join("work")).is_ok() && os::capture_game(hwnd, rect).is_some_and(|(w, h, rgb)| save_png(&picture, w, h, &rgb).is_ok());
     if !taken {
         LOOKING.store(false, Ordering::SeqCst);
         sh.log("duel: the game's window could not be pictured");
@@ -113,10 +117,18 @@ fn look(sh: &Arc<Shared>, pid: u32) {
     show(sh, true);
     let sh = sh.clone();
     crate::spawn_named("duel", move || {
-        let prompt = prompt_of(&hand_of(&sh), last_guess().as_ref());
-        let answer = run(&sh, &prompt).and_then(|text| crate::opgg::json_in(&text).ok_or_else(|| text.chars().take(120).collect()));
+        let prompt = prompt_of(&hand_of(&sh), &deck_of(&sh), last_guess().as_ref());
+        let answer = run(&sh, &prompt).and_then(|text| answer_in(&text).ok_or_else(|| text.chars().take(120).collect()));
         let took = crate::now_ms().saturating_sub(started);
         match answer {
+            Ok(found) if found["screen"] == "deck" => {
+                let deck: String = found["myDeck"].as_str().unwrap_or("").chars().take(1500).collect();
+                sh.log(&format!("duel: her deck read in {} s", took / 1000));
+                if !deck.trim().is_empty() {
+                    sh.change(json!({ "duelDeck": deck }));
+                }
+                publish(&sh, json!({ "state": "deck", "deck": deck, "took": took, "at": crate::now_ms() }));
+            }
             Ok(found) => {
                 sh.log(&format!("duel: {} in {} s", found["deck"].as_str().unwrap_or("?"), took / 1000));
                 *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((found.clone(), crate::now_ms()));
@@ -148,22 +160,47 @@ fn keep_shot(sh: &Shared, picture: &std::path::Path, at: u64) {
     }
 }
 
+// The answer in what Claude wrote: the first JSON object in it that says
+// which screen it saw, whatever is written around it (a word before, a note
+// after with braces of its own: the first try failed so, 2026-10-22).
+pub fn answer_in(text: &str) -> Option<Value> {
+    text.match_indices('{').find_map(|(at, _)| {
+        let v = serde_json::Deserializer::from_str(&text[at..]).into_iter::<Value>().next()?.ok()?;
+        (v.get("screen").is_some() || v.get("deck").is_some()).then_some(v)
+    })
+}
+
 fn last_guess() -> Option<Value> {
     LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(_, at)| crate::now_ms().saturating_sub(*at) < GUESS_MS).map(|(v, _)| v.clone())
+}
+
+fn deck_of(sh: &Shared) -> String {
+    sh.setting("duelDeck").as_str().unwrap_or("").trim().chars().take(1500).collect()
 }
 
 fn hand_of(sh: &Shared) -> String {
     sh.setting("duelHand").as_str().unwrap_or("").trim().chars().take(300).collect()
 }
 
-pub fn prompt_of(hand: &str, last: Option<&Value>) -> String {
+pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>) -> String {
     let mut p = String::from(
-        "你是遊戲王 Master Duel 的對戰助手。先用 Read 讀這張遊戲截圖：shot.png（在目前資料夾）。\n\n\
-         圖裡是對戰畫面：對手的卡在畫面上方（場上、墓地），左邊可能打開著某張卡的說明。請：\n\
-         1. 認出看得到的對手的卡（卡名用台灣 Master Duel 的繁體中文官方譯名；不確定就寫日文或英文名）。\n\
-         2. 判斷對手是什麼牌組（主題）。不確定時用 WebSearch 查目前的環境和這個牌組的打法（日文、英文的資料都可以）。\n\
-         3. 告訴我要斷哪裡：這個牌組的關鍵展開點，用手坑或魔法陷阱該斷哪張卡的哪個效果、什麼時機。\n",
+        "你是遊戲王 Master Duel 的對戰助手。先用 Read 讀這張遊戲截圖：shot.png（在目前資料夾，就是遊戲畫面本身）。\n\n\
+         【如果這是牌組編輯畫面】（上面主要牌組、下面額外牌組的卡片格子）：這是「我」的牌組。盡量認出每張卡，只回\n\
+         {\"screen\":\"deck\",\"myDeck\":\"牌組主題：…\\n主要牌組：卡名×張數、…\\n額外牌組：…\"}\n\
+         認不出的卡寫「？」，不要猜很冷門的卡。\n\n\
+         【如果這是對戰畫面】畫面上方是對手的場地，下方是我的；左邊可能打開著某張卡的說明，中間可能正跳出「是否連鎖」。\n\
+         對手的格子這樣叫（照畫面上的左右）：上面那排魔法陷阱區 S1～S5（左到右），下一排怪獸區 M1～M5（左到右），\
+         對手怪獸區右邊那格場地區 F，中間兩格額外怪獸區 EL（左）、ER（右）。在手牌、墓地、除外或連鎖中的寫 hand、gy、ban、chain。\n\
+         請：\n\
+         1. 認出看得到的對手的卡（卡名用台灣 Master Duel 的繁體中文官方譯名；左邊或上方有卡片說明時以說明為準；不確定就寫日文或英文名）。\n\
+         2. 判斷對手是什麼牌組。不確定時用 WebSearch 查目前的環境和這個牌組的打法（日文、英文的資料都可以）。\n\
+         3. 告訴我要斷哪裡：關鍵展開點，用手坑或魔法陷阱該斷哪張卡的哪個效果、什麼時機，那張卡在哪一格。\n\
+         4. 正在問「是否連鎖」時：說要不要連鎖、用哪張（看得到我能連鎖的卡）。\n\
+         5. 我這邊：對上這個牌組先攻、後攻各該怎麼打；看得到我的手牌時，這回合具體怎麼做（幾個步驟）。\n",
     );
+    if !deck.is_empty() {
+        p.push_str(&format!("\n我的牌組（我自己記的，可能不完整）：\n{deck}\n建議都照我真的有的卡來說。\n"));
+    }
     if !hand.is_empty() {
         p.push_str(&format!("\n我的牌組帶的手坑／斷點卡：{hand}。建議時優先用這些，沒有合適的才提別的。\n"));
     }
@@ -175,11 +212,14 @@ pub fn prompt_of(hand: &str, last: Option<&Value>) -> String {
         ));
     }
     p.push_str(
-        "\n只回一個 JSON，不要其他文字：\n\
-         {\"deck\":\"牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的卡名\"],\"plan\":\"它想做什麼，一句話\",\
-         \"stop\":[{\"card\":\"要斷的卡\",\"effect\":\"哪個效果\",\"with\":\"用什麼斷\",\"when\":\"時機\",\"why\":\"為什麼，20字內\"}],\
+        "\n對戰畫面只回一個 JSON，不要其他文字：\n\
+         {\"screen\":\"duel\",\"deck\":\"對手牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的對手卡名\"],\"plan\":\"它想做什麼，一句話\",\
+         \"chain\":{\"card\":\"對手正在發動的卡\",\"answer\":\"要不要連鎖、用哪張，一句話\"},\
+         \"stop\":[{\"card\":\"要斷的卡\",\"zone\":\"M3|S1|F|EL|hand|gy|chain…\",\"effect\":\"哪個效果\",\"with\":\"用什麼斷\",\"when\":\"時機\",\"why\":\"為什麼，20字內\"}],\
+         \"me\":{\"first\":\"先攻怎麼打，一句\",\"second\":\"後攻怎麼打，一句\",\"now\":[\"這回合第一步\",\"第二步\"]},\
          \"watch\":[\"要小心它的什麼，15字內\"],\"tip\":\"一句建議\"}\n\
-         stop 最多 3 個，照重要程度排；watch 最多 3 個。看不出對手的卡（不是對戰畫面）時 deck 寫空字串、plan 說看到了什麼。全部繁體中文、台灣用語。\n",
+         沒在問連鎖時 chain 寫 null；看不到我的手牌時 now 寫 []。stop 最多 3 個，照重要程度排；now 最多 4 步；watch 最多 3 個。\
+         看不出對手的卡時 deck 寫空字串、plan 說看到了什麼。全部繁體中文、台灣用語。\n",
     );
     p
 }
@@ -274,12 +314,18 @@ pub fn shrink(w: usize, h: usize, rgb: &[u8], most: usize) -> (usize, usize, Vec
 #[cfg(windows)]
 mod os {
     #[repr(C)]
-    #[derive(Default, Clone, Copy)]
+    #[derive(Default, Clone, Copy, Debug)]
     pub struct Rect {
         pub l: i32,
         pub t: i32,
         pub r: i32,
         pub b: i32,
+    }
+
+    #[repr(C)]
+    struct Point {
+        x: i32,
+        y: i32,
     }
 
     #[repr(C)]
@@ -305,7 +351,10 @@ mod os {
         fn EnumWindows(f: EnumProc, l: isize) -> i32;
         fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
         fn IsWindowVisible(hwnd: isize) -> i32;
-        fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
+        fn IsIconic(hwnd: isize) -> i32;
+        fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
+        fn ClientToScreen(hwnd: isize, p: *mut Point) -> i32;
+        fn PrintWindow(hwnd: isize, dc: isize, flags: u32) -> i32;
         fn GetDC(hwnd: isize) -> isize;
         fn ReleaseDC(hwnd: isize, dc: isize) -> i32;
     }
@@ -321,24 +370,27 @@ mod os {
         fn DeleteDC(dc: isize) -> i32;
     }
 
-    // The game's largest window shown: where it is on the screen (physical).
-    pub fn window_rect(pid: u32) -> Option<Rect> {
+    // The game's largest window shown, and where its inside (its client
+    // area: no title bar, no borders) is on the screen (physical).
+    pub fn game_window(pid: u32) -> Option<(isize, Rect)> {
         struct Search {
             pid: u32,
-            best: Option<(i64, Rect)>,
+            best: Option<(i64, isize, Rect)>,
         }
         unsafe extern "system" fn each(hwnd: isize, l: isize) -> i32 {
             // SAFETY: l is the Search below, alive for the enumeration.
             let search = unsafe { &mut *(l as *mut Search) };
             let mut pid = 0;
             let mut r = Rect::default();
-            // SAFETY: reads of a window's process and place into our own values.
+            // SAFETY: reads of a window's process and size into our own values.
             unsafe {
                 GetWindowThreadProcessId(hwnd, &mut pid);
-                if pid == search.pid && IsWindowVisible(hwnd) != 0 && GetWindowRect(hwnd, &mut r) != 0 {
-                    let size = (r.r - r.l) as i64 * (r.b - r.t) as i64;
-                    if size > 0 && search.best.is_none_or(|(s, _)| size > s) {
-                        search.best = Some((size, r));
+                if pid == search.pid && IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0 && GetClientRect(hwnd, &mut r) != 0 {
+                    let size = r.r as i64 * r.b as i64;
+                    if size > 0 && search.best.is_none_or(|(s, _, _)| size > s) {
+                        let mut at = Point { x: 0, y: 0 };
+                        ClientToScreen(hwnd, &mut at);
+                        search.best = Some((size, hwnd, Rect { l: at.x, t: at.y, r: at.x + r.r, b: at.y + r.b }));
                     }
                 }
             }
@@ -347,26 +399,35 @@ mod os {
         let mut search = Search { pid, best: None };
         // SAFETY: the callback is given our Search, which outlives the call.
         unsafe { EnumWindows(each, &mut search as *mut Search as isize) };
-        search.best.map(|(_, r)| r)
+        search.best.map(|(_, h, r)| (h, r))
     }
 
-    // What the screen shows there (the game as the person sees it), RGB.
-    pub fn capture(r: Rect) -> Option<(usize, usize, Vec<u8>)> {
+    pub fn window_rect(pid: u32) -> Option<Rect> {
+        game_window(pid).map(|(_, r)| r)
+    }
+
+    // The game's inside as it draws it (PrintWindow, its full content): the
+    // whole of it even under other windows (tried 2026-10-22, the terminal
+    // over half of it); else what the screen shows there. RGB.
+    pub fn capture_game(hwnd: isize, r: Rect) -> Option<(usize, usize, Vec<u8>)> {
         let (w, h) = (r.r - r.l, r.b - r.t);
         if w <= 0 || h <= 0 {
             return None;
         }
         const SRCCOPY: u32 = 0x00CC_0020;
         const CAPTUREBLT: u32 = 0x4000_0000;
+        // PW_CLIENTONLY | PW_RENDERFULLCONTENT
+        const PRINT: u32 = 1 | 2;
         let mut bgra = vec![0u8; w as usize * h as usize * 4];
-        // SAFETY: device contexts and a bitmap of ours, all let go below;
-        // the pixels written into our own buffer of the size asked for.
+        // SAFETY: device contexts and a bitmap of ours, all let go below; the
+        // pixels written into our own buffer of the size asked for.
         let ok = unsafe {
             let screen = GetDC(0);
             let mem = CreateCompatibleDC(screen);
             let bmp = CreateCompatibleBitmap(screen, w, h);
             let old = SelectObject(mem, bmp);
-            let copied = BitBlt(mem, 0, 0, w, h, screen, r.l, r.t, SRCCOPY | CAPTUREBLT) != 0;
+            let printed = PrintWindow(hwnd, mem, PRINT) != 0;
+            let copied = printed || BitBlt(mem, 0, 0, w, h, screen, r.l, r.t, SRCCOPY | CAPTUREBLT) != 0;
             let mut info = BitmapInfoHeader { size: std::mem::size_of::<BitmapInfoHeader>() as u32, width: w, height: -h, planes: 1, bit_count: 32, compression: 0, size_image: 0, x_ppm: 0, y_ppm: 0, clr_used: 0, clr_important: 0 };
             let lines = GetDIBits(mem, bmp, 0, h as u32, bgra.as_mut_ptr(), &mut info, 0);
             SelectObject(mem, old);
@@ -378,6 +439,10 @@ mod os {
         if !ok {
             return None;
         }
+        // All black: what PrintWindow gives for a window it cannot draw.
+        if bgra.chunks_exact(4).all(|p| p[0] == 0 && p[1] == 0 && p[2] == 0) {
+            return None;
+        }
         let rgb = bgra.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0]]).collect();
         Some((w as usize, h as usize, rgb))
     }
@@ -385,17 +450,20 @@ mod os {
 
 #[cfg(not(windows))]
 mod os {
-    #[derive(Default, Clone, Copy)]
+    #[derive(Default, Clone, Copy, Debug)]
     pub struct Rect {
         pub l: i32,
         pub t: i32,
         pub r: i32,
         pub b: i32,
     }
+    pub fn game_window(_pid: u32) -> Option<(isize, Rect)> {
+        None
+    }
     pub fn window_rect(_pid: u32) -> Option<Rect> {
         None
     }
-    pub fn capture(_r: Rect) -> Option<(usize, usize, Vec<u8>)> {
+    pub fn capture_game(_hwnd: isize, _r: Rect) -> Option<(usize, usize, Vec<u8>)> {
         None
     }
 }
@@ -409,6 +477,8 @@ fn window(sh: &Shared) -> Option<WebviewWindow> {
 fn publish(sh: &Shared, view: Value) {
     *VIEW.lock().unwrap_or_else(|e| e.into_inner()) = view;
     push(sh);
+    let sh = crate::shared(&sh.app);
+    apply_frames(&sh, SHOWN.load(Ordering::SeqCst));
 }
 
 fn push(sh: &Shared) {
@@ -424,14 +494,20 @@ fn push(sh: &Shared) {
     }
 }
 
-// By the right edge of the display the game is on, in the middle of its height.
+// Inside the game, by its right edge, as a map helper sits in a game's
+// corner: as tall as the game but a margin, at most SIZE; by the right edge
+// of the island's display when no game is found.
 fn rect(sh: &Shared) -> Option<((i32, i32), (i32, i32), f64)> {
     let game = game_pid().and_then(os::window_rect);
     let a = game.and_then(|r| sh.screens().near((r.l + r.r) / 2, (r.t + r.b) / 2)).or_else(|| crate::island::area(sh))?;
-    let w = ((SIZE.0 * a.sf).round() as i32).min(a.w);
-    let h = ((SIZE.1 * a.sf).round() as i32).min(a.h - (2.0 * MARGIN * a.sf) as i32);
+    let (gx, gy, gw, gh) = game.map_or((a.x, a.y, a.w, a.h), |r| (r.l, r.t, r.r - r.l, r.b - r.t));
     let margin = (MARGIN * a.sf).round() as i32;
-    Some(((a.x + a.w - w - margin, a.y + (a.h - h) / 2), (w, h), a.sf))
+    let w = ((SIZE.0 * a.sf).round() as i32).min(gw / 3).max((260.0 * a.sf) as i32);
+    let h = ((SIZE.1 * a.sf).round() as i32).min(gh - 2 * margin);
+    // Below the opponent's LP and the turn's mark, which sit at the game's top right.
+    let top = gy + (gh as f64 * 0.16) as i32;
+    let h = h.min(gy + gh - margin - top);
+    Some(((gx + gw - w - margin, top), (w, h), a.sf))
 }
 
 fn lay(win: &WebviewWindow, (x, y): (i32, i32), (w, h): (i32, i32)) {
@@ -479,6 +555,94 @@ fn create(sh: &Arc<Shared>) {
     });
 }
 
+// --- The frames on the game ------------------------------------------------------------
+
+// The zones to frame from an answer: each card to stop that is on the field,
+// numbered as the panel numbers them.
+pub fn zones_of(found: &Value) -> Value {
+    let stops = found["stop"].as_array().cloned().unwrap_or_default();
+    Value::Array(
+        stops
+            .iter()
+            .take(3)
+            .enumerate()
+            .filter(|(_, s)| matches!(s["zone"].as_str(), Some("S1" | "S2" | "S3" | "S4" | "S5" | "M1" | "M2" | "M3" | "M4" | "M5" | "F" | "EL" | "ER")))
+            .map(|(i, s)| json!({ "zone": s["zone"], "n": i + 1, "with": s["with"] }))
+            .collect(),
+    )
+}
+
+fn frames_window(sh: &Shared) -> Option<WebviewWindow> {
+    sh.app.get_webview_window(FRAMES)
+}
+
+fn make_frames(sh: &Arc<Shared>) {
+    if FRAMES_MADE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Some(r) = game_pid().and_then(os::window_rect) else {
+        FRAMES_MADE.store(false, Ordering::SeqCst);
+        return;
+    };
+    let sh = sh.clone();
+    std::thread::spawn(move || {
+        let built = WebviewWindowBuilder::new(&sh.app, FRAMES, WebviewUrl::App("duel/frames.html".into()))
+            .title("wakuwaku duel frames")
+            .inner_size(400.0, 300.0)
+            .additional_browser_args(crate::browser_args(&sh))
+            .data_directory(crate::webview_dir(&sh))
+            .transparent(true)
+            .decorations(false)
+            .resizable(false)
+            .maximizable(false)
+            .minimizable(false)
+            .skip_taskbar(true)
+            .shadow(false)
+            .always_on_top(true)
+            .focusable(false)
+            .focused(false)
+            .visible(false)
+            .build();
+        match built {
+            Ok(win) => {
+                lay(&win, (r.l, r.t), (r.r - r.l, r.b - r.t));
+                // Every click goes on to the game under it.
+                let _ = win.set_ignore_cursor_events(true);
+                sh.own_window(&win);
+            }
+            Err(err) => sh.log(&format!("duel: could not make its frames: {err}")),
+        }
+    });
+}
+
+pub fn frames_ready(sh: &Arc<Shared>) {
+    FRAMES_READY.store(true, Ordering::SeqCst);
+    apply(sh);
+}
+
+// The frames: on the game's inside while the panel is up with an answer.
+fn apply_frames(sh: &Arc<Shared>, want: bool) {
+    let zones = VIEW.lock().unwrap_or_else(|e| e.into_inner()).get("found").map(zones_of).unwrap_or(json!([]));
+    let any = zones.as_array().is_some_and(|z| !z.is_empty());
+    if want && any && !FRAMES_MADE.load(Ordering::SeqCst) {
+        make_frames(sh);
+        return;
+    }
+    if !FRAMES_READY.load(Ordering::SeqCst) {
+        return;
+    }
+    let Some(win) = frames_window(sh) else { return };
+    if want && any {
+        if let Some(r) = game_pid().and_then(os::window_rect) {
+            lay(&win, (r.l, r.t), (r.r - r.l, r.b - r.t));
+        }
+        let _ = sh.app.emit_to(FRAMES, "duel:frames", json!({ "zones": zones }));
+        let _ = win.show();
+    } else {
+        let _ = win.hide();
+    }
+}
+
 // Its page is up: drawn, and shown if it was asked for meanwhile.
 pub fn ready(sh: &Arc<Shared>) {
     READY.store(true, Ordering::SeqCst);
@@ -488,6 +652,7 @@ pub fn ready(sh: &Arc<Shared>) {
 
 fn apply(sh: &Arc<Shared>) {
     let want = SHOWN.load(Ordering::SeqCst);
+    apply_frames(sh, want);
     if want && !CREATED.load(Ordering::SeqCst) {
         create(sh);
         return;
@@ -532,12 +697,32 @@ mod tests {
 
     #[test]
     fn what_claude_is_asked() {
-        let p = prompt_of("", None);
+        let p = prompt_of("", "", None);
         assert!(p.contains("shot.png") && p.contains("\"stop\"") && !p.contains("我的牌組帶的"));
         let last = json!({ "deck": "蛇眼", "seen": ["蛇眼灰燼", "原罪寶-蛇眼"] });
-        let p = prompt_of("灰流麗、增殖的G", Some(&last));
+        let p = prompt_of("灰流麗、增殖的G", "巳劍：天叢雲之巳劍×2", Some(&last));
+        assert!(p.contains("我的牌組（我自己記的") && p.contains("天叢雲之巳劍×2") && p.contains("\"zone\""));
         assert!(p.contains("我的牌組帶的手坑／斷點卡：灰流麗、增殖的G"));
         assert!(p.contains("可能是「蛇眼」（看到：蛇眼灰燼、原罪寶-蛇眼）"));
+    }
+
+    #[test]
+    fn the_answer_whatever_is_written_around_it() {
+        let said = "好的，這是分析：
+```json
+{\"screen\":\"duel\",\"deck\":\"蛇眼\",\"stop\":[]}
+```
+補充：{其他}";
+        assert_eq!(answer_in(said).unwrap()["deck"], "蛇眼");
+        assert!(answer_in("沒有 JSON").is_none());
+        assert_eq!(answer_in("{\"x\":1} {\"screen\":\"deck\",\"myDeck\":\"a\"}").unwrap()["screen"], "deck");
+    }
+
+    #[test]
+    fn frames_for_the_cards_on_the_field_numbered_as_listed() {
+        let found = json!({ "stop": [ { "zone": "hand" }, { "zone": "M3", "with": "灰流麗" }, { "zone": "F" }, { "zone": "S2" } ] });
+        assert_eq!(zones_of(&found), json!([{ "zone": "M3", "n": 2, "with": "灰流麗" }, { "zone": "F", "n": 3, "with": null }]));
+        assert_eq!(zones_of(&json!({})), json!([]));
     }
 
     #[test]

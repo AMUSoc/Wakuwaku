@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>wakuwaku duel frames</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        font-family: 'Microsoft JhengHei UI', 'PingFang TC', system-ui, sans-serif;
+      }
+      .zone {
+        position: absolute;
+        box-sizing: border-box;
+        border: 3px solid #ff8a3d;
+        border-radius: 8px;
+        box-shadow: 0 0 14px 3px rgba(255, 138, 61, 0.75), inset 0 0 12px rgba(255, 138, 61, 0.45);
+        animation: glow 1.4s ease-in-out infinite;
+      }
+      .zone .n {
+        position: absolute;
+        top: -14px;
+        left: -14px;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: #e8732a;
+        color: #fff;
+        font-weight: 700;
+        font-size: 15px;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+      }
+      .zone .tag {
+        position: absolute;
+        left: 50%;
+        bottom: -26px;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(16, 20, 34, 0.9);
+        color: #ffb27a;
+        font-size: 12px;
+      }
+      @keyframes glow {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.55;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="frames"></div>
+    <script src="../pet/bridge.js"></script>
+    <script src="frames.js"></script>
+  </body>
+</html>

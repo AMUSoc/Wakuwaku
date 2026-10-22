@@ -59,6 +59,7 @@
     scoutClose: () => send('scout_close'),
     // Master Duel's helper (duel.rs), in its panel's window.
     onDuel: on('duel:update'),
+    onDuelFrames: on('duel:frames'),
     duelClose: () => send('duel_close'),
     duelAgain: () => send('duel_again'),
     // The folder the phone's files go to (mobile.rs drop).

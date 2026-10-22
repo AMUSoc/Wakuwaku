@@ -865,6 +865,10 @@ async fn pet_ready(app: AppHandle, window: WebviewWindow) {
         duel::ready(&sh);
         return;
     }
+    if window.label() == duel::FRAMES {
+        duel::frames_ready(&sh);
+        return;
+    }
     if is_dock(&window) {
         dock::ready(&sh);
         dock::push_asks(&sh);

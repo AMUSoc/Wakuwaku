@@ -146,6 +146,8 @@ fn defaults() -> Map<String, Value> {
         "duel": true,
         "duelKey": "Alt+D",
         "duelHand": "",
+        // Her own deck as read off its editor's screen (duel.rs), or as she wrote it.
+        "duelDeck": "",
         // Asking her from the phone (ask.rs): the agent last asked.
         "askAgent": "claude",
         // The phone's page from elsewhere (mobile.rs): off, or listened for

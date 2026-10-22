@@ -518,6 +518,7 @@
         ${row(esc(T('s.riotKey')), esc(T('s.riotKeyNote')), `<input class="in" id="s-riot-key" type="password" spellcheck="false" autocomplete="off" placeholder="RGAPI-…" value="${esc(s.riotApiKey || '')}">`)}
         ${row(esc(T('s.duel')), esc(T('s.duelNote', { key: s.duelKey || 'Alt+D' })), sw('duel', s.duel !== false))}
         ${row(esc(T('s.duelHand')), esc(T('s.duelHandNote')), `<input class="in" id="s-duel-hand" spellcheck="false" autocomplete="off" placeholder="${esc(T('s.duelHandHint'))}" value="${esc(s.duelHand || '')}">`)}
+        <div class="r"><div class="grow"><div>${esc(T('s.duelDeck'))}</div><div class="d">${esc(T('s.duelDeckNote'))}</div><textarea class="in" id="s-duel-deck" rows="5" spellcheck="false" style="width:100%;box-sizing:border-box;resize:vertical">${esc(s.duelDeck || '')}</textarea></div></div>
       </div>`
   }
 
@@ -1626,6 +1627,7 @@
     if (e.target.id === 's-riot-key') return patch({ riotApiKey: e.target.value.trim() })
     // Her own hand traps, for Master Duel's helper (duel.rs).
     if (e.target.id === 's-duel-hand') return patch({ duelHand: e.target.value.trim().slice(0, 300) })
+    if (e.target.id === 's-duel-deck') return patch({ duelDeck: e.target.value.trim().slice(0, 1500) })
     const key = e.target.dataset.field
     if (!key || !(key in drafts)) return
     const value = drafts[key].trim()

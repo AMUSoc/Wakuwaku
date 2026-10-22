@@ -18,6 +18,8 @@
   }
 
   const secs = ms => Math.max(0, Math.round(ms / 1000))
+  // Where a card to stop is (the frame on the game bears its number).
+  const ZONE_WORD = { M1: 'duel.zoneM', M2: 'duel.zoneM', M3: 'duel.zoneM', M4: 'duel.zoneM', M5: 'duel.zoneM', S1: 'duel.zoneS', S2: 'duel.zoneS', S3: 'duel.zoneS', S4: 'duel.zoneS', S5: 'duel.zoneS', F: 'duel.zoneF', EL: 'duel.zoneEL', ER: 'duel.zoneER', hand: 'duel.zoneHand', gy: 'duel.zoneGy', chain: 'duel.zoneChain' }
 
   function draw() {
     clearInterval(timer)
@@ -41,6 +43,10 @@
       const known = ['picture', 'noGame', 'timeout'].includes(data.why)
       $('deck').textContent = T(known ? `duel.why.${data.why}` : 'duel.why.other')
       body.replaceChildren(el('p', 'muted', known || !data.why ? '' : String(data.why)), el('p', 'muted', T('duel.howTo', { key: data.key })))
+    } else if (data.state === 'deck') {
+      $('label').textContent = T('duel.deckRead')
+      $('deck').textContent = T('duel.deckReadSub')
+      body.replaceChildren(el('pre', 'mine', data.deck || ''), el('p', 'muted', T('duel.deckFix')))
     } else if (data.state === 'ready' && !f.deck) {
       $('label').textContent = T('duel.nothing')
       $('deck').textContent = ''
@@ -55,6 +61,8 @@
         $('sure').dataset.sure = f.sure
       }
       const parts = []
+      // Asked whether to chain: the answer first, above all else.
+      if (f.chain && f.chain.answer) parts.push(el('div', 'chain', el('div', 'q', T('duel.chainQ', { card: f.chain.card || '' })), el('div', 'a', f.chain.answer)))
       if (f.plan) parts.push(el('p', 'plan', f.plan))
       const stops = (f.stop || []).slice(0, 3)
       if (stops.length) {
@@ -69,12 +77,21 @@
                 'div',
                 'what',
                 el('div', 'card', s.card || '', s.effect ? el('span', 'effect', `・${s.effect}`) : null),
-                el('div', 'line', s.with ? el('span', 'with', s.with) : null, s.when ? el('span', 'when', s.when) : null),
+                el('div', 'line', s.with ? el('span', 'with', s.with) : null, s.when ? el('span', 'when', s.when) : null, ZONE_WORD[s.zone] ? el('span', 'where', T(ZONE_WORD[s.zone], { n: (s.zone || '').slice(1) })) : null),
                 s.why ? el('div', 'why', s.why) : null,
               ),
             ),
           ),
         )
+      }
+      // Her side: going first, going second, this turn's steps.
+      const me = f.me || {}
+      const steps = (me.now || []).slice(0, 4)
+      if (me.first || me.second || steps.length) {
+        parts.push(el('h2', '', T('duel.me')))
+        if (steps.length) parts.push(el('ol', 'steps', steps.map(x => el('li', '', x))))
+        if (me.first) parts.push(el('p', 'side', el('b', '', T('duel.first')), me.first))
+        if (me.second) parts.push(el('p', 'side', el('b', '', T('duel.second')), me.second))
       }
       const watch = (f.watch || []).slice(0, 3)
       if (watch.length) {
