@@ -13,6 +13,9 @@
   let lang = 'zh-TW'
   let deck = { theme: '', cards: [] }
   let pictures = {}
+  // Slot → the slots that look like it (copies of the card, duel.rs).
+  let alike = {}
+  let alsoChanged = 0
   let scanning = null
   let hasPicture = false
   let error = null
@@ -117,6 +120,7 @@
     const url = pictures[c.slot] || (c.slot.includes('+') && i ? i.img : null)
     box.append(url ? Object.assign(el('img'), { src: url, alt: '' }) : el('div', 'blank', '＋'))
     if (!c.sure) box.append(el('span', 'q', '?'))
+    if (c.remembered && !c.sure) box.append(el('span', 'mem', T('deck.memBadge')))
     if (i?.hand) box.append(el('span', 'ht', T('deckc.handTrap')))
     box.append(el('span', 'nm', c.name.trim() || T('deck.unnamed')))
     if (i) box.append(el('span', 'st', i.kind & MONSTER ? stars(i) : whatIs(i)))
@@ -185,10 +189,14 @@
     let found = []
     let at = -1
     const was = c.name
+    // Chosen: the copies that look like it (alike) take the name too.
     const choose = card => {
-      c.name = card.name
-      c.id = card.id
-      c.sure = true
+      alsoChanged = 0
+      for (const x of deck.cards)
+        if (x === c || (alike[c.slot] || []).includes(x.slot)) {
+          if (x !== c && (x.name !== card.name || !x.sure)) alsoChanged++
+          Object.assign(x, { name: card.name, id: card.id, sure: true, remembered: false })
+        }
       draw()
     }
     const showFound = () => {
@@ -229,10 +237,10 @@
         else ((c.sure = true), (picked = null), draw())
       }
     })
-    const alike = deck.cards.filter(x => x !== c && x.name.trim() && x.name.trim() === was.trim())
+    const namedAlike = deck.cards.filter(x => x !== c && x.name.trim() && x.name.trim() === was.trim())
     const ok = el('button', 'act good', c.sure ? T('deck.markUnsure') : T('deck.ok'))
-    ok.onclick = () => ((c.sure = !c.sure), draw())
-    const same = alike.length ? el('button', 'act', T('deck.sameAll', { n: alike.length })) : null
+    ok.onclick = () => ((c.sure = !c.sure), (c.remembered = false), draw())
+    const same = namedAlike.length ? el('button', 'act', T('deck.sameAll', { n: namedAlike.length })) : null
     if (same)
       same.onclick = () => {
         for (const x of deck.cards) if (x.name.trim() === was.trim()) Object.assign(x, { name: c.name, id: c.id, sure: true })
@@ -244,11 +252,13 @@
       picked = null
       draw()
     }
+    const note = c.remembered && !c.sure ? el('p', 'memline', T('deck.remembered')) : alsoChanged ? el('p', 'okline', T('deck.alsoChanged', { n: alsoChanged })) : null
+    alsoChanged = 0
     const i = infoOf(c)
     const about = i
       ? el('div', 'about', el('b', '', i.name), el('span', 'what', whatIs(i)), i.kind & MONSTER ? el('span', 'nums', stars(i).replace('  ', '　ATK ').replace('/', ' / DEF ')) : null, i.scale ? el('span', 'what', T('deckc.scale', { n: i.scale })) : null, el('p', 'desc', i.desc))
       : null
-    return el('aside', 'side', pics, arts, about, el('label', 'th', T('deck.cardName')), name, list, el('p', 'hint', T('deck.typeHint')), el('div', 'acts', ok, same, del))
+    return el('aside', 'side', pics, note, arts, about, el('label', 'th', T('deck.cardName')), name, list, el('p', 'hint', T('deck.typeHint')), el('div', 'acts', ok, same, del))
   }
 
   // The deck's numbers: how many of each, the levels, and the chance of a
@@ -386,9 +396,9 @@
 
   $('close').onclick = () => window.pet.duelDeckClose()
   $('cancel').onclick = () => window.pet.duelDeckClose()
-  $('save').onclick = () => window.pet.duelDeckSave({ theme: $('theme').value.trim(), cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure, id: c.id || null })) })
+  $('save').onclick = () => window.pet.duelDeckSave({ theme: $('theme').value.trim(), cards: deck.cards.map(c => ({ slot: c.slot, name: c.name, sure: c.sure, id: c.id || null, remembered: !!c.remembered })) })
   $('allok').onclick = () => {
-    for (const c of deck.cards) c.sure = true
+    for (const c of deck.cards) (c.sure = true), (c.remembered = false)
     draw()
   }
   $('rescan').onclick = () => {
@@ -415,8 +425,9 @@
     for (const [id, key] of [['label', 'deck.label'], ['head', 'deck.title'], ['cancel', 'deck.cancel'], ['save', 'deck.save'], ['allok', 'deck.allOk'], ['rescan', 'deck.rescan'], ['themeLabel', 'deck.theme']]) $(id).textContent = T(key)
     $('theme').placeholder = T('deck.themePh')
     const d = p.deck || {}
-    deck = { theme: d.theme || '', cards: (d.cards || []).map(c => ({ slot: String(c.slot), name: String(c.name || ''), sure: c.sure !== false, id: c.id || null })) }
+    deck = { theme: d.theme || '', cards: (d.cards || []).map(c => ({ slot: String(c.slot), name: String(c.name || ''), sure: c.sure !== false, id: c.id || null, remembered: !!c.remembered })) }
     pictures = p.pictures || {}
+    alike = p.alike || {}
     scanning = p.scanning || null
     hasPicture = !!p.hasPicture
     error = p.error || null

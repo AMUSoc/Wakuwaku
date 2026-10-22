@@ -566,3 +566,22 @@ header .title {
   color: var(--muted);
   font-style: normal;
 }
+
+/* Known by its look from before: for her to look at. */
+.tile .mem {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--good);
+  color: #08200f;
+}
+
+.memline {
+  margin: 0;
+  font-size: 12px;
+  color: var(--good);
+}

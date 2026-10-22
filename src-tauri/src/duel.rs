@@ -731,18 +731,35 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>) {
             std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
             crate::deckscan::sheet(&cards).ok_or("no sheet")?.save(&work.join("sheet.png"))?;
             let main = cards.iter().filter(|(s, _)| s.starts_with('m')).count();
-            let numbered: Vec<(usize, String)> = kept.iter().filter_map(|(slot, name)| cards.iter().position(|(s, _)| s == slot).map(|i| (i + 1, name.clone()))).collect();
+            // The cards she has said are what before, known by their look (yellow
+            // still, for her to look at: her word, 2026-10-22).
+            let memory = crate::deckscan::known(&d);
+            let recalled: Vec<(String, String, Option<u64>)> = cards
+                .iter()
+                .filter(|(slot, _)| !kept.iter().any(|(s, _)| s == slot))
+                .filter_map(|(slot, img)| crate::deckscan::recall(&memory, &crate::deckscan::print(img)).map(|k| (slot.clone(), k.name.clone(), k.id)))
+                .collect();
+            let known_names: Vec<(String, String)> = kept.iter().cloned().chain(recalled.iter().map(|(s, n, _)| (s.clone(), n.clone()))).collect();
+            let numbered: Vec<(usize, String)> = known_names.iter().filter_map(|(slot, name)| cards.iter().position(|(s, _)| s == slot).map(|i| (i + 1, name.clone()))).collect();
             // The theme's cards from the card database, when it has any: picked among, no web search.
             let theme_cards = if theme.is_empty() { Vec::new() } else { crate::cards::with_cards(&sh.dir, |all| crate::cards::theme_cards(all, &theme)).unwrap_or_default() };
             let prompt = crate::deckscan::prompt_of(main, cards.len() - main, &theme, &theme_cards, &numbered);
-            let text = run(&sh, &prompt, DECK_TIMEOUT)?;
-            let found = answer_in(&text).ok_or_else(|| text.chars().take(120).collect::<String>())?;
+            // All known: no one asked.
+            let found = if numbered.len() == cards.len() {
+                json!({ "cards": [] })
+            } else {
+                let text = run(&sh, &prompt, DECK_TIMEOUT)?;
+                answer_in(&text).ok_or_else(|| text.chars().take(120).collect::<String>())?
+            };
             let read: Vec<Value> = cards
                 .iter()
                 .enumerate()
                 .map(|(i, (slot, _))| {
                     if let Some((_, name)) = kept.iter().find(|(s, _)| s == slot) {
                         return json!({ "slot": slot, "name": name, "sure": true });
+                    }
+                    if let Some((_, name, id)) = recalled.iter().find(|(s, _, _)| s == slot) {
+                        return json!({ "slot": slot, "name": name, "id": id, "sure": false, "remembered": true });
                     }
                     let c = found["cards"].as_array().and_then(|a| a.iter().find(|c| c["n"].as_u64() == Some(i as u64 + 1)));
                     let said = c.and_then(|c| c["name"].as_str()).unwrap_or("");
@@ -759,7 +776,7 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>) {
         })();
         let took = crate::now_ms().saturating_sub(started) / 1000;
         match &done {
-            Ok(()) => sh.log(&format!("duel: her deck read card by card in {took} s")),
+            Ok(()) => sh.log(&format!("duel: her deck read card by card in {took} s ({} known by their look)", crate::deckscan::read_deck(&dir(&sh))["cards"].as_array().map_or(0, |a| a.iter().filter(|c| c["remembered"] == true).count()))),
             Err(why) => sh.log(&format!("duel: her deck not read ({why})")),
         }
         *SCANNING.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -806,7 +823,16 @@ fn deck_view(sh: &Shared) -> Value {
         })
         .collect();
     let scanning = *SCANNING.lock().unwrap_or_else(|e| e.into_inner());
-    json!({ "lang": sh.lang(), "deck": deck, "pictures": pictures, "scanning": scanning, "hasPicture": d.join("full.png").is_file(), "text": deck_of(sh) })
+    // Which slots look alike (copies of a card): one renamed renames the others.
+    let looks: Vec<(String, Vec<f32>)> = pictures
+        .keys()
+        .filter_map(|slot| Some((slot.clone(), crate::deckscan::print(&crate::deckscan::Image::load(&slots_dir.join(format!("{slot}.png")))?))))
+        .collect();
+    let alike: serde_json::Map<String, Value> = looks
+        .iter()
+        .map(|(slot, look)| (slot.clone(), json!(looks.iter().filter(|(s, l)| s != slot && crate::deckscan::alike(look, l) >= crate::deckscan::ALIKE).map(|(s, _)| s).collect::<Vec<_>>())))
+        .collect();
+    json!({ "lang": sh.lang(), "deck": deck, "pictures": pictures, "alike": alike, "scanning": scanning, "hasPicture": d.join("full.png").is_file(), "text": deck_of(sh) })
 }
 
 // Up, in the middle of the display the game is on (it takes the keyboard: names are typed in it).
@@ -912,7 +938,7 @@ pub fn save_deck(sh: &Arc<Shared>, deck: &Value) {
         .filter_map(|c| {
             let slot = c["slot"].as_str().filter(|s| s.len() <= 8 && (s.starts_with('m') || s.starts_with('e')))?;
             let name: String = c["name"].as_str().unwrap_or("").trim().chars().take(60).collect();
-            Some(json!({ "slot": slot, "name": name, "sure": c["sure"] != false, "id": c["id"].as_u64() }))
+            Some(json!({ "slot": slot, "name": name, "sure": c["sure"] != false, "id": c["id"].as_u64(), "remembered": c["sure"] == false && c["remembered"] == true }))
         })
         .take(80)
         .collect();
@@ -921,7 +947,21 @@ pub fn save_deck(sh: &Arc<Shared>, deck: &Value) {
     let _ = std::fs::create_dir_all(dir(sh));
     let _ = std::fs::write(crate::deckscan::deck_path(&dir(sh)), deck.to_string());
     sh.change(json!({ "duelDeck": crate::deckscan::text_of(&deck) }));
-    sh.log("duel: her deck put right by hand");
+    // Each card she marked right, its look learnt: known the next time it is read.
+    let slots = dir(sh).join("slots");
+    let learnt: Vec<crate::deckscan::Known> = deck["cards"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["sure"] == true && !c["name"].as_str().unwrap_or("").is_empty())
+        .filter_map(|c| {
+            let img = crate::deckscan::Image::load(&slots.join(format!("{}.png", c["slot"].as_str()?)))?;
+            Some(crate::deckscan::Known { look: crate::deckscan::print(&img), name: c["name"].as_str()?.to_string(), id: c["id"].as_u64() })
+        })
+        .collect();
+    let n = learnt.len();
+    crate::deckscan::remember(&dir(sh), learnt);
+    sh.log(&format!("duel: her deck put right by hand, {n} cards' looks learnt"));
     close_deck(sh);
 }
 

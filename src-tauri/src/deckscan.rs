@@ -208,6 +208,91 @@ pub fn prompt_of(main: usize, extra: usize, theme: &str, theme_cards: &[String],
     p
 }
 
+// --- A card's look, to tell copies apart and know it again ---------------------------------
+
+// Its art (the card's middle, past its name and rarity at the top and
+// above its text) in 12x12 grey, each the average of its square, less
+// their mean and over their spread: Master Duel's shine makes copies of a
+// card brighter or darker, not otherwise. Measured on her 55 cards
+// (2026-10-22): copies alike 0.955 and more, other cards 0.57 at most (one
+// copy with its shine moving, 0.74 to the others, is left to her).
+pub const ALIKE: f32 = 0.85;
+const PRINT: usize = 12;
+
+pub fn print(img: &Image) -> Vec<f32> {
+    let (x0, x1) = ((img.w as f32 * 0.12) as usize, (img.w as f32 * 0.88) as usize);
+    let (y0, y1) = ((img.h as f32 * 0.18) as usize, (img.h as f32 * 0.66) as usize);
+    let mut cells = vec![0f32; PRINT * PRINT];
+    let mut counts = vec![0f32; PRINT * PRINT];
+    for y in y0..y1.min(img.h) {
+        for x in x0..x1.min(img.w) {
+            let cell = ((y - y0) * PRINT / (y1 - y0).max(1)).min(PRINT - 1) * PRINT + ((x - x0) * PRINT / (x1 - x0).max(1)).min(PRINT - 1);
+            let i = (y * img.w + x) * 3;
+            cells[cell] += 0.299 * img.rgb[i] as f32 + 0.587 * img.rgb[i + 1] as f32 + 0.114 * img.rgb[i + 2] as f32;
+            counts[cell] += 1.0;
+        }
+    }
+    for (v, n) in cells.iter_mut().zip(&counts) {
+        *v /= n.max(1.0);
+    }
+    let mean = cells.iter().sum::<f32>() / cells.len() as f32;
+    let spread = (cells.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / cells.len() as f32).sqrt().max(1.0);
+    cells.iter().map(|v| (v - mean) / spread).collect()
+}
+
+// How alike two are: 1 the same, 0 nothing alike.
+pub fn alike(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    a.iter().zip(b).map(|(x, y)| x * y).sum::<f32>() / a.len() as f32
+}
+
+// The cards she has said are what (duel/known.json): a look each, its name
+// and passcode; a deck read again is filled from it (she asked, 2026-10-22).
+fn known_path(dir: &Path) -> PathBuf {
+    dir.join("known.json")
+}
+
+pub struct Known {
+    pub look: Vec<f32>,
+    pub name: String,
+    pub id: Option<u64>,
+}
+
+pub fn known(dir: &Path) -> Vec<Known> {
+    let list: Vec<Value> = std::fs::read_to_string(known_path(dir)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    list.iter()
+        .filter_map(|k| {
+            Some(Known {
+                look: k["p"].as_array()?.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32 / 100.0).collect(),
+                name: k["name"].as_str()?.to_string(),
+                id: k["id"].as_u64(),
+            })
+        })
+        .collect()
+}
+
+// What a look is, when she has said so for one like it.
+pub fn recall<'a>(known: &'a [Known], look: &[f32]) -> Option<&'a Known> {
+    known.iter().map(|k| (alike(&k.look, look), k)).filter(|(s, _)| *s >= ALIKE).max_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, k)| k)
+}
+
+// These learnt: one like a known look puts it right (she knows better now),
+// others added; the last 3000 kept.
+pub fn remember(dir: &Path, learnt: Vec<Known>) {
+    let mut all = known(dir);
+    for k in learnt {
+        match all.iter_mut().find(|o| alike(&o.look, &k.look) >= ALIKE) {
+            Some(o) => *o = k,
+            None => all.push(k),
+        }
+    }
+    let skip = all.len().saturating_sub(3000);
+    let list: Vec<Value> = all[skip..].iter().map(|k| json!({ "p": k.look.iter().map(|v| (v * 100.0).round() as i32).collect::<Vec<_>>(), "name": k.name, "id": k.id })).collect();
+    let _ = std::fs::write(known_path(dir), Value::Array(list).to_string());
+}
+
 // The slots and what each was read as, the deck window's (duel/deck.json).
 pub fn deck_path(dir: &Path) -> PathBuf {
     dir.join("deck.json")
@@ -251,6 +336,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn copies_of_a_card_alike_through_its_shine_and_known_again() {
+        // A card's art, and the same brighter (its shine); another card.
+        let art = |f: &dyn Fn(usize, usize) -> u8| {
+            let (w, h) = (68, 99);
+            Image { w, h, rgb: (0..w * h).flat_map(|i| { let v = f(i % w, i / w); [v, v, v] }).collect() }
+        };
+        let card = art(&|x, y| ((x * 7 + y * 3) % 200) as u8);
+        let shiny = art(&|x, y| (((x * 7 + y * 3) % 200) as f32 * 0.8 + 40.0) as u8);
+        let other = art(&|x, y| ((x * 13 + (99 - y) * 11) % 230) as u8);
+        assert!(alike(&print(&card), &print(&shiny)) > 0.99);
+        assert!(alike(&print(&card), &print(&other)) < ALIKE);
+        let dir = std::env::temp_dir().join(format!("wakuwaku-known-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        remember(&dir, vec![Known { look: print(&card), name: "灰流麗".into(), id: Some(14558127) }]);
+        // Said again otherwise: put right, not added.
+        remember(&dir, vec![Known { look: print(&shiny), name: "灰流麗".into(), id: Some(14558127) }, Known { look: print(&other), name: "增殖的Z".into(), id: None }]);
+        let k = known(&dir);
+        assert_eq!(k.len(), 2);
+        assert_eq!(recall(&k, &print(&card)).map(|k| k.id), Some(Some(14558127)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_deck_as_lines_with_its_counts() {
         let deck = json!({ "theme": "雷熱祀劍", "cards": [
             { "slot": "m0", "name": "灰流麗", "sure": true },
@@ -274,3 +382,4 @@ mod tests {
         assert!(p.contains("冰燃・雷熱渦爐、劍極・雷熱渦爐") && p.contains("不用上網查") && !p.contains("WebSearch 查"));
     }
 }
+
