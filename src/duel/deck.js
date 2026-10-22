@@ -273,17 +273,31 @@
   function drawList() {
     const typedOrFiltered = query.trim() || Object.values(filter).some(Boolean)
     $('listNote').textContent = listLoading ? T('deck.dbLoading') : !listed.length ? T('dk.noResults') : typedOrFiltered ? T('dk.found', { n: listed.length }) : T('dk.around')
-    $('cards').replaceChildren(
-      ...listed.map(i => {
-        const n = copies(i.name)
-        const b = el('button', `lcard${viewing && viewing.id === i.id ? ' on' : ''}`, img(i.img), n ? el('span', 'cnt', `×${n}`) : null, i.hand ? el('span', 'ht', T('deckc.handTrap')) : null)
-        b.title = `${i.name}\n${typeLine(i)}`
-        b.onclick = () => ((viewing = i), draw())
-        b.ondblclick = () => add(i)
-        return b
-      }),
-    )
+    // Built once for each list that comes back; a click or a card added only
+    // marks it (rebuilt, the list jumped back to its top and its pictures blinked).
+    if (built !== listed) {
+      built = listed
+      $('cards').replaceChildren(
+        ...listed.map(i => {
+          const b = el('button', 'lcard', img(i.img), el('span', 'cnt'), i.hand ? el('span', 'ht', T('deckc.handTrap')) : null)
+          b.card = i
+          b.title = `${i.name}\n${typeLine(i)}`
+          b.onclick = () => ((viewing = i), draw())
+          b.ondblclick = () => add(i)
+          return b
+        }),
+      )
+      $('cards').scrollTop = 0
+    }
+    for (const b of $('cards').children) {
+      const n = copies(b.card.name)
+      b.classList.toggle('on', !!viewing && viewing.id === b.card.id)
+      const cnt = b.querySelector('.cnt')
+      cnt.textContent = n ? `×${n}` : ''
+      cnt.hidden = !n
+    }
   }
+  let built = null
 
   function drawFilters() {
     const chips = [['', T('deckc.all')], ['monster', T('deckc.monster')], ['spell', T('deckc.spell')], ['trap', T('deckc.trap')], ['hand', T('deckc.handTrap')]].map(([v, text]) => {

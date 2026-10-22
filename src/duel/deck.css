@@ -1,19 +1,20 @@
-/* Her deck, laid out and coloured as Master Duel's deck editor (deck.js):
-   dark navy panels edged in light blue, white bold text, black rounded
-   buttons outlined in white, the active tab in the game's lime. */
+/* Her deck, laid out as Master Duel's deck editor (deck.js) but in
+   Wakuwaku's own look (the game's colours felt out of place, she said,
+   2026-10-23): dark glass, thin edges, rounded, Claude's orange. */
 :root {
-  --bg: #070d1c;
-  --panel: rgba(12, 28, 52, 0.96);
-  --panel-2: rgba(6, 16, 32, 0.9);
-  --edge: rgba(120, 180, 240, 0.35);
-  --edge-strong: rgba(150, 210, 255, 0.75);
-  --fg: #e9f0fb;
+  /* Wakuwaku's own (duel.css, the island): dark glass, Claude's orange. */
+  --bg: #121726;
+  --panel: rgba(255, 255, 255, 0.04);
+  --panel-2: rgba(30, 36, 56, 0.85);
+  --edge: rgba(150, 170, 220, 0.16);
+  --edge-strong: rgba(150, 170, 220, 0.35);
+  --fg: #e6e8ef;
   --strong: #ffffff;
-  --muted: #8ea3c2;
-  --lime: #c4ef17;
-  --lime-ink: #10200a;
-  --warn: #ffc23f;
-  --good: #59e39a;
+  --muted: #8f97ad;
+  --lime: #e8732a;
+  --lime-ink: #ffffff;
+  --warn: #ffb340;
+  --good: #4fd88f;
   --bad: #ff6b6b;
   --claude: #e8732a;
 }
@@ -44,7 +45,7 @@ body {
   background:
     radial-gradient(900px 500px at 85% 0%, rgba(90, 60, 200, 0.25), transparent 60%),
     radial-gradient(700px 500px at 0% 100%, rgba(30, 90, 180, 0.25), transparent 60%),
-    linear-gradient(160deg, #0b1630, var(--bg));
+    linear-gradient(160deg, #1a2034, var(--bg));
 }
 
 button {
@@ -75,7 +76,7 @@ select:focus {
 }
 
 select option {
-  background: #0b1630;
+  background: #1a2034;
 }
 
 /* --- The top bar ------------------------------------------------------------------ */
@@ -92,7 +93,7 @@ select option {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: #05080f;
+  background: var(--panel-2);
   border: 2px solid var(--lime);
   color: var(--lime);
   font-size: 16px;
@@ -124,7 +125,7 @@ select option {
 .pill {
   padding: 8px 14px;
   border-radius: 999px;
-  background: #05080f;
+  background: var(--panel-2);
   border: 1.5px solid var(--edge-strong);
   font-weight: 700;
   white-space: nowrap;
@@ -138,8 +139,8 @@ select option {
 .savebtn {
   padding: 8px 26px;
   border-radius: 12px;
-  background: #05080f;
-  border: 2px solid #d9e2f0;
+  background: var(--panel-2);
+  border: 2px solid var(--edge-strong);
   color: var(--strong);
   font-weight: 800;
   font-size: 15px;
@@ -166,7 +167,7 @@ select option {
   gap: 6px;
   padding: 10px;
   border-radius: 12px;
-  background: #0b1630;
+  background: #1a2034;
   border: 1px solid var(--edge-strong);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
 }
@@ -214,7 +215,7 @@ select option {
 .themebox button {
   padding: 5px 10px;
   border-radius: 8px;
-  background: #05080f;
+  background: var(--panel-2);
   border: 1px solid var(--edge-strong);
   font-size: 12px;
 }
@@ -404,8 +405,8 @@ select option {
 .act {
   padding: 9px 0;
   border-radius: 10px;
-  background: #05080f;
-  border: 2px solid #d9e2f0;
+  background: var(--panel-2);
+  border: 2px solid var(--edge-strong);
   font-weight: 800;
   font-size: 15px;
 }
@@ -680,7 +681,7 @@ select option {
 .square {
   width: 40px;
   border-radius: 10px;
-  background: #05080f;
+  background: var(--panel-2);
   border: 1.5px solid var(--edge-strong);
 }
 
@@ -715,7 +716,7 @@ select option {
 .chip {
   padding: 4px 10px;
   border-radius: 999px;
-  background: #05080f;
+  background: var(--panel-2);
   border: 1px solid var(--edge);
   font-size: 12px;
 }
@@ -896,7 +897,7 @@ select option {
   max-width: 400px;
   padding: 20px 22px;
   border-radius: 12px;
-  background: #0b1630;
+  background: #1a2034;
   border: 1px solid var(--edge-strong);
   color: var(--strong);
 }
@@ -915,7 +916,7 @@ select option {
 .askbtns button:not(.savebtn) {
   padding: 8px 14px;
   border-radius: 10px;
-  background: #05080f;
+  background: var(--panel-2);
   border: 1.5px solid var(--edge-strong);
 }
 
@@ -967,4 +968,146 @@ select option {
 
 .dfoot .acts {
   margin-top: 0;
+}
+
+/* --- Wakuwaku's look over the layout ------------------------------------------------- */
+#app {
+  border-radius: 18px;
+  background:
+    radial-gradient(700px 360px at 0% 0%, rgba(232, 115, 42, 0.12), transparent 60%),
+    radial-gradient(700px 400px at 100% 100%, rgba(139, 124, 216, 0.12), transparent 60%),
+    var(--bg);
+}
+
+#top {
+  background: transparent;
+  border-bottom: 1px solid var(--edge);
+}
+
+.round {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  background: var(--panel-2);
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.round:hover {
+  border-color: rgba(232, 115, 42, 0.6);
+  background: var(--panel-2);
+}
+
+.pill,
+.act,
+.chip,
+.square,
+.themebox button,
+.askbtns button:not(.savebtn) {
+  border: 1px solid var(--edge) !important;
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.pill:hover,
+.act:hover:not(:disabled),
+.chip:hover,
+.square:hover {
+  border-color: rgba(232, 115, 42, 0.6) !important;
+  color: var(--fg);
+}
+
+.act {
+  font-weight: 700;
+  font-size: 14px;
+  padding: 8px 0;
+}
+
+/* Saving, the one to press: filled orange, as Wakuwaku's primary buttons. */
+.savebtn {
+  border-radius: 10px;
+  border: 1px solid var(--claude);
+  background: var(--claude);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 8px 20px;
+}
+
+.savebtn:hover {
+  border-color: #ff8a45;
+  background: #ff8a45;
+  color: #fff;
+}
+
+.panel {
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  box-shadow: none;
+}
+
+.dhead {
+  background: transparent;
+}
+
+.dicon {
+  color: var(--claude);
+}
+
+.tabs {
+  gap: 6px;
+  padding: 8px 8px 0;
+}
+
+.tab {
+  border-radius: 10px;
+  padding: 8px 0;
+  background: var(--panel-2);
+  border: 1px solid var(--edge);
+  font-weight: 700;
+}
+
+.tab.on {
+  background: var(--claude);
+  border-color: var(--claude);
+  color: #fff;
+}
+
+.chip.on,
+.square.on {
+  background: var(--claude);
+  border-color: var(--claude) !important;
+  color: #fff;
+}
+
+.attr {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--edge);
+}
+
+.nums .lv {
+  color: var(--warn);
+}
+
+.tile.picked,
+.lcard.on {
+  border-color: var(--claude);
+  box-shadow: 0 0 0 2px rgba(232, 115, 42, 0.35);
+}
+
+#toast {
+  background: var(--good);
+  color: #08200f;
+}
+
+.empty {
+  border-style: solid;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+input:focus,
+select:focus {
+  border-color: var(--claude);
 }
