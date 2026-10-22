@@ -1180,11 +1180,12 @@ pub fn open_deck(sh: &Arc<Shared>) {
     let _ = crate::cards::with_cards(&sh.dir, |_| ());
     let a = game_pid().and_then(os::window_rect).and_then(|r| sh.screens().near((r.l + r.r) / 2, (r.t + r.b) / 2)).or_else(|| crate::island::area(sh));
     let Some(a) = a else { return };
-    let (mut w, mut h) = (((1080.0 * a.sf) as i32).min(a.w - 40), ((760.0 * a.sf) as i32).min(a.h - 40));
+    // Three panels as the game's deck editor: about 1280 wide.
+    let (mut w, mut h) = (((1280.0 * a.sf) as i32).min(a.w - 40), ((800.0 * a.sf) as i32).min(a.h - 40));
     let mut pos = (a.x + (a.w - w) / 2, a.y + (a.h - h) / 2);
     // Where she left it, while its top is still on a display.
     if let Some((x, y, sw, sh_)) = deck_spot(sh).filter(|&(x, y, sw, _)| sh.screens().near(x + sw / 2, y + 20).is_some()) {
-        (pos, w, h) = ((x, y), sw.max(400), sh_.max(300));
+        (pos, w, h) = ((x, y), sw.max((1000.0 * a.sf) as i32).min(a.w), sh_.max((600.0 * a.sf) as i32).min(a.h));
     }
     if !DECK_MADE.swap(true, Ordering::SeqCst) {
         let sh = sh.clone();
@@ -1198,7 +1199,7 @@ pub fn open_deck(sh: &Arc<Shared>) {
                 .transparent(true)
                 .decorations(false)
                 .resizable(true)
-                .min_inner_size(560.0, 420.0)
+                .min_inner_size(1000.0, 600.0)
                 .skip_taskbar(true)
                 .shadow(false)
                 .always_on_top(true)
@@ -1227,6 +1228,22 @@ pub fn open_deck(sh: &Arc<Shared>) {
 
 // The deck window's drop-down: cards by what is typed (none while the
 // database is being fetched the first time: "loading").
+// The deck window's card list (cards.rs browse): what is typed, the filters,
+// and, nothing asked, her deck's cards, its theme's and the hand traps.
+pub fn browse_cards(sh: &Shared, q: &str, filter: &Value, names: &[String], theme: &str) -> Value {
+    let got = crate::cards::with_cards(&sh.dir, |all| {
+        let mut around: Vec<String> = names.to_vec();
+        if !theme.trim().is_empty() {
+            around.extend(crate::cards::theme_cards(all, theme));
+        }
+        crate::cards::browse(all, q, filter, &around, 150)
+    });
+    match got {
+        Some(found) => json!({ "cards": found }),
+        None => json!({ "cards": [], "loading": true }),
+    }
+}
+
 pub fn search_cards(sh: &Shared, q: &str) -> Value {
     match crate::cards::with_cards(&sh.dir, |all| crate::cards::search(all, q, 12)) {
         Some(found) => json!({ "cards": found }),

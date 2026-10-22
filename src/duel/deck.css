@@ -1,367 +1,371 @@
-/* Her deck as the game shows it (deck.js): tiles of the cards, the unsure in
-   yellow with a "?", the picked one large on the right. */
-.deckpanel {
-  padding: 16px 18px 12px;
-  /* Solid: the game under it made the cards hard to read. */
-  background:
-    radial-gradient(600px 300px at 0% 0%, rgba(232, 115, 42, 0.12), transparent 60%),
-    #121726 !important;
+/* Her deck, laid out and coloured as Master Duel's deck editor (deck.js):
+   dark navy panels edged in light blue, white bold text, black rounded
+   buttons outlined in white, the active tab in the game's lime. */
+:root {
+  --bg: #070d1c;
+  --panel: rgba(12, 28, 52, 0.96);
+  --panel-2: rgba(6, 16, 32, 0.9);
+  --edge: rgba(120, 180, 240, 0.35);
+  --edge-strong: rgba(150, 210, 255, 0.75);
+  --fg: #e9f0fb;
+  --strong: #ffffff;
+  --muted: #8ea3c2;
+  --lime: #c4ef17;
+  --lime-ink: #10200a;
+  --warn: #ffc23f;
+  --good: #59e39a;
+  --bad: #ff6b6b;
+  --claude: #e8732a;
 }
 
-header {
-  align-items: center;
+* {
+  box-sizing: border-box;
 }
 
-.themebox {
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
+  color: var(--fg);
+  font-family: 'Microsoft JhengHei UI', 'Microsoft YaHei UI', 'PingFang TC', system-ui, sans-serif;
+  background: transparent;
+}
+
+#app {
+  position: absolute;
+  inset: 0;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  background:
+    radial-gradient(900px 500px at 85% 0%, rgba(90, 60, 200, 0.25), transparent 60%),
+    radial-gradient(700px 500px at 0% 100%, rgba(30, 90, 180, 0.25), transparent 60%),
+    linear-gradient(160deg, #0b1630, var(--bg));
 }
 
-.themebox label {
-  font-size: 12px;
-  color: var(--muted);
-  white-space: nowrap;
+button {
+  font: inherit;
+  color: var(--fg);
+  cursor: pointer;
 }
 
-#theme,
-input.name {
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+input,
+select {
   font: inherit;
   color: var(--strong);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 7px 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  padding: 6px 10px;
   outline: none;
 }
 
-#theme {
-  width: 210px;
+input:focus,
+select:focus {
+  border-color: var(--lime);
 }
 
-input:focus {
-  border-color: var(--claude);
+select option {
+  background: #0b1630;
 }
 
-button.primary {
-  background: var(--claude);
-  border-color: var(--claude);
-  color: #fff;
-  padding: 7px 14px;
+/* --- The top bar ------------------------------------------------------------------ */
+#top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.15));
+  border-bottom: 1px solid var(--edge);
+}
+
+.round {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #05080f;
+  border: 2px solid var(--lime);
+  color: var(--lime);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.round:hover {
+  background: rgba(196, 239, 23, 0.15);
+}
+
+.brand {
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--claude);
+  font-size: 13px;
+}
+
+.grow {
+  flex: 1;
+  align-self: stretch;
+}
+
+#dirty {
+  color: var(--warn);
+  font-size: 12px;
   white-space: nowrap;
 }
 
-.cols {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  gap: 14px;
-  margin-top: 12px;
+.pill {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #05080f;
+  border: 1.5px solid var(--edge-strong);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
-#grids {
-  flex: 1;
-  overflow-y: auto;
-  padding-right: 4px;
+.pill:hover {
+  border-color: var(--lime);
 }
 
-#grids::-webkit-scrollbar {
-  width: 6px;
-}
-
-#grids::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border-radius: 3px;
-}
-
-#grids h2 {
-  margin: 4px 0 8px;
+/* As the game's 儲存: black, outlined in white, bold. */
+.savebtn {
+  padding: 8px 26px;
+  border-radius: 12px;
+  background: #05080f;
+  border: 2px solid #d9e2f0;
   color: var(--strong);
-  font-size: 14px;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.tile {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 3px;
-  padding: 3px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 2px solid transparent;
-  cursor: pointer;
-  text-align: center;
-}
-
-.tile:hover {
-  border-color: rgba(255, 255, 255, 0.25);
-}
-
-.tile img,
-.tile .blank {
-  width: 100%;
-  aspect-ratio: 68 / 99;
-  border-radius: 4px;
-  object-fit: cover;
-  display: block;
-}
-
-.tile .blank {
-  display: grid;
-  place-items: center;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--muted);
-  font-size: 22px;
-}
-
-.tile .nm {
-  font-size: 11px;
-  line-height: 1.25;
-  color: var(--fg);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  min-height: 2.5em;
-}
-
-.tile.unsure {
-  border-color: rgba(255, 179, 64, 0.85);
-  background: rgba(255, 179, 64, 0.1);
-}
-
-.tile.unsure .nm {
-  color: #ffd38a;
-}
-
-.tile .q {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--warn);
-  color: #1a1206;
   font-weight: 800;
-  font-size: 13px;
-  display: grid;
-  place-items: center;
-}
-
-.tile.picked {
-  border-color: var(--claude);
-  box-shadow: 0 0 0 2px rgba(232, 115, 42, 0.35);
-}
-
-.addtile .nm {
-  color: var(--muted);
-}
-
-#side {
-  flex: 0 0 240px;
-  overflow-y: auto;
-}
-
-.side {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
-}
-
-.side h3 {
-  margin: 0;
-  color: var(--strong);
   font-size: 15px;
+  white-space: nowrap;
 }
 
-.side img.big,
-.side .bigblank {
-  width: 100%;
-  aspect-ratio: 68 / 99;
-  border-radius: 8px;
-  object-fit: cover;
-  image-rendering: auto;
+.savebtn:hover {
+  border-color: var(--lime);
+  color: var(--lime);
 }
 
-.side .bigblank {
-  display: grid;
-  place-items: center;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--muted);
-  font-size: 40px;
+.menuwrap {
+  position: relative;
 }
 
-.th {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.acts {
+#menuList {
+  position: absolute;
+  right: 0;
+  top: 46px;
+  z-index: 20;
+  width: 280px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #0b1630;
+  border: 1px solid var(--edge-strong);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
 }
 
-.act {
-  padding: 7px 10px;
-  font-size: 13px;
+#menuList[hidden] {
+  display: none;
 }
 
-.act.good {
-  border-color: rgba(79, 216, 143, 0.5);
-  color: var(--good);
+#menuList > button {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
 }
 
-.act.bad:hover {
+#menuList > button:hover:not(:disabled) {
+  border-color: var(--edge-strong);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+#menuList > button.bad:hover:not(:disabled) {
   border-color: var(--bad);
   color: var(--bad);
 }
 
-.warnline {
-  color: var(--warn);
-  margin: 0;
-}
-
-.okline {
-  color: var(--good);
-  margin: 0;
-}
-
-.empty {
-  padding: 16px;
-  margin-bottom: 10px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--muted);
-}
-
-#scan {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 12px;
-  background: rgba(18, 23, 38, 0.82);
-  border-radius: 12px;
-  color: var(--strong);
-  font-size: 15px;
-  text-align: center;
-}
-
-#scan[hidden] {
-  display: none;
-}
-
-footer button {
-  padding: 7px 16px;
-  font-size: 13px;
-}
-
-#status {
-  color: var(--bad);
-}
-
-#side {
-  flex-basis: 300px;
-}
-
-.pics {
+.themebox {
   display: flex;
-  gap: 8px;
-}
-
-.pics figure {
-  flex: 1;
-  margin: 0;
-  min-width: 0;
-}
-
-.pics figcaption {
-  margin-top: 3px;
-  font-size: 11px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--edge);
+  font-size: 12px;
   color: var(--muted);
-  text-align: center;
 }
 
-.picks {
+.themebox input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.themebox button {
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: #05080f;
+  border: 1px solid var(--edge-strong);
+  font-size: 12px;
+}
+
+/* --- The three panels ------------------------------------------------------------- */
+#cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 270px 1fr 330px;
+  gap: 12px;
+  padding: 12px;
+}
+
+.panel {
+  position: relative;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  max-height: 260px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03), 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* The card's details, as the game's left panel. */
+#detail {
+  padding: 12px;
+  gap: 8px;
   overflow-y: auto;
 }
 
-.pick {
+.hello {
+  margin: auto 0;
+  text-align: center;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.dname {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 4px 6px;
-  text-align: left;
-  border-radius: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--edge);
 }
 
-.pick.on,
-.pick:hover {
-  border-color: var(--claude);
-  background: rgba(232, 115, 42, 0.14);
+.dname b {
+  color: var(--strong);
+  font-size: 17px;
+  line-height: 1.3;
 }
 
-.pick img {
-  width: 34px;
-  height: 49px;
-  object-fit: cover;
-  border-radius: 3px;
+.attr {
   flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(150, 90, 220, 0.35);
+  border: 1px solid rgba(200, 150, 255, 0.6);
+  font-weight: 800;
+  font-size: 13px;
 }
 
-.pick .pn {
+.top2 {
+  display: flex;
+  gap: 10px;
+}
+
+.top2 .art {
+  width: 108px;
+  aspect-ratio: 68 / 99;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+.nums {
   display: flex;
   flex-direction: column;
-  min-width: 0;
-}
-
-.pick b {
-  font-size: 13px;
+  gap: 5px;
+  font-weight: 800;
+  font-size: 20px;
   color: var(--strong);
-  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-.pick small {
+.nums .lv {
+  color: #ffd84d;
+}
+
+.nums small {
   font-size: 11px;
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin-right: 6px;
 }
 
-.hint {
+.nums .have {
+  font-size: 12px;
+  color: var(--lime);
+}
+
+.ht {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(139, 124, 216, 0.9);
+  color: #fff;
+}
+
+.nums .ht {
+  align-self: flex-start;
+}
+
+.type {
+  font-weight: 800;
+  color: var(--strong);
+}
+
+.desc {
   margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.compare {
+  display: flex;
+  gap: 8px;
+}
+
+.compare figure {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+}
+
+.compare img {
+  width: 100%;
+  aspect-ratio: 68 / 99;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.compare figcaption {
   font-size: 11px;
   color: var(--muted);
-}
-
-/* The two pictures side by side, small enough to leave the list in sight. */
-.pics {
-  justify-content: center;
-}
-
-.pics figure {
-  flex: 0 1 120px;
 }
 
 .arts {
@@ -371,160 +375,434 @@ footer button {
   align-items: center;
 }
 
-.arts .th {
+.arts .note {
   width: 100%;
 }
 
-.art {
+.artb {
   padding: 1px;
+  background: transparent;
+  border: 1px solid var(--edge);
   border-radius: 4px;
 }
 
-.art img {
+.artb img {
   width: 30px;
   height: 44px;
+  object-fit: cover;
+  display: block;
+}
+
+/* As the game's +1 / −1. */
+.acts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.act {
+  padding: 9px 0;
+  border-radius: 10px;
+  background: #05080f;
+  border: 2px solid #d9e2f0;
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.act:hover:not(:disabled) {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+
+.act.wide,
+.savebtn.wide {
+  width: 100%;
+  font-size: 14px;
+}
+
+.act.good {
+  border-color: var(--good);
+  color: var(--good);
+}
+
+/* The deck, in the middle. */
+.dhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.dicon {
+  font-size: 22px;
+  color: #b7a4ff;
+}
+
+#decks {
+  max-width: 240px;
+  font-size: 16px;
+  font-weight: 800;
+  background: transparent;
+  border-color: transparent;
+}
+
+#decks:hover {
+  border-color: var(--edge);
+}
+
+#deckName {
+  flex: 1;
+  min-width: 80px;
+  font-size: 13px;
+}
+
+#grids {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 10px;
+}
+
+.dsec h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin: 10px 0 6px;
+  font-size: 16px;
+  color: var(--strong);
+}
+
+.dsec h2 .n {
+  font-size: 18px;
+}
+
+.dsec.e {
+  border-top: 1px solid var(--edge);
+  margin-top: 8px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.tile {
+  position: relative;
+  padding: 0;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 4px;
+}
+
+.tile img,
+.tile .blank {
+  width: 100%;
+  aspect-ratio: 68 / 99;
   object-fit: cover;
   display: block;
   border-radius: 3px;
 }
 
-.art.on {
-  border-color: var(--claude);
+.tile .blank {
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
 }
 
-/* Moved by its top. */
-header,
-header .title {
-  cursor: grab;
-}
-
-/* The sort and the filters, as the game's deck editor has them. */
-#tools .tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-#tools select,
-#tools input.q {
-  font: inherit;
-  font-size: 12px;
-  color: var(--fg);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 4px 6px;
-  outline: none;
-}
-
-#tools select.on {
-  border-color: var(--claude);
-  color: var(--strong);
-}
-
-#tools select option {
-  background: #121726;
-}
-
-#tools input.q {
-  width: 150px;
-}
-
-.chips {
-  display: flex;
-  gap: 3px;
-}
-
-.chip {
-  padding: 4px 9px;
-  font-size: 12px;
-  border-radius: 999px;
-}
-
-.chip.on {
-  background: var(--claude);
-  border-color: var(--claude);
-  color: #fff;
-}
-
-.match {
-  font-size: 12px;
-  color: var(--claude);
-}
-
-.tile.dim {
-  opacity: 0.22;
-}
-
-.tile .st {
+.tile .nm {
+  display: block;
   font-size: 10px;
+  line-height: 1.3;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.tile .ht {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  padding: 0 4px;
-  border-radius: 4px;
-  font-size: 10px;
-  background: rgba(139, 124, 216, 0.9);
-  color: #fff;
+.tile:hover {
+  border-color: var(--edge-strong);
 }
 
-/* The card's own word: what it is, its numbers, its text. */
-.about {
+.tile.picked {
+  border-color: var(--lime);
+  box-shadow: 0 0 10px rgba(196, 239, 23, 0.5);
+}
+
+.tile.unsure {
+  border-color: rgba(255, 194, 63, 0.85);
+}
+
+.tile.unsure .nm {
+  color: var(--warn);
+}
+
+.tile .q {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--warn);
+  color: #1a1206;
+  font-weight: 900;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+}
+
+.tile .mem {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  background: var(--good);
+  color: #08200f;
+}
+
+.empty {
+  margin: 14px 0;
+  padding: 16px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px dashed var(--edge);
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 8px;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.25);
+  align-items: flex-start;
+  gap: 10px;
 }
 
-.about b {
+.empty p {
+  margin: 0;
+}
+
+#scan {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  background: rgba(7, 13, 28, 0.85);
   color: var(--strong);
 }
 
-.about .what {
-  font-size: 12px;
-  color: var(--claude);
+#scan[hidden] {
+  display: none;
 }
 
-.about .nums {
-  font-size: 12px;
-  color: var(--strong);
-  font-variant-numeric: tabular-nums;
+.dots {
+  display: flex;
+  gap: 6px;
 }
 
-.about .desc {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
+.dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--lime);
+  animation: dot 1s infinite ease-in-out;
+}
+
+.dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes dot {
+  50% {
+    transform: translateY(-6px);
+    opacity: 0.5;
+  }
+}
+
+/* The card list, on the right: tabs as the game's (lime when on). */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0;
+}
+
+.tab {
+  flex: 1;
+  padding: 10px 0;
+  border: 0;
+  border-radius: 6px 6px 0 0;
+  background: rgba(20, 50, 80, 0.9);
   color: var(--fg);
-  max-height: 180px;
+  font-weight: 800;
+}
+
+.tab.on {
+  background: var(--lime);
+  color: var(--lime-ink);
+}
+
+#listPane,
+#statsPane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  gap: 8px;
+}
+
+#listPane[hidden],
+#statsPane[hidden],
+#filters[hidden] {
+  display: none;
+}
+
+.search {
+  display: flex;
+  gap: 6px;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.square {
+  width: 40px;
+  border-radius: 10px;
+  background: #05080f;
+  border: 1.5px solid var(--edge-strong);
+}
+
+.square.on {
+  background: var(--lime);
+  color: var(--lime-ink);
+  border-color: var(--lime);
+}
+
+#filters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chips,
+.sels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sels select {
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.sels select.on {
+  border-color: var(--lime);
+}
+
+.chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #05080f;
+  border: 1px solid var(--edge);
+  font-size: 12px;
+}
+
+.chip.on {
+  background: var(--lime);
+  color: var(--lime-ink);
+  border-color: var(--lime);
+  font-weight: 800;
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+#cards {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  user-select: text;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  align-content: start;
+}
+
+.lcard {
+  position: relative;
+  padding: 0;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 4px;
+}
+
+.lcard img {
+  width: 100%;
+  aspect-ratio: 68 / 99;
+  object-fit: cover;
+  display: block;
+  border-radius: 3px;
+}
+
+.lcard:hover {
+  border-color: var(--edge-strong);
+}
+
+.lcard.on {
+  border-color: var(--lime);
+}
+
+.lcard .cnt {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.8);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--lime);
+}
+
+.lcard .ht {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  font-size: 9px;
+  padding: 0 3px;
 }
 
 /* The deck's numbers. */
 .stats {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
+  gap: 6px;
 }
 
 .stats p {
   margin: 0;
-  font-size: 13px;
+}
+
+.stats .big {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--strong);
 }
 
 .stats .good {
@@ -535,8 +813,7 @@ header .title {
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  height: 64px;
-  margin-top: 4px;
+  height: 80px;
 }
 
 .bar {
@@ -557,7 +834,7 @@ header .title {
 .bar i span {
   width: 100%;
   border-radius: 3px 3px 0 0;
-  background: var(--claude);
+  background: var(--lime);
 }
 
 .bar small,
@@ -567,17 +844,25 @@ header .title {
   font-style: normal;
 }
 
-/* Known by its look from before: for her to look at. */
-.tile .mem {
-  position: absolute;
-  top: -6px;
-  left: -6px;
-  padding: 1px 5px;
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 700;
-  background: var(--good);
-  color: #08200f;
+/* --- The bottom line ------------------------------------------------------------ */
+#status {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 16px 10px;
+  font-size: 12px;
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.good {
+  color: var(--good);
+}
+
+.bad {
+  color: var(--bad);
 }
 
 .memline {
@@ -586,76 +871,20 @@ header .title {
   color: var(--good);
 }
 
-/* Her saved decks: which, its name, a new one, one thrown away. */
-.lib {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.lib select,
-.lib input {
-  font: inherit;
-  color: var(--strong);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 6px 9px;
-  outline: none;
-}
-
-.lib select {
-  font-size: 16px;
-  font-weight: 700;
-  max-width: 260px;
-}
-
-.lib select option {
-  background: #121726;
-}
-
-.lib input {
-  width: 170px;
-}
-
-.lib button {
-  padding: 6px 10px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-#dropDeck:not(:disabled):hover {
-  border-color: var(--bad);
-  color: var(--bad);
-}
-
-/* Nothing yet: the way to read it from the game. */
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.empty p {
+.okline {
   margin: 0;
+  font-size: 12px;
+  color: var(--good);
 }
 
-.bigscan {
-  padding: 10px 18px !important;
-  font-size: 15px;
-}
-
-/* Not saved: save, leave it, or stay. */
+/* --- Asked before losing what is not saved; said when saved -------------------------- */
 #ask {
   position: fixed;
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(8, 10, 18, 0.6);
-  border-radius: 18px;
-  z-index: 10;
+  background: rgba(4, 8, 18, 0.7);
+  z-index: 30;
 }
 
 #ask[hidden],
@@ -664,16 +893,16 @@ header .title {
 }
 
 .askcard {
-  max-width: 380px;
-  padding: 18px 20px;
-  border-radius: 16px;
-  background: #1a2034;
-  border: 1px solid var(--line);
+  max-width: 400px;
+  padding: 20px 22px;
+  border-radius: 12px;
+  background: #0b1630;
+  border: 1px solid var(--edge-strong);
   color: var(--strong);
 }
 
 .askcard p {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   line-height: 1.6;
 }
 
@@ -683,51 +912,59 @@ header .title {
   justify-content: flex-end;
 }
 
-.askbtns button {
-  padding: 7px 14px;
+.askbtns button:not(.savebtn) {
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: #05080f;
+  border: 1.5px solid var(--edge-strong);
 }
 
-/* Saved: said so. */
 #toast {
   position: fixed;
   left: 50%;
-  bottom: 64px;
+  bottom: 48px;
   transform: translateX(-50%);
-  padding: 9px 18px;
+  padding: 10px 22px;
   border-radius: 999px;
-  background: var(--good);
-  color: #08200f;
-  font-weight: 700;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-  z-index: 11;
+  background: var(--lime);
+  color: var(--lime-ink);
+  font-weight: 800;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  z-index: 31;
 }
 
-/* The top row wraps, never runs into itself. */
-.deckpanel header {
-  flex-wrap: wrap;
-  row-gap: 8px;
+::-webkit-scrollbar {
+  width: 6px;
 }
 
-.deckpanel header .title {
-  flex: 1 1 520px;
+::-webkit-scrollbar-thumb {
+  background: var(--edge);
+  border-radius: 3px;
 }
 
-.lib {
-  flex-wrap: wrap;
+/* The details scroll; their buttons stay at the bottom. */
+#detail {
+  overflow: hidden;
 }
 
-/* The theme, rarely needed now, small in the bottom row. */
-footer .themebox {
-  margin-left: auto;
+.dscroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
 }
 
-footer .themebox #theme {
-  width: 150px;
-  padding: 5px 8px;
-  font-size: 12px;
+.dfoot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--edge);
 }
 
-footer .themebox button {
-  padding: 5px 10px;
-  font-size: 12px;
+.dfoot .acts {
+  margin-top: 0;
 }

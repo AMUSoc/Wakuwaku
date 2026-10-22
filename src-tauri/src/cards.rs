@@ -51,6 +51,9 @@ const HAND_TRAPS: [&str; 25] = [
     "Dominus Purge",
 ];
 
+// YGOPro's type bit of a monster.
+const MONSTER: u32 = 0x1;
+
 #[derive(Clone)]
 pub struct Card {
     pub id: u64,
@@ -263,7 +266,11 @@ pub fn info(cards: &[Card], id: Option<u64>, name: &str) -> Option<Value> {
             let want = bare(&name);
             (want.chars().count() >= 3).then(|| cards.iter().find(|c| bare(&c.name) == want || bare(&c.jp) == want || bare(&c.en) == want)).flatten()
         })?;
-    Some(json!({
+    Some(info_of(c))
+}
+
+fn info_of(c: &Card) -> Value {
+    json!({
         "id": c.id,
         "name": c.name,
         "jp": c.jp,
@@ -278,7 +285,56 @@ pub fn info(cards: &[Card], id: Option<u64>, name: &str) -> Option<Value> {
         "desc": c.desc,
         "hand": c.hand,
         "img": picture(c.id),
-    }))
+    })
+}
+
+// The deck window's card list, as the game's: the cards whose name or text
+// holds what is typed, through the filters (`f`: "type" monster | spell |
+// trap | hand, and the bits "attr", "race", "kind", and "level"); nothing
+// typed nor filtered, the cards of her deck, its theme and the hand traps.
+// Ordered as the game lists them: monsters (main, then extra) by level high
+// to low, spells, traps; then by name.
+pub fn browse(cards: &[Card], q: &str, f: &Value, around: &[String], most: usize) -> Vec<Value> {
+    let q = q.trim().to_lowercase();
+    let n = |k: &str| f[k].as_u64().or_else(|| f[k].as_str()?.parse().ok()).unwrap_or(0) as u32;
+    let (kind_of, attr, race, sub, level) = (f["type"].as_str().unwrap_or(""), n("attr"), n("race"), n("kind"), n("level"));
+    let filtered = !kind_of.is_empty() || attr + race + sub + level > 0;
+    let passes = |c: &Card| {
+        let monster = c.kind & MONSTER != 0;
+        (match kind_of {
+            "monster" => monster,
+            "spell" => c.kind & 0x2 != 0,
+            "trap" => c.kind & 0x4 != 0,
+            "hand" => c.hand,
+            _ => true,
+        }) && (attr == 0 || monster && c.attr == attr)
+            && (race == 0 || monster && c.race == race)
+            && (sub == 0 || c.kind & sub != 0)
+            && (level == 0 || monster && c.level & 0xff == level)
+    };
+    let mut hits: Vec<&Card> = cards
+        .iter()
+        .filter(|c| {
+            if !q.is_empty() {
+                (c.key.contains(&q) || c.desc.to_lowercase().contains(&q)) && passes(c)
+            } else if filtered {
+                passes(c)
+            } else {
+                c.hand || around.iter().any(|a| *a == c.name)
+            }
+        })
+        .collect();
+    let rank = |c: &Card| -> (u8, i64) {
+        let extra = c.kind & (0x40 | 0x2000 | 0x800000 | 0x4000000) != 0;
+        let group = if c.kind & MONSTER != 0 { if extra { 1 } else { 0 } } else if c.kind & 0x2 != 0 { 2 } else { 3 };
+        (group, -((c.level & 0xff) as i64))
+    };
+    // What is typed found in the name first, then in the text.
+    hits.sort_by(|a, b| {
+        let named = |c: &Card| !q.is_empty() && !c.key.contains(&q);
+        named(a).cmp(&named(b)).then(rank(a).cmp(&rank(b))).then(a.name.cmp(&b.name))
+    });
+    hits.into_iter().take(most).map(info_of).collect()
 }
 
 // A theme's cards: those whose names hold a word of it ("雷熱祀劍" holds
@@ -367,6 +423,21 @@ mod tests {
         assert_eq!((ash["kind"].as_u64(), ash["hand"].as_bool()), (Some(4129), Some(true)));
         assert!(info(&cards, None, "沒有這張").is_none());
         assert_eq!(info(&cards, None, "冰燃雷熱渦爐").unwrap()["id"], 8633261);
+    }
+
+    #[test]
+    fn the_card_list_as_the_game_lists_it() {
+        let cards = db();
+        // Nothing typed: her deck's cards and the hand traps.
+        let mine = browse(&cards, "", &json!({}), &["天叢雲之巳劍".to_string()], 50);
+        let names: Vec<&str> = mine.iter().filter_map(|c| c["name"].as_str()).collect();
+        assert_eq!(names, ["天叢雲之巳劍", "灰流麗"], "monsters by level high to low");
+        // Typed: the name, then the text.
+        assert_eq!(browse(&cards, "灰流", &json!({}), &[], 50)[0]["name"], "灰流麗");
+        assert!(browse(&cards, "降臨", &json!({}), &[], 50).iter().any(|c| c["name"] == "天叢雲之巳劍"), "found in its text");
+        // Filtered: level 3 monsters, hand traps.
+        assert_eq!(browse(&cards, "", &json!({ "level": 3 }), &[], 50).len(), 1);
+        assert_eq!(browse(&cards, "", &json!({ "type": "hand" }), &[], 50)[0]["name"], "灰流麗");
     }
 
     #[test]

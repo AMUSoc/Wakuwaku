@@ -68,6 +68,7 @@
     duelCards: q => invoke('duel_cards', { q: String(q || '') }).catch(() => null),
     duelCardArts: id => invoke('duel_card_arts', { id: Number(id) || 0 }).catch(() => null),
     duelCardInfo: cards => invoke('duel_card_info', { cards }).catch(() => null),
+    duelCardsBrowse: (q, filter, names, theme) => invoke('duel_cards_browse', { q: String(q || ''), filter: filter || {}, names: names || [], theme: String(theme || '') }).catch(() => null),
     duelFly: open => send('duel_fly', { open: !!open }),
     duelScan: () => send('duel_scan'),
     duelWatch: on => send('duel_watch', { on: !!on }),

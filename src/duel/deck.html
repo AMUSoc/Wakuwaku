@@ -4,44 +4,62 @@
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: asset: http://asset.localhost https://images.ygoprodeck.com; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'" />
     <title>wakuwaku duel deck</title>
-    <link rel="stylesheet" href="duel.css" />
     <link rel="stylesheet" href="deck.css" />
   </head>
   <body>
-    <div id="panel" class="deckpanel">
-      <header>
-        <div class="title">
-          <span id="label"></span>
-          <div class="lib">
-            <select id="decks"></select>
-            <input id="deckName" spellcheck="false" autocomplete="off" />
+    <div id="app">
+      <header id="top">
+        <button id="back" type="button" class="round">◀</button>
+        <span id="label" class="brand"></span>
+        <div class="grow"></div>
+        <span id="dirty" hidden></span>
+        <button id="scanGame" type="button" class="pill"></button>
+        <button id="save" type="button" class="savebtn"></button>
+        <div class="menuwrap">
+          <button id="menu" type="button" class="round">☰</button>
+          <div id="menuList" hidden>
             <button id="newDeck" type="button"></button>
-            <button id="scanGame" type="button" class="primary"></button>
-            <button id="dropDeck" type="button"></button>
+            <button id="allok" type="button"></button>
+            <button id="dropDeck" type="button" class="bad"></button>
+            <div class="themebox">
+              <label id="themeLabel" for="theme"></label>
+              <input id="theme" spellcheck="false" autocomplete="off" />
+              <button id="rescan" type="button"></button>
+            </div>
           </div>
         </div>
-        <button id="close" type="button" aria-label="close">✕</button>
       </header>
-      <div id="tools"></div>
-      <div class="cols">
-        <div id="grids"></div>
-        <div id="side"></div>
-        <div id="scan" hidden><div class="dots"><i></i><i></i><i></i></div><div id="scanText"></div></div>
-      </div>
-      <footer>
-        <span id="foot"></span>
-        <span id="status"></span>
-        <div class="themebox">
-          <label id="themeLabel" for="theme"></label>
-          <input id="theme" spellcheck="false" autocomplete="off" />
-          <button id="rescan" type="button"></button>
-        </div>
-        <button id="allok" type="button"></button>
-        <button id="cancel" type="button"></button>
-        <button id="save" type="button" class="primary"></button>
-      </footer>
+      <main id="cols">
+        <section id="detail" class="panel"></section>
+        <section id="deckp" class="panel">
+          <div class="dhead">
+            <span class="dicon">▤</span>
+            <select id="decks"></select>
+            <input id="deckName" spellcheck="false" autocomplete="off" />
+          </div>
+          <div id="grids"></div>
+          <div id="scan" hidden><div class="dots"><i></i><i></i><i></i></div><div id="scanText"></div></div>
+        </section>
+        <section id="list" class="panel">
+          <div class="tabs">
+            <button id="tabList" type="button" class="tab on"></button>
+            <button id="tabStats" type="button" class="tab"></button>
+          </div>
+          <div id="listPane">
+            <div class="search">
+              <input id="q" spellcheck="false" autocomplete="off" />
+              <button id="fToggle" type="button" class="square">⚙</button>
+            </div>
+            <div id="filters" hidden></div>
+            <p id="listNote" class="note"></p>
+            <div id="cards"></div>
+          </div>
+          <div id="statsPane" hidden></div>
+        </section>
+      </main>
+      <footer id="status"></footer>
     </div>
-    <div id="ask" hidden><div class="askcard"><p id="askText"></p><div class="askbtns"><button id="askSave" type="button" class="primary"></button><button id="askDrop" type="button"></button><button id="askBack" type="button"></button></div></div></div>
+    <div id="ask" hidden><div class="askcard"><p id="askText"></p><div class="askbtns"><button id="askSave" type="button" class="savebtn"></button><button id="askDrop" type="button"></button><button id="askBack" type="button"></button></div></div></div>
     <div id="toast" hidden></div>
     <script src="../pet/bridge.js"></script>
     <script src="../shared/i18n.js"></script>

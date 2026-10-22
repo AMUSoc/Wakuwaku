@@ -1071,6 +1071,12 @@ async fn duel_crew_typing(app: AppHandle, on: bool) {
 }
 
 #[tauri::command]
+async fn duel_cards_browse(app: AppHandle, q: String, filter: Value, names: Vec<String>, theme: String) -> Value {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || duel::browse_cards(&sh, &q, &filter, &names, &theme)).await.unwrap_or(Value::Null)
+}
+
+#[tauri::command]
 async fn duel_card_info(app: AppHandle, cards: Vec<(Option<u64>, String)>) -> Value {
     let sh = shared(&app);
     tauri::async_runtime::spawn_blocking(move || duel::card_info(&sh, &cards)).await.unwrap_or(Value::Null)
@@ -1557,6 +1563,7 @@ fn main() {
             duel_cards,
             duel_card_arts,
             duel_card_info,
+            duel_cards_browse,
             duel_crew_ask,
             duel_crew_typing,
             duel_deck_close,
