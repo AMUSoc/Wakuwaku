@@ -108,6 +108,7 @@ fn look(sh: &Arc<Shared>, pid: u32) {
         return;
     }
     let started = crate::now_ms();
+    keep_shot(sh, &picture, started);
     publish(sh, json!({ "state": "looking", "since": started, "last": last_guess() }));
     show(sh, true);
     let sh = sh.clone();
@@ -128,6 +129,23 @@ fn look(sh: &Arc<Shared>, pid: u32) {
         }
         LOOKING.store(false, Ordering::SeqCst);
     });
+}
+
+// Each picture kept too (duel/shots/, the last 60): what the game looks
+// like, for laying the helper's frames on its zones and seeing how well
+// cards are told apart (2026-10-22).
+fn keep_shot(sh: &Shared, picture: &std::path::Path, at: u64) {
+    let shots = dir(sh).join("shots");
+    if std::fs::create_dir_all(&shots).is_err() || std::fs::copy(picture, shots.join(format!("{at}.png"))).is_err() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(&shots) else { return };
+    let mut all: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    all.sort();
+    let excess = all.len().saturating_sub(60);
+    for old in &all[..excess] {
+        let _ = std::fs::remove_file(old);
+    }
 }
 
 fn last_guess() -> Option<Value> {
