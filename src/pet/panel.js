@@ -93,6 +93,7 @@
       'div',
       { class: 'head' },
       el('span', { class: 'title' }, title),
+      ask.machine ? el('span', { class: 'chip' }, ask.machine) : null,
       ask.from === 'codex' ? el('span', { class: 'chip' }, 'Codex') : null,
       ask.project ? el('span', { class: 'chip' }, ask.project) : null,
     )

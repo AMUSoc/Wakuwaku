@@ -97,6 +97,7 @@ pub fn snapshot(sh: &Shared) -> Value {
         // The phone's page: where it is listened for, its address with the
         // token (the QR code), when the phone last asked (mobile.rs).
         "mobile": crate::mobile::view(sh),
+        "peers": crate::peers::view(),
     })
 }
 
@@ -178,6 +179,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // token is made, never set (settings_mobile).
         "mobile" => is_bool,
         "mobileBind" => v.as_str().is_some_and(|b| b == "tailscale" || b.parse::<std::net::IpAddr>().is_ok()),
+        "peers" => v.as_array().is_some_and(|a| a.len() <= 4 && a.iter().all(|p| p.as_str().is_some_and(|p| crate::peers::parse(p).is_some()))),
         "mobileUrl" => v.as_str().is_some_and(|u| u.is_empty() || crate::mobile::is_server(u)),
         "ntfy" => v.as_object().is_some_and(|m| {
             m.iter().all(|(k, v)| match k.as_str() {

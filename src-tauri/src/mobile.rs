@@ -415,7 +415,7 @@ fn state(sh: &Shared) -> Value {
         .map(|agent| {
             let (mut shown, mut list, mut closed) = {
                 let pet = sh.pet.lock().unwrap();
-                (pet.get_for(agent, now), pet.list_for(agent), pet.closed_for(agent, 5))
+                (pet.get_own_for(agent, now), pet.list_own_for(agent), pet.closed_for(agent, 5))
             };
             // With the specifics kept off screen, no replies or errors either.
             if !details {
@@ -442,7 +442,8 @@ fn state(sh: &Shared) -> Value {
             })
         })
         .collect();
-    json!({ "lang": sh.lang(), "details": details, "at": now, "agents": agents })
+    // Its name: the phone and her other computers show its sessions by it.
+    json!({ "lang": sh.lang(), "details": details, "at": now, "machine": crate::peers::machine(), "agents": agents })
 }
 
 // A session's whole conversation, and how the phone may add to it: { session,

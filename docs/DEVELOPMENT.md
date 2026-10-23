@@ -574,6 +574,17 @@ CPU 主要花在 GPU 进程和渲染进程上，两边几乎一样（页面是�
 
 实测（2026-10-17，Windows 11，Tailscale 100.90.183.86，另开一份在 47299 端口）：外部无 token 时页面 200、`api/*` 401、`/hook` `/health` `/quit` `/state` 404；`?t=` 后 302 并设 cookie；带 `X-Forwarded-For`、`Tailscale-User-Login`、`Host: evil.example` 的本机请求都当外部；没有 `x-wakuwaku` 头的回答 404；Chrome 里从 Tailscale 地址打开、按「允许」，挂着的 hook 收到 `{"behavior":"allow"}`。0.0.0.0 → Tailscale、Tailscale → 0.0.0.0、0.0.0.0 → 关掉，`netstat` 上旧地址都马上放掉。
 
+## 她的其他电脑（peers.rs，2026-10-24）
+
+使用者家里一台电脑、手边一台笔电，两台都跑 Wakuwaku，要互相看得到对方的 AI。
+
+- **设置**：「手机访问」页最下面「我的其他电脑」，贴上另一台手机访问的网址（QR code 底下那串，含 `?t=` token），存进设置 `peers`（最多 4 个，`peers::parse` 认得出网址和 token 才收）。两台都要打开手机访问、互相贴。这台的名称是 Windows 的电脑名（`COMPUTERNAME`，`peers::machine`），手机页的 `api/state` 也多了 `machine`。
+- **怎么连**：`peers` 线程每 2 秒问每一台的 `/mobile/api/state` 和 `/mobile/api/asks`（带 `x-wakuwaku-token`）。这两个接口只回那台**自己的**工作阶段和确认（`state.rs` 的 `get_own_for`、`list_own_for`），所以两台不会把对方的再传回来、绕圈。贴的是自己的网址（回来的 `machine` 就是自己）就不理。连续 3 次问不到（关机：Windows 连到关着的埠要 1～2 秒才拒绝，实测约 11 秒）就把那台的工作阶段和确认拿掉。
+- **显示**：那台的工作阶段（每个 agent 的 `list`）以 `id` 加上「电脑名:」、`machine`、`jump: false` 放进 `Pet.remote`（`set_remote`），`get`、`get_for`、`list`、`list_for`、`second`、`wants_you` 都把它们和这台的一起比（等你确认 > 出错 > …，同级取最新），所以岛和每个 agent 的桌宠都会跟着另一台动。`status.js` 的 `nameOf` 在名字前面加「电脑名・」。点桌宠跳到视窗只找这台的（`pet.rs` 用 `get_own_for`）。另一台的工作阶段变成等你、做完、出错时，这台也照样响提示音和系统通知（`set_remote` 回传要响的，`sh.alert`，专案名前加电脑名）。
+- **确认**：那台的每个确认在这台给一个从 `1 << 40` 开始的 id（`peers::FIRST`，同一个确认每次都同一个 id），`session` 也加「电脑名:」，带 `machine`（确认面板多一个电脑名的 chip），照 agent 分给岛或桌宠（`asks_for` 后面接 `peers::asks_where`）。在这台回答时 `Shared::answer` 看到是那台的 id，就 POST 到那台的 `/mobile/api/answer`（它自己的 id），那台再回给它的 hook。
+- **实测**（同一台电脑开两份，`COMPUTERNAME` 设成 LAPTOP-T 和 HOME-T，互贴 127.0.0.1 的网址）：HOME-T 收到 Claude Code 的 UserPromptSubmit 和 PermissionRequest，LAPTOP-T 的岛 4 秒内显示「HOME-T・write a post」和带 HOME-T chip 的确认；在 LAPTOP-T 按允许，HOME-T 挂着的 hook 收到 `allow`；HOME-T 关掉后 11 秒，LAPTOP-T 上它的工作阶段消失。
+- 手机也两台都连，见「手机页」的 WakuwakuMobile。
+
 ## 右边的竖岛（dock.rs、src/dock/）
 
 托盘或岛的右键菜单「右边的竖岛」（设置 `dock`，默认关）：岛所在那块屏的右边缘、上下居中，一个 agent 一格（Claude、Codex、Antigravity、Grok），宠物在靠屏幕边那侧，左边是对话框写它在做什么（`status.js` 的 `brief`）；闲置又没有确认的只露出宠物。单击一格就在原地展开：那个 agent 的每个会话（名字、状态、用时、做完的回复）、「跳到窗口」按钮（有行程链才有），以及它的确认：权限和计划可以直接允许／拒绝（照 id 回到原本的 hook，和岛、桌宠上回答一样），问题类的写「到灵动岛上回答」。单击不再开终端机。顶端的岛照旧，两个同时在。

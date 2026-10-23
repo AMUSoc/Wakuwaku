@@ -33,7 +33,11 @@
   }
 
   // What it is called: its name, or else its project.
-  const nameOf = (s, detailed = true) => (detailed && s.name) || s.project || ''
+  // Another computer's (peers.rs): its name first.
+  const nameOf = (s, detailed = true) => {
+    const name = (detailed && s.name) || s.project || ''
+    return s.machine ? `${s.machine}・${name}` : name
+  }
 
   // The step it is on: n/m of its to-do list, the step, and for how long.
   function stepOf(lang, s, { now = Date.now(), withClock = true } = {}) {

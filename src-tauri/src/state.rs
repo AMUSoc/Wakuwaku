@@ -318,6 +318,12 @@ fn todo_view(s: &Session) -> Value {
     json!({ "done": done, "total": s.todos.len(), "active": active })
 }
 
+// The one that most wants you first (its mood), then the latest.
+fn sort_by_want(all: &mut [Value]) {
+    let rank = |v: &Value| (priority(v["mood"].as_str().unwrap_or("")), v["at"].as_u64().unwrap_or(0));
+    all.sort_by(|a, b| rank(b).cmp(&rank(a)));
+}
+
 // A session as the pages draw it.
 fn view(s: &Session) -> Value {
     let is_working = s.mood == "working";
@@ -360,6 +366,10 @@ pub struct Talk {
 #[derive(Default)]
 pub struct Pet {
     sessions: HashMap<String, Session>,
+    // The other computers' sessions (peers.rs), as their pages draw them,
+    // each with its "machine": shown here too, the user's two computers
+    // seeing each other's (2026-10-24). By machine.
+    remote: HashMap<String, Vec<Value>>,
 }
 
 // Set a session's mood; Some(mood) when it wants a chime.
@@ -712,43 +722,78 @@ impl Pet {
         self.sessions.values().filter(|s| !s.hidden)
     }
 
+    // Another computer's sessions now (none: it is gone): whether that
+    // changed anything, and the chimes it wants (a session come to wait on
+    // you, or to an end: its mood and project, as Outcome's alerts).
+    pub fn set_remote(&mut self, machine: &str, views: Vec<Value>) -> (bool, Vec<(String, String)>) {
+        let before = self.remote.remove(machine).unwrap_or_default();
+        let changed = before != views;
+        let mood = |v: &Value| v["mood"].as_str().unwrap_or("").to_string();
+        let alerts = views
+            .iter()
+            .filter(|v| {
+                let m = mood(v);
+                (m == "waiting" || is_ending(&m)) && before.iter().find(|b| b["id"] == v["id"]).is_none_or(|b| mood(b) != m)
+            })
+            .map(|v| (mood(v), v["project"].as_str().unwrap_or("").to_string()))
+            .collect();
+        if !views.is_empty() {
+            self.remote.insert(machine.to_string(), views);
+        }
+        (changed, alerts)
+    }
+
+    // The sessions in sight as the pages draw them, of one agent or all;
+    // the other computers' too, or this one's alone (what the phone and the
+    // other computers are told: each asks every computer itself).
+    fn views(&self, agent: Option<&str>, remote: bool) -> Vec<Value> {
+        let of = |a: &str| agent.is_none_or(|want| agent_key(a) == want);
+        let mut out: Vec<Value> = self.shown().filter(|s| of(&s.agent)).map(view).collect();
+        if remote {
+            out.extend(self.remote.values().flatten().filter(|v| of(v["agent"].as_str().unwrap_or(""))).cloned());
+        }
+        out
+    }
+
     // What the island shows: the session that most wants you, and the rest
     // in sight.
     pub fn get(&self, now: u64) -> Value {
-        self.get_where(now, |_| true)
+        self.get_where(now, None, true)
     }
 
     // What one agent's pet on the desktop shows: the same, of its agent's
     // sessions alone (none: at rest).
     pub fn get_for(&self, agent: &str, now: u64) -> Value {
-        self.get_where(now, |s| agent_key(&s.agent) == agent)
+        self.get_where(now, Some(agent), true)
     }
 
-    fn get_where(&self, now: u64, of: impl Fn(&Session) -> bool) -> Value {
-        let top = self
-            .shown()
-            .filter(|s| of(s))
-            .fold(None::<&Session>, |best, s| match best {
-                Some(b) if priority(&s.mood) < priority(&b.mood) => Some(b),
-                Some(b) if priority(&s.mood) == priority(&b.mood) && s.at < b.at => Some(b),
-                _ => Some(s),
-            });
-        let Some(top) = top else {
+    // The same, of this computer's sessions alone.
+    pub fn get_own_for(&self, agent: &str, now: u64) -> Value {
+        self.get_where(now, Some(agent), false)
+    }
+
+    fn get_where(&self, now: u64, agent: Option<&str>, remote: bool) -> Value {
+        let all = self.views(agent, remote);
+        let rank = |v: &Value| (priority(v["mood"].as_str().unwrap_or("")), v["at"].as_u64().unwrap_or(0));
+        let Some(top) = all.iter().fold(None::<&Value>, |best, v| match best {
+            Some(b) if rank(v) < rank(b) => Some(b),
+            _ => Some(v),
+        }) else {
             let mut empty = view(&Session::new(String::new(), now));
             empty["others"] = json!(0);
             empty["sessions"] = json!(0);
             return empty;
         };
-        let mut now = view(top);
-        now["others"] = json!(self.shown().filter(|s| of(s) && s.id != top.id && s.mood != "idle").count());
-        now["sessions"] = json!(self.shown().filter(|s| of(s)).count());
+        let mut now = top.clone();
+        now["others"] = json!(all.iter().filter(|v| v["id"] != top["id"] && v["mood"] != "idle").count());
+        now["sessions"] = json!(all.len());
         now
     }
 
     // Every session in sight, the one that most wants you first: the island's
     // open lines, the settings' list.
     pub fn list(&self) -> Value {
-        self.list_where(|_| true)
+        self.list_where(None, true)
     }
 
     // An agent's sessions closed lately and out of her sight, the latest
@@ -761,27 +806,33 @@ impl Pet {
 
     // One agent's sessions so: its pet's bubble names only them.
     pub fn list_for(&self, agent: &str) -> Value {
-        self.list_where(|s| agent_key(&s.agent) == agent)
+        self.list_where(Some(agent), true)
     }
 
-    fn list_where(&self, of: impl Fn(&Session) -> bool) -> Value {
-        let mut all: Vec<&Session> = self.shown().filter(|s| of(s) && (!s.id.is_empty() || s.mood != "idle")).collect();
-        all.sort_by(|a, b| priority(&b.mood).cmp(&priority(&a.mood)).then(b.at.cmp(&a.at)));
-        Value::Array(all.into_iter().map(view).collect())
+    // The same, of this computer's sessions alone.
+    pub fn list_own_for(&self, agent: &str) -> Value {
+        self.list_where(Some(agent), false)
+    }
+
+    fn list_where(&self, agent: Option<&str>, remote: bool) -> Value {
+        let mut all: Vec<Value> = self.views(agent, remote).into_iter().filter(|v| v["id"] != "" || v["mood"] != "idle").collect();
+        sort_by_want(&mut all);
+        Value::Array(all)
     }
 
     // The mood of the next session that wants something, after the one shown:
     // for the island's second bubble.
     pub fn second(&self) -> Option<String> {
-        let mut busy: Vec<&Session> = self.shown().filter(|s| s.mood != "idle").collect();
-        busy.sort_by(|a, b| priority(&b.mood).cmp(&priority(&a.mood)).then(b.at.cmp(&a.at)));
-        busy.get(1).map(|s| s.mood.clone())
+        let mut busy: Vec<Value> = self.views(None, true).into_iter().filter(|v| v["mood"] != "idle").collect();
+        sort_by_want(&mut busy);
+        busy.get(1).and_then(|v| v["mood"].as_str()).map(str::to_string)
     }
 
     // Whether a session wants you: waiting on you, or an ending not yet seen.
     // Widgets keep to themselves meanwhile.
     pub fn wants_you(&self) -> bool {
-        self.sessions.values().any(|s| s.mood == "waiting" || is_ending(&s.mood))
+        let wants = |m: &str| m == "waiting" || is_ending(m);
+        self.sessions.values().any(|s| wants(&s.mood)) || self.remote.values().flatten().any(|v| wants(v["mood"].as_str().unwrap_or("")))
     }
 
     // What the sessions are called (projects, titles, tasks): kept out of a
@@ -846,6 +897,22 @@ impl Pet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn another_computer_s_sessions_shown_and_chimed() {
+        let mut pet = Pet::default();
+        let home = |mood: &str, at: u64| vec![json!({ "id": "HOME:a", "agent": "", "mood": mood, "at": at, "project": "blog", "machine": "HOME" })];
+        let (changed, alerts) = pet.set_remote("HOME", home("working", 5));
+        assert!(changed && alerts.is_empty());
+        assert_eq!(pet.get(10)["id"], "HOME:a");
+        assert_eq!(pet.get_own_for("claude", 10)["sessions"], 0, "the phone is told this computer's own alone");
+        assert_eq!(pet.list_own_for("claude"), json!([]));
+        assert_eq!(pet.set_remote("HOME", home("working", 5)), (false, vec![]));
+        assert_eq!(pet.set_remote("HOME", home("waiting", 6)).1, vec![("waiting".to_string(), "blog".to_string())]);
+        assert!(pet.wants_you());
+        assert_eq!(pet.set_remote("HOME", Vec::new()), (true, vec![]));
+        assert_eq!(pet.get(10)["sessions"], 0);
+    }
 
     fn msg(v: Value) -> Value {
         v

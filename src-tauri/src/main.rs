@@ -58,6 +58,7 @@ mod mobile;
 mod notch;
 mod notify;
 mod opgg;
+mod peers;
 mod pet;
 mod pointer;
 mod power;
@@ -426,13 +427,18 @@ impl Shared {
     // The prompts waiting changed.
     // The prompts each page holds: an agent's pet out on the desktop, its
     // own agent's (asks::agent_of); the island, the rest.
+    // The other computers' too (peers.rs), the same way.
     pub fn asks_for(&self, pet: Option<&str>) -> Value {
         let out = self.out_agents();
-        let asks = self.asks.lock().unwrap();
-        match pet {
-            Some(agent) => asks.views_where(|a| a == agent && out.contains(&a)),
-            None => asks.views_where(|a| !out.contains(&a)),
+        let keep = |a: &str| match pet {
+            Some(agent) => a == agent && out.contains(&a),
+            None => !out.contains(&a),
+        };
+        let mut views = self.asks.lock().unwrap().views_where(keep);
+        if let Some(all) = views.as_array_mut() {
+            all.extend(peers::asks_where(keep));
         }
+        views
     }
 
     pub fn push_asks(&self) {
@@ -463,7 +469,8 @@ impl Shared {
     // for it answered.
     pub fn answer(&self, id: u64, choice: &Value) -> bool {
         let lang = self.lang();
-        let ok = self.asks.lock().unwrap().answer(id, choice, lang);
+        // Another computer's: sent back to it.
+        let ok = if peers::is_theirs(id) { peers::answer(id, choice) } else { self.asks.lock().unwrap().answer(id, choice, lang) };
         self.log(&format!("answer {id}: {choice} -> {ok}"));
         if ok {
             self.push_asks();
@@ -581,7 +588,7 @@ impl Shared {
     }
 
     // A chime from her home, and a system notification if asked for.
-    fn alert(&self, mood: &str, project: &str) {
+    pub fn alert(&self, mood: &str, project: &str) {
         let _ = self.app.emit_to("island", "pet:alert", json!({ "mood": mood }));
         let group = match mood {
             "waiting" => "waiting",
@@ -1683,6 +1690,7 @@ fn main() {
             server::serve(sh.clone(), listener);
             // Phone access: the page listened for on Tailscale's address too (mobile.rs).
             mobile::start(&sh);
+            peers::start(&sh);
             // Her updates looked for (a downloaded exe only).
             updates::start(&sh);
             // Crashes since: their reports made, sent or asked about.

@@ -990,10 +990,24 @@
         }
       </div>
       ${s.mobile ? phoneBlock() : ''}
+      ${peersBlock()}
       ${sec(T('s.ntfy'))}<div class="grp">
         ${row(esc(T('s.ntfyOn')), esc(T('s.ntfyNote')), sw('ntfy.on', ntfy.on))}
         ${row(esc(T('s.ntfyServer')), esc(T('s.ntfyServerNote')), `<input class="in" id="s-ntfy-server" spellcheck="false" autocomplete="off" placeholder="https://ntfy.sh" value="${esc(ntfy.server || '')}">`)}
         <div class="r"><div class="grow"><div>${esc(T('s.ntfyTopic'))}</div><div class="d">${esc(T('s.ntfyTopicNote'))}</div><div class="r"><span class="cmd mono">${esc(ntfy.topic || '')}</span></div><div class="r"><button class="pbtn sm" data-copy="${esc(ntfy.topic || '')}">${esc(T('home.copy'))}</button><button class="pbtn sm" data-mobile="topic">${esc(T('s.ntfyNewTopic'))}</button><button class="pbtn sm al" data-mobile="test">${esc(T('s.ntfyTest'))}</button></div>${tried}</div></div>
+      </div>`
+  }
+
+  // Her other computers (peers.rs): one's phone address pasted, and whether
+  // it answers.
+  function peersBlock() {
+    const s = snap.settings
+    const p = snap.peers || {}
+    const set = (s.peers || [])[0] || ''
+    const how = (p.list || []).map(x => (x.ok ? T('s.peersOk', { machine: x.machine }) : T('s.peersOff'))).join('、')
+    return `${sec(T('s.peers'))}<div class="grp">
+        ${row(esc(T('s.peersAddress')), esc(T('s.peersNote', { name: p.machine || '' })), `<input class="in" id="s-peer" spellcheck="false" autocomplete="off" placeholder="http://100.x.y.z:47213/mobile/?t=…" value="${esc(set)}">`)}
+        ${set ? `<div class="r"><div class="grow"><div class="d">${esc(how || T('s.peersOff'))}</div></div></div>` : ''}
       </div>`
   }
 
@@ -1624,6 +1638,11 @@
       return patch({ mobileBind: ip })
     }
     if (e.target.id === 's-mobile-url') return patch({ mobileUrl: e.target.value.trim().replace(/\/+$/, '') })
+    // Another computer's phone address: kept as pasted (one not so is not kept); blank, none.
+    if (e.target.id === 's-peer') {
+      const v = e.target.value.trim()
+      return patch({ peers: v ? [v] : [] })
+    }
     if (e.target.id === 's-ntfy-server') return patch({ ntfy: { ...snap.settings.ntfy, server: e.target.value.trim().replace(/\/+$/, '') } })
     // Her Riot API key, kept once typed (lcu.rs); one not as Riot gives them is not kept.
     if (e.target.id === 's-riot-key') return patch({ riotApiKey: e.target.value.trim() })

@@ -158,6 +158,8 @@ fn defaults() -> Map<String, Value> {
         "mobile": false,
         "mobileBind": "tailscale",
         "mobileToken": "",
+        // Her other computers (peers.rs): each one's phone address with its token.
+        "peers": [],
         "mobileUrl": "",
         // Pushes to the phone through ntfy: a server of your own or ntfy.sh,
         // a topic of her own (made as she first starts).

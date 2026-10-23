@@ -918,7 +918,7 @@ pub fn let_go(sh: &Arc<Shared>, agent: &str) {
                 crate::launch::terminal(&sh, &agent);
                 return;
             }
-            let own = sh.pet.lock().unwrap().get_for(&agent, now_ms())["id"].as_str().unwrap_or("").to_string();
+            let own = sh.pet.lock().unwrap().get_own_for(&agent, now_ms())["id"].as_str().unwrap_or("").to_string();
             match goes.or((!own.is_empty()).then_some(own)) {
                 Some(id) => {
                     crate::jump_to(&sh, &id);
