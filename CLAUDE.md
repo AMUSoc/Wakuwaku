@@ -67,7 +67,7 @@ relay/             當機報告中繼（Cloudflare Worker、阿里雲函式計�
 - `scout.rs`：本局十人（像 Porofessor）：對局載入時用 Riot API（spectator、段位、熟練度、最近戰績）查十個人，畫面中間的面板顯示，`Alt+X` 叫出／收起、點一下收起；所有 Riot API 請求在這裡排隊守次數限制。頁面在 `src/scout/`。細節見 `docs/DEVELOPMENT.md` 的「本局十人」。
 - `ask.rs`：手機的「問她」：問 Claude（會上網查）或 Antigravity（Google 搜尋），在 `data/ask/` 跑，回答回到手機，可以追問（`/mobile/api/ask`）。電腦上的 Alt+Q 框做過一天就拿掉了。
 - `clip.rs`：電腦的剪貼簿（給手機用：讀有變的文字、寫入手機傳來的文字；密碼管理員標成私密的不讀）。
-- `duel.rs`：遊戲王 Master Duel 小助手：遊戲開著時按 `duelKey`（Alt+D）截遊戲畫面，交給 Claude 看圖認出對手牌組和該斷的效果（圖直接放進問題、先回要緊的再補其餘；對手的卡用攻守星數對卡片資料庫），結果顯示在遊戲右邊的面板（`src/duel/`）。`art.rs`：掃描牌組時拿官方卡圖比對每一格。只看螢幕，不讀遊戲記憶體。細節見 `docs/DEVELOPMENT.md` 的「游戏王 Master Duel 小助手」。
+- `duel.rs`：遊戲王 Master Duel 小助手：遊戲開著時按 `duelKey`（Alt+D）截遊戲畫面，交給 Claude 看圖認出對手牌組和該斷的效果（圖直接放進問題、先回要緊的再補其餘；對手的卡用攻守星數對卡片資料庫；工具列的「戰況」一直看，卡片下面可以打字跟她說現在的狀況），結果顯示在遊戲右邊的面板（`src/duel/`）。`art.rs`：掃描牌組時拿官方卡圖比對每一格。只看螢幕，不讀遊戲記憶體。細節見 `docs/DEVELOPMENT.md` 的「游戏王 Master Duel 小助手」。
 - `review.rs`：四個 AI 一起檢討一場對局：Wakuwaku 先整理成一頁事實，按了才跑，每隻一次、各管一塊、3 行 100 字內、不准用工具，結果存 `lol/reviews/` 不重跑。
 - `opgg.rs`：OP.GG 的出裝和克制：由 Claude 透過 OP.GG 官方 MCP 查（`--mcp-config` 臨時掛上、只開兩個查詢工具），回 JSON，存一天。她自己叫的 agent（檢討、OP.GG）在 `data/lol/` 底下跑，`server.rs` 的 `is_hers` 不把它們當工作階段。
 - `jump.rs`：點會話跳到它的視窗（行程鏈、找視窗、叫到前面、Claude 桌面版的會話連結）。

@@ -374,153 +374,6 @@ pre.mine {
   user-select: text;
 }
 
-/* The four (軍師團): each pet's head, her part, her line; one asked. */
-.crew {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.mate {
-  display: grid;
-  grid-template-columns: 40px 1fr;
-  grid-template-rows: auto 1fr;
-  column-gap: 6px;
-  align-items: start;
-  padding: 6px;
-  text-align: left;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
-  cursor: pointer;
-  color: var(--fg);
-  font: inherit;
-}
-
-.mate:hover,
-.mate.on {
-  border-color: var(--c);
-  background: color-mix(in srgb, var(--c) 14%, transparent);
-}
-
-.mate .head {
-  grid-row: 1 / 3;
-}
-
-.head {
-  width: 40px;
-  height: 43px;
-  background-repeat: no-repeat;
-  background-size: 320px auto;
-  background-position: 0 0;
-  animation: idle 1.56s steps(6) infinite;
-  display: grid;
-  place-items: center;
-}
-
-.head:not([style*='background-image']) {
-  border-radius: 50%;
-  background: var(--c);
-  animation: none;
-  color: #fff;
-  font-weight: 800;
-}
-
-.head.busy {
-  background-position-y: -303.3px;
-  animation-duration: 0.84s;
-}
-
-@keyframes idle {
-  from {
-    background-position-x: 0;
-  }
-  to {
-    background-position-x: -240px;
-  }
-}
-
-.mate .who {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  min-width: 0;
-}
-
-.mate .who b {
-  font-size: 12px;
-  color: var(--strong);
-}
-
-.mate .role {
-  font-size: 11px;
-  color: var(--c);
-  white-space: nowrap;
-}
-
-.mate .line {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--fg);
-  white-space: pre-line;
-}
-
-.mate .line .q {
-  display: block;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.mate .line.busy {
-  color: var(--c);
-}
-
-.mate .line.bad {
-  color: var(--bad);
-}
-
-.askbox {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.askrow {
-  display: flex;
-  gap: 5px;
-}
-
-.askq {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: 13px;
-  color: var(--strong);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--claude);
-  border-radius: 9px;
-  padding: 6px 9px;
-  outline: none;
-  user-select: text;
-}
-
-.askbox .send {
-  padding: 5px 12px;
-}
-
-.askbox .quick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.askbox .chip {
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-}
-
 /* The bar down the game's right, the card out to its left. */
 #panel {
   right: 72px !important;
@@ -603,74 +456,75 @@ pre.mine {
   color: var(--muted);
 }
 
-/* The four, larger (she could not read them, 2026-10-23): one a row, the
-   pet's head larger, her words whole. */
-.crew {
-  grid-template-columns: 1fr;
-  gap: 8px;
+/* What she told it and its answer, newest last; the line to tell it, at
+   the card's foot. */
+.said {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(232, 115, 42, 0.12);
+  border: 1px solid rgba(232, 115, 42, 0.45);
 }
 
-.mate {
-  grid-template-columns: 56px 1fr;
-  column-gap: 10px;
-  padding: 10px 12px;
+.said.old {
+  opacity: 0.6;
+  background: var(--card-2);
+  border-color: var(--line);
 }
 
-.mate .head {
-  width: 56px;
-  height: 61px;
-  background-size: 448px auto;
-}
-
-.mate .head.busy {
-  background-position-y: -424.7px;
-}
-
-.mate .head {
-  animation-name: idle56;
-}
-
-@keyframes idle56 {
-  from {
-    background-position-x: 0;
-  }
-  to {
-    background-position-x: -336px;
-  }
-}
-
-.mate .who b {
-  font-size: 15px;
-}
-
-.mate .role {
-  font-size: 13px;
-}
-
-.mate .line {
-  font-size: 15px;
-  line-height: 1.55;
-  margin-top: 2px;
+.said .q {
+  font-size: 12px;
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 
-.mate .line .q {
-  font-size: 13px;
-  margin-bottom: 2px;
-}
-
-.mate .line .muted {
-  display: block;
-  font-size: 12px;
-}
-
-.askq {
+.said .a {
+  margin-top: 2px;
   font-size: 15px;
+  line-height: 1.5;
+  color: var(--strong);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
-.askbox .chip {
+.said .a.busy {
+  color: var(--warn);
   font-size: 13px;
-  padding: 5px 10px;
+}
+
+.said .a.bad {
+  color: var(--bad);
+  font-size: 13px;
+}
+
+#sayrow {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+#say {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--strong);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px 10px;
+  outline: none;
+  user-select: text;
+}
+
+#say:focus {
+  border-color: var(--claude);
+}
+
+#sayGo {
+  padding: 6px 12px;
+  font-size: 13px;
 }
 
 /* My hand as read: the advice goes by these. */

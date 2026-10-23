@@ -76,8 +76,8 @@
     duelDeckUse: id => send('duel_deck_use', { id: String(id) }),
     duelDeckDrop: id => send('duel_deck_drop', { id: String(id) }),
     duelDeckNew: () => send('duel_deck_new'),
-    duelCrewAsk: (agent, q) => send('duel_crew_ask', { agent: String(agent), q: String(q || '') }),
-    duelCrewTyping: on => send('duel_crew_typing', { on: !!on }),
+    duelSay: q => send('duel_say', { q: String(q || '') }),
+    duelTyping: on => send('duel_typing', { on: !!on }),
     duelClose: () => send('duel_close'),
     duelAgain: () => send('duel_again'),
     // The folder the phone's files go to (mobile.rs drop).

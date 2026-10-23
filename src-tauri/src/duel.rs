@@ -40,7 +40,7 @@ const SIZE: (f64, f64) = (380.0, 620.0);
 // The bar of her tools down the game's right (Alt+D brings it up, 2026-10-22:
 // "a small toolbar, not a chat window"); a card of what was asked for slides
 // out to its left (FLY), the window as large as both then.
-const BAR: (f64, f64) = (64.0, 386.0);
+const BAR: (f64, f64) = (64.0, 222.0);
 const BAR_GAP: f64 = 8.0;
 static FLY: AtomicBool = AtomicBool::new(false);
 // How tall the card wants to be (logical px, its page measures it): no
@@ -195,9 +195,6 @@ fn look_with(sh: &Arc<Shared>, pid: u32, quiet: bool) {
         VIEW.lock().unwrap_or_else(|e| e.into_inner())["updating"] = json!(started);
         push(sh);
     } else {
-        if !quiet {
-            *ASKS.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        }
         publish(sh, json!({ "state": "looking", "since": started, "last": last_guess() }));
         FLY.store(true, Ordering::SeqCst);
         show(sh, true);
@@ -261,9 +258,8 @@ fn look_with(sh: &Arc<Shared>, pid: u32, quiet: bool) {
 }
 
 // The rest of a look, from its first answer: how to play on, what to
-// watch, a tip, the four's lines; laid into the answer shown while it is
-// still that one.
-const REST: [&str; 4] = ["me", "watch", "tip", "crew"];
+// watch, a tip; laid into the answer shown while it is still that one.
+const REST: [&str; 3] = ["me", "watch", "tip"];
 
 fn more(sh: &Arc<Shared>, found: Value, at: u64) {
     let mut core = found;
@@ -561,6 +557,7 @@ fn take_in(sh: &Arc<Shared>, found: &Value) {
         if found["fresh"] == true && !m.seen.is_empty() {
             let frame = std::mem::take(&mut m.frame);
             *m = Match { frame, looked: m.looked, ..Match::default() };
+            SAID.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
         for c in found["seen"].as_array().into_iter().flatten().filter_map(Value::as_str) {
             let c = c.trim();
@@ -780,14 +777,13 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>, known: &str) -> S
 
 // What comes after the first answer, from it alone (no pictures, so quick):
 // how she plays on (going first, second, this turn's steps), what to watch,
-// a tip, the four's lines.
+// a tip.
 pub fn prompt_more(found: &Value, deck: &str, notes: &str) -> String {
     let mut p = String::from(
         "你是遊戲王 Master Duel 的對戰助手。另一位助手剛看了遊戲截圖，整理成下面的 JSON（myHand 是我手上的牌、field 和 seen 是對手的卡、stop 是要斷的地方）。\
          不要使用任何工具，照這些資料和你對 Master Duel 的了解補上：\n\
          1. 我這邊：對上這個牌組先攻、後攻各該怎麼打；看得到我的手牌時，照我手上這幾張，這回合具體怎麼做（幾個步驟，只能用我手上或場上有的卡）。\n\
-         2. 要小心它的什麼、一句建議。\n\
-         3. 四位軍師各說一句。\n",
+         2. 要小心它的什麼、一句建議。\n",
     );
     p.push_str(&format!("\n=== 剛看到的 ===\n{found}\n"));
     if !deck.is_empty() {
@@ -797,10 +793,9 @@ pub fn prompt_more(found: &Value, deck: &str, notes: &str) -> String {
     p.push_str(
         "\n只回一個 JSON，不要其他文字：\n\
          {\"me\":{\"first\":\"先攻怎麼打，一句\",\"second\":\"後攻怎麼打，一句\",\"now\":[\"這回合第一步\",\"第二步\"]},\
-         \"watch\":[\"要小心它的什麼，15字內\"],\"tip\":\"一句建議\",\
-         \"crew\":{\"claude\":\"總指揮：現在最該做的一件事\",\"codex\":\"算數字：生命值、打點、還差多少傷害或資源張數\",\"grok\":\"看對手：它可能還藏著什麼（蓋牌、手坑、墓地效果）\",\"agy\":\"查環境：這牌組在目前環境的地位、常帶的卡\"}}\n\
+         \"watch\":[\"要小心它的什麼，15字內\"],\"tip\":\"一句建議\"}\n\
          一回合一次的規則：卡名寫著「這個卡名…1回合只能使用1次」的，這回合已經用過一張的，同名的另一張不能再發動同一個效果，步驟裡絕對不要用。\
-         crew 是四位軍師各說一句、各 25 字內、口氣像隊友在旁邊講話。看不到我的手牌時 now 寫 []。now 最多 4 步；watch 最多 3 個。全部繁體中文、台灣用語。\n",
+         看不到我的手牌時 now 寫 []。now 最多 4 步；watch 最多 3 個。全部繁體中文、台灣用語。\n",
     );
     p
 }
@@ -1043,6 +1038,7 @@ mod os {
         fn PrintWindow(hwnd: isize, dc: isize, flags: u32) -> i32;
         fn GetDC(hwnd: isize) -> isize;
         fn ReleaseDC(hwnd: isize, dc: isize) -> i32;
+        fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, w: i32, h: i32, flags: u32) -> i32;
     }
     #[allow(clashing_extern_declarations)]
     #[link(name = "gdi32")]
@@ -1090,6 +1086,16 @@ mod os {
 
     pub fn window_rect(pid: u32) -> Option<Rect> {
         game_window(pid).map(|(_, r)| r)
+    }
+
+    // A window of hers to the top of the windows not on top of all, not
+    // activated, not waited for.
+    pub fn raise(hwnd: isize) {
+        const HWND_TOP: isize = 0;
+        // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
+        const FLAGS: u32 = 0x1 | 0x2 | 0x10 | 0x4000;
+        // SAFETY: a window of ours, its place in the order alone.
+        unsafe { SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, FLAGS) };
     }
 
     // The game's inside as it draws it (PrintWindow, its full content): the
@@ -1149,6 +1155,7 @@ mod os {
     pub fn window_rect(_pid: u32) -> Option<Rect> {
         None
     }
+    pub fn raise(_hwnd: isize) {}
     pub fn capture_game(_hwnd: isize, _r: Rect) -> Option<(usize, usize, Vec<u8>)> {
         None
     }
@@ -1176,118 +1183,100 @@ fn push(sh: &Shared) {
         view["lang"] = json!(sh.lang());
         view["key"] = json!(key_name(sh));
         view["hand"] = json!(hand_of(sh));
-        view["crew"] = crew(sh);
         view["fly"] = json!(FLY.load(Ordering::SeqCst));
         view["watch"] = watch_view();
-        view["asks"] = Value::Object(ASKS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default());
+        view["said"] = json!(*SAID.lock().unwrap_or_else(|e| e.into_inner()));
         let _ = sh.app.emit_to(LABEL, "duel:update", view);
     }
 }
 
-// --- The four, each with a part ("軍師團", the user's word, 2026-10-22) ----------------------
+// --- Telling her what is happening ------------------------------------------------------
+//
+// Under the card she types what the duel is doing ("對手發動灰流麗，要連鎖嗎"),
+// and is answered from it and from the last look, in words only (no
+// picture to read: a chain does not wait for one). Her idea, 2026-10-23,
+// after the four ("軍師團") turned out of no use to her and were taken out.
 
-// Each one's part, as her line in the panel says and as she is asked.
-const PARTS: [(&str, &str); 4] = [
-    ("claude", "總指揮：綜合大家的看法，告訴我現在最該做什麼"),
-    ("codex", "算數字：生命值、攻擊力、打點、還差多少傷害、雙方資源張數"),
-    ("grok", "看對手：對手可能還藏著什麼（蓋牌、手坑、墓地效果），它下一步想幹嘛"),
-    ("agy", "查環境：這個牌組在目前環境的地位、常見構築和常帶的卡、怎麼對付"),
-];
+// What she said and was answered, this duel's last few: { q, state: asking | done | failed, a, since, took }.
+static SAID: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+const SAID_KEPT: usize = 6;
 
-// Each asked by her (agent → { q, state: asking | done | failed, a, since, stood_in }).
-static ASKS: Mutex<Option<serde_json::Map<String, Value>>> = Mutex::new(None);
-// The window that had the keyboard before she typed in the panel.
-static TYPED_FROM: Mutex<isize> = Mutex::new(0);
-
-// The four, with what each pet is drawn from.
-fn crew(sh: &Shared) -> Value {
-    let settings = sh.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let found = crate::data::pets(&sh.dir);
-    json!(PARTS
-        .iter()
-        .map(|&(agent, _)| {
-            let sprite = crate::data::pet_of(&settings, Some(agent), &found);
-            json!({
-                "agent": agent,
-                "sprite": sprite.map(|p| crate::data::asset_url(&p.sheet)),
-                "color": sprite.and_then(|p| p.color.clone()).unwrap_or_else(|| crate::data::agent_color(agent).to_string()),
-            })
-        })
-        .collect::<Vec<_>>())
-}
-
-// What one of them is asked: her part, the duel as Claude read it off the
-// last picture, her deck, the question; short. No tools, but for the meta
-// (`web`): that one may search the web.
-pub fn ask_prompt(agent: &str, q: &str, found: &Value, deck: &str, web: bool) -> String {
-    let part = PARTS.iter().find(|p| p.0 == agent).map_or(PARTS[0].1, |p| p.1);
-    let rule = if web {
-        "可以用 WebSearch 查目前 Master Duel 的環境、這個牌組的構築和打法（最多查 2 次，不要細讀長網頁），不要讀寫檔案"
-    } else {
-        "只根據下面的資料和你自己對遊戲王的了解回答，不要使用任何工具、不要讀寫檔案、不要上網"
-    };
-    let mut p = format!(
-        "你是遊戲王 Master Duel 軍師團的一員，四位軍師各管一塊，你負責「{part}」。玩家在對戰中問你：「{q}」\n\
-         規則：{rule}；繁體中文、台灣 Master Duel 的卡名和用語；從你負責的角度回答，最多 3 行、100 字內，直接講結論，不要開場白。\n"
+pub fn say_prompt(q: &str, found: &Value, age_s: u64, said: &[Value], notes: &str, named: &str) -> String {
+    let mut p = String::from(
+        "你是遊戲王 Master Duel 的對戰助手。玩家正在對戰，連鎖沒時間等：他打字告訴你現在的狀況或問你，\
+         用最多 3 行、80 字內回答，第一句就是結論（連不連鎖、用哪張、斷哪一個效果、現在該按什麼）。\
+         只能叫他用他手上或場上真的有的卡（下面 myHand、mySet）；這個卡名一回合只能用一次、這回合已經用過的，同名的另一張不能再用。\
+         不要使用任何工具，不要開場白。繁體中文、台灣 Master Duel 的卡名。\n",
     );
     if found.is_object() {
-        p.push_str(&format!("\n=== 目前對局（另一位軍師剛看遊戲截圖整理的）===\n{}\n", serde_json::to_string_pretty(found).unwrap_or_default()));
+        p.push_str(&format!("\n=== 剛剛看到的場面（{age_s} 秒前的截圖，之後可能又變了，以玩家說的為準）===\n{found}\n"));
     } else {
-        p.push_str("\n（還沒看過對局畫面。）\n");
+        p.push_str("\n（還沒看過場面，只照玩家說的回答。）\n");
     }
-    if !deck.is_empty() {
-        p.push_str(&format!("\n=== 我的牌組 ===\n{deck}\n"));
+    p.push_str(notes);
+    if !named.is_empty() {
+        p.push_str(&format!("\n玩家提到的卡的效果原文：\n{named}\n"));
     }
+    let before: Vec<String> = said.iter().filter(|s| s["state"] == "done").map(|s| format!("玩家：{}\n你：{}", s["q"].as_str().unwrap_or(""), s["a"].as_str().unwrap_or(""))).collect();
+    if !before.is_empty() {
+        p.push_str(&format!("\n=== 剛才說過的 ===\n{}\n", before.join("\n")));
+    }
+    p.push_str(&format!("\n玩家現在說：「{q}」\n"));
     p
 }
 
-// She asks one of them: that agent itself answers (Claude for one not
-// installed here, said so), the panel told as it goes.
-pub fn ask(sh: &Arc<Shared>, agent: &str, q: &str) {
+pub fn say(sh: &Arc<Shared>, q: &str) {
     let q: String = q.trim().chars().take(200).collect();
-    let Some(&(agent, _)) = PARTS.iter().find(|p| p.0 == agent) else { return };
     if q.is_empty() {
         return;
     }
     let since = crate::now_ms();
-    ASKS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(agent.into(), json!({ "q": q, "state": "asking", "since": since }));
+    let before = {
+        let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+        let before = said.clone();
+        said.push(json!({ "q": q, "state": "asking", "since": since }));
+        let skip = said.len().saturating_sub(SAID_KEPT);
+        said.drain(..skip);
+        before
+    };
     push(sh);
-    let found = VIEW.lock().unwrap_or_else(|e| e.into_inner()).get("found").cloned().unwrap_or(Value::Null);
-    // The meta (Antigravity's part) looked up by Claude on the web: her
-    // answers were poor, the user said (2026-10-23).
-    let web = agent == "agy";
-    let prompt = ask_prompt(agent, &q, &found, &deck_of(sh), web);
     let sh = sh.clone();
-    crate::spawn_named("duel-ask", move || {
-        let folder = dir(&sh).join("work");
-        let _ = std::fs::create_dir_all(&folder);
-        let installed = crate::run::find(match agent {
-            "codex" => "codex",
-            "grok" => "grok",
-            _ => "claude",
-        })
-        .is_some();
-        let by = if installed && !web { agent } else { "claude" };
-        let got = crate::review::ask(by, &folder, &prompt, web);
-        let entry = match got {
-            Ok(a) => json!({ "q": q, "state": "done", "a": a, "since": since, "stoodIn": !installed && !web, "looked": web }),
-            Err(why) => json!({ "q": q, "state": "failed", "a": why, "since": since }),
+    crate::spawn_named("duel-say", move || {
+        let (mut found, at) = {
+            let view = VIEW.lock().unwrap_or_else(|e| e.into_inner());
+            (view.get("found").cloned().unwrap_or(Value::Null), view["at"].as_u64().unwrap_or(0))
         };
-        {
-            let mut asks = ASKS.lock().unwrap_or_else(|e| e.into_inner());
-            let asks = asks.get_or_insert_with(Default::default);
-            // Asked again meanwhile (or a new picture): not this answer.
-            if asks.get(agent).and_then(|a| a["since"].as_u64()) != Some(since) {
-                return;
+        if let Some(o) = found.as_object_mut() {
+            for k in ["screen", "deckAlt", "fresh", "me", "watch", "tip"] {
+                o.remove(k);
             }
-            asks.insert(agent.into(), entry);
+        }
+        let named = crate::cards::with_cards(&sh.dir, |all| {
+            crate::cards::named_in(all, &q, 4).iter().filter_map(|n| crate::cards::text_of(all, n, 260).map(|t| format!("・{n}：{t}"))).collect::<Vec<_>>().join("\n")
+        })
+        .unwrap_or_default();
+        let age = crate::now_ms().saturating_sub(at) / 1000;
+        let prompt = say_prompt(&q, &found, age, &before, &card_notes(&sh), &named);
+        let got = see(&sh, &prompt, &[], TIMEOUT);
+        let took = crate::now_ms().saturating_sub(since);
+        sh.log(&format!("duel: told something, answered {} in {} s", if got.is_ok() { "so" } else { "not" }, took / 1000));
+        {
+            let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(entry) = said.iter_mut().find(|s| s["since"].as_u64() == Some(since)) else { return };
+            *entry = match got {
+                // Its words plain (it writes **bold** at times).
+                Ok(a) => json!({ "q": q, "state": "done", "a": a.replace("**", ""), "since": since, "took": took }),
+                Err(why) => json!({ "q": q, "state": "failed", "a": why, "since": since }),
+            };
         }
         push(&sh);
     });
 }
 
-// The panel takes the keyboard while she types a question, and gives it
-// back to the game after.
+// The panel takes the keyboard while she types, and gives it back to the
+// game after (the window that had it).
+static TYPED_FROM: Mutex<isize> = Mutex::new(0);
+
 pub fn typing(sh: &Shared, on: bool) {
     let Some(win) = window(sh) else { return };
     if on {
@@ -1295,9 +1284,11 @@ pub fn typing(sh: &Shared, on: bool) {
         let _ = win.set_focusable(true);
         let _ = win.set_focus();
     } else {
+        // Given back only when it still has it (not when she clicked another window away).
+        let has_it = win.hwnd().is_ok_and(|h| h.0 as isize == crate::focus::foreground());
         let _ = win.set_focusable(false);
         let from = std::mem::take(&mut *TYPED_FROM.lock().unwrap_or_else(|e| e.into_inner()));
-        if from != 0 {
+        if from != 0 && has_it {
             crate::focus::set_foreground(from);
         }
     }
@@ -1355,7 +1346,7 @@ fn create(sh: &Arc<Shared>) {
             .minimizable(false)
             .skip_taskbar(true)
             .shadow(false)
-            .always_on_top(true)
+            .always_on_top(false)
             .focusable(false)
             .focused(false)
             .visible(false)
@@ -1890,7 +1881,7 @@ fn make_frames(sh: &Arc<Shared>) {
             .minimizable(false)
             .skip_taskbar(true)
             .shadow(false)
-            .always_on_top(true)
+            .always_on_top(false)
             .focusable(false)
             .focused(false)
             .visible(false)
@@ -1917,57 +1908,63 @@ pub fn frames_ready(sh: &Arc<Shared>) {
 const FRAMES_FOR: u64 = 120_000;
 static FRAMES_ON: AtomicBool = AtomicBool::new(false);
 static FRAMES_WATCH: AtomicBool = AtomicBool::new(false);
-// The bar put away while another window is in front (it is on top of
-// everything: it sat over her other windows, 2026-10-23), back with the game.
-static AWAY: AtomicBool = AtomicBool::new(false);
 
-// The game in front (or one of her own windows, typed in): else the frames
-// would sit over whatever is.
-fn game_in_front(sh: &Shared) -> bool {
-    let front = crate::focus::foreground();
-    if game_pid().and_then(os::game_window).is_some_and(|(hwnd, _)| hwnd == front) {
-        return true;
-    }
-    [LABEL, DECK].iter().filter_map(|l| sh.app.get_webview_window(l)).filter_map(|w| w.hwnd().ok()).any(|h| h.0 as isize == front)
-}
+// Every 150 ms while she has the bar up: the game come to the front, the
+// bar and the frames raised over it. They are not on top of everything:
+// over her other windows they were in the way, and put away whenever the
+// game was not in front they vanished from over a game still in sight and
+// came back as if opened anew (her words, 2026-10-23). So they sit just
+// over the game, and another window over the game is over them too. Each
+// second: the frames off once stale, the bar gone with the game.
+const TICK: Duration = Duration::from_millis(150);
 
-// Every second while she has the bar up: the bar and the frames away with
-// the game not in front, back when it is; the frames off once stale; the
-// bar gone with the game.
 fn watch_frames(sh: &Arc<Shared>) {
     if FRAMES_WATCH.swap(true, Ordering::SeqCst) {
         return;
     }
     let sh = sh.clone();
-    crate::spawn_named("duel-frames", move || loop {
-        std::thread::sleep(Duration::from_secs(1));
-        if !SHOWN.load(Ordering::SeqCst) {
-            continue;
-        }
-        if game_pid().is_none() {
-            show(&sh, false);
-            continue;
-        }
-        let away = !game_in_front(&sh);
-        if AWAY.swap(away, Ordering::SeqCst) != away {
-            apply(&sh);
-        }
-        let want = FLY.load(Ordering::SeqCst);
-        if FRAMES_ON.load(Ordering::SeqCst) != (want && frames_fresh(&sh)) {
-            apply_frames(&sh, want);
+    crate::spawn_named("duel-frames", move || {
+        let (mut game, mut was_front, mut ticks) = (0isize, false, 0u32);
+        loop {
+            std::thread::sleep(TICK);
+            if !SHOWN.load(Ordering::SeqCst) {
+                was_front = false;
+                continue;
+            }
+            ticks += 1;
+            if ticks % 7 == 1 {
+                let Some(pid) = game_pid() else {
+                    show(&sh, false);
+                    continue;
+                };
+                game = os::game_window(pid).map_or(0, |(h, _)| h);
+                let want = FLY.load(Ordering::SeqCst);
+                if FRAMES_ON.load(Ordering::SeqCst) != (want && frames_fresh()) {
+                    apply_frames(&sh, want);
+                }
+            }
+            let front = game != 0 && crate::focus::foreground() == game;
+            if front && !was_front {
+                for win in [frames_window(&sh), window(&sh)].into_iter().flatten() {
+                    if let Ok(h) = win.hwnd() {
+                        os::raise(h.0 as isize);
+                    }
+                }
+            }
+            was_front = front;
         }
     });
 }
 
-fn frames_fresh(sh: &Shared) -> bool {
+fn frames_fresh() -> bool {
     let at = VIEW.lock().unwrap_or_else(|e| e.into_inner())["at"].as_u64().unwrap_or(0);
-    crate::now_ms().saturating_sub(at) < FRAMES_FOR && game_in_front(sh)
+    crate::now_ms().saturating_sub(at) < FRAMES_FOR
 }
 
 // The frames: on the game's inside while the panel is up with an answer.
 fn apply_frames(sh: &Arc<Shared>, want: bool) {
     watch_frames(sh);
-    let want = want && frames_fresh(sh);
+    let want = want && frames_fresh();
     let zones = VIEW.lock().unwrap_or_else(|e| e.into_inner()).get("found").map(zones_of).unwrap_or(json!([]));
     let any = zones.as_array().is_some_and(|z| !z.is_empty());
     FRAMES_ON.store(want, Ordering::SeqCst);
@@ -2009,7 +2006,7 @@ fn apply(sh: &Arc<Shared>) {
         return;
     }
     if let Some(win) = window(sh) {
-        if want && !AWAY.load(Ordering::SeqCst) {
+        if want {
             if let Some((pos, size, _)) = rect(sh) {
                 lay(&win, pos, size);
                 // Onto a display of another scale, Windows sizes it again a
@@ -2039,10 +2036,7 @@ fn apply(sh: &Arc<Shared>) {
 
 pub fn show(sh: &Arc<Shared>, on: bool) {
     SHOWN.store(on, Ordering::SeqCst);
-    if on {
-        // Asked for from the game: in front now.
-        AWAY.store(false, Ordering::SeqCst);
-    } else {
+    if !on {
         WATCH.store(false, Ordering::SeqCst);
     }
     apply(sh);
@@ -2070,7 +2064,7 @@ mod tests {
     fn what_claude_is_asked() {
         let p = prompt_of("", "", None, "");
         assert!(p.contains("圖 2") && p.contains("圖 3") && p.contains("\"stop\"") && p.contains("\"field\"") && !p.contains("我的牌組帶的"));
-        assert!(!p.contains("\"crew\"") && !p.contains("\"me\""), "those come after");
+        assert!(!p.contains("\"me\""), "that comes after");
         let last = json!({ "deck": "蛇眼", "seen": ["蛇眼灰燼", "原罪寶-蛇眼"] });
         let p = prompt_of("灰流麗、增殖的G", "巳劍：天叢雲之巳劍×2", Some(&last), "{\"deck\":\"蛇眼\"}");
         assert!(p.contains("剛上網查的") && p.contains("\"turn\"") && p.contains("fresh"));
@@ -2080,7 +2074,18 @@ mod tests {
         assert!(p.contains("\"myHand\"") && p.contains("手上沒有"));
         assert!(p.contains("可能是「蛇眼」（到目前看過的對手卡：蛇眼灰燼、原罪寶-蛇眼）"));
         let m = prompt_more(&json!({ "myHand": ["灰流麗"] }), "巳劍", "\n這回合用過：x\n");
-        assert!(m.contains("\"crew\"") && m.contains("\"now\"") && m.contains("灰流麗") && m.contains("這回合用過：x") && m.contains("不要使用任何工具"));
+        assert!(m.contains("\"now\"") && m.contains("灰流麗") && m.contains("這回合用過：x") && m.contains("不要使用任何工具") && !m.contains("crew"));
+    }
+
+    #[test]
+    fn what_she_tells_it_asked_with_the_last_look() {
+        let said = [json!({ "q": "要連鎖嗎", "a": "不用", "state": "done" }), json!({ "q": "還在想", "state": "asking" })];
+        let p = say_prompt("對手發動灰流麗", &json!({ "myHand": ["無限泡影"] }), 12, &said, "\n這回合用過：x\n", "・灰流麗：①：…");
+        assert!(p.contains("12 秒前") && p.contains("無限泡影") && p.contains("這回合用過：x") && p.contains("・灰流麗：①"));
+        assert!(p.contains("玩家：要連鎖嗎\n你：不用") && !p.contains("還在想"), "only what was answered");
+        assert!(p.ends_with("玩家現在說：「對手發動灰流麗」\n"));
+        let p = say_prompt("x", &Value::Null, 0, &[], "", "");
+        assert!(p.contains("還沒看過場面") && !p.contains("提到的卡"));
     }
 
     #[test]

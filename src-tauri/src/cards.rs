@@ -362,6 +362,23 @@ pub fn theme_cards(cards: &[Card], theme: &str) -> Vec<String> {
     out
 }
 
+// The cards a message names (their names in it, three characters and
+// more), the longest first: "對手發動灰流麗" → 灰流麗.
+pub fn named_in(cards: &[Card], text: &str, most: usize) -> Vec<String> {
+    let mut found: Vec<&str> = cards.iter().map(|c| c.name.as_str()).filter(|n| n.chars().count() >= 3 && text.contains(n)).collect();
+    found.sort_by_key(|n| std::cmp::Reverse(n.chars().count()));
+    found.dedup();
+    // A name inside a longer one found (灰流麗 in 灰流麗麗) is that one.
+    let mut out: Vec<String> = Vec::new();
+    for n in found {
+        if !out.iter().any(|o| o.contains(n)) {
+            out.push(n.to_string());
+        }
+    }
+    out.truncate(most);
+    out
+}
+
 // The monsters with these numbers, as a duel shows one on the field: its
 // ATK and DEF (a link has none: its DEF field holds its arrows), its level.
 pub fn by_stats(cards: &[Card], atk: i32, def: i32, level: Option<u32>) -> Vec<&Card> {
@@ -466,6 +483,13 @@ mod tests {
         assert_eq!(best_match(&cards, "Ice Ryzeal"), Some("冰燃・雷熱渦爐".into()));
         assert_eq!(best_match(&cards, "灰流麗？"), Some("灰流麗".into()));
         assert_eq!(best_match(&cards, "雷熱渦爐"), None);
+    }
+
+    #[test]
+    fn the_cards_a_message_names() {
+        let cards = db();
+        assert_eq!(named_in(&cards, "對手發動灰流麗，要用天叢雲之巳劍嗎", 4), ["天叢雲之巳劍", "灰流麗"]);
+        assert!(named_in(&cards, "要連鎖嗎", 4).is_empty());
     }
 
     #[test]

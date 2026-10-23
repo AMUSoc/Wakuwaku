@@ -1060,13 +1060,13 @@ async fn duel_cards(app: AppHandle, q: String) -> Value {
 }
 
 #[tauri::command]
-async fn duel_crew_ask(app: AppHandle, agent: String, q: String) {
+async fn duel_say(app: AppHandle, q: String) {
     let sh = shared(&app);
-    tauri::async_runtime::spawn_blocking(move || duel::ask(&sh, &agent, &q)).await.ok();
+    tauri::async_runtime::spawn_blocking(move || duel::say(&sh, &q)).await.ok();
 }
 
 #[tauri::command]
-async fn duel_crew_typing(app: AppHandle, on: bool) {
+async fn duel_typing(app: AppHandle, on: bool) {
     let sh = shared(&app);
     tauri::async_runtime::spawn_blocking(move || duel::typing(&sh, on)).await.ok();
 }
@@ -1565,8 +1565,8 @@ fn main() {
             duel_card_arts,
             duel_card_info,
             duel_cards_browse,
-            duel_crew_ask,
-            duel_crew_typing,
+            duel_say,
+            duel_typing,
             duel_deck_close,
             open_drops,
             duel_again,
