@@ -208,6 +208,21 @@
       // What she read as my hand (and my set cards): advice goes by these only.
       const mine = [...(f.myHand || []), ...(f.mySet || []).map(c => `${c}${T('duel.setMark')}`)]
       parts.push(el('div', 'myhand', el('span', 'muted', T('duel.myHand')), mine.length ? mine.map(c => el('span', `chip${c === '?' ? ' unknown' : ''}`, c)) : el('span', 'muted', T('duel.noHand'))))
+      // What she read on each of the opponent's zones (to see at a glance whether she read it right).
+      const field = (f.field || []).filter(z => ZONE_WORD[z.zone] && z.name)
+      if (field.length)
+        parts.push(
+          el(
+            'div',
+            'myhand field',
+            el('span', 'muted', T('duel.theirField')),
+            field.map(z => {
+              const chip = el('span', `chip${/^[?？]/.test(z.name) ? ' unknown' : ''}${z.by === 'stats' ? ' stats' : ''}`, el('b', '', T(`duel.zoneShort.${z.zone.replace(/\d/, '')}`, { n: z.zone.slice(1) })), z.name)
+              if (z.by === 'stats') chip.title = T('duel.byStats')
+              return chip
+            }),
+          ),
+        )
       const stops = (f.stop || []).slice(0, 3)
       if (stops.length) {
         parts.push(el('h2', '', T('duel.stop')))
@@ -228,6 +243,8 @@
           ),
         )
       }
+      // The rest (how to play on, the four's lines) still coming.
+      if (data.more) parts.push(Object.assign(el('p', 'muted more', T('duel.more', { s: secs(Date.now() - data.at) })), { since: data.at }))
       // Her side: going first, going second, this turn's steps.
       const me = f.me || {}
       const steps = (me.now || []).slice(0, 4)
@@ -253,7 +270,11 @@
       body.replaceChildren(el('p', 'muted', T('duel.howTo', { key: data.key })))
     }
     // Thinking: her seconds go on.
-    if (data.updating) timer = setInterval(() => document.querySelectorAll('.updating').forEach(u => (u.textContent = T('duel.updating', { s: secs(Date.now() - u.since) }))), 1000)
+    if (data.updating || data.more)
+      timer = setInterval(() => {
+        document.querySelectorAll('.updating').forEach(u => (u.textContent = T('duel.updating', { s: secs(Date.now() - u.since) })))
+        document.querySelectorAll('.more').forEach(u => (u.textContent = T('duel.more', { s: secs(Date.now() - u.since) })))
+      }, 1000)
     else if (Object.values(data.asks || {}).some(a => a.state === 'asking') && data.state !== 'looking')
       timer = setInterval(() => document.querySelectorAll('.line.busy').forEach(l => (l.textContent = T('duel.crewThinking', { s: secs(Date.now() - l.since) }))), 1000)
     const foot = mode === 'crew' ? [] : [T('duel.keyHint', { key: data.key || 'Alt+D' })]

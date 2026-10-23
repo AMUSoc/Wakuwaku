@@ -31,6 +31,7 @@
 #![recursion_limit = "256"]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod art;
 mod asks;
 mod backplate;
 mod connection;

@@ -27,6 +27,10 @@ getrandom = "0.3"
 png = "0.17"
 # The card database's zip opened (cards.rs); already in the tree, under png.
 miniz_oxide = "0.8"
+# The official card pictures (YGOPRODeck's are JPEG) a deck's cards are
+# told by (art.rs); the crate already in the tree, under Tauri, with its
+# JPEG decoder now.
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [features]
 default = ["custom-protocol"]

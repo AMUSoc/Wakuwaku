@@ -686,6 +686,15 @@ pre.mine {
 .myhand .chip.unknown {
   opacity: 0.6;
 }
+.myhand.field .chip b {
+  margin-right: 4px;
+  opacity: 0.6;
+  font-weight: 600;
+}
+.myhand.field .chip.stats {
+  border-style: dashed;
+}
+
 
 .with.none {
   background: rgba(255, 107, 107, 0.15) !important;

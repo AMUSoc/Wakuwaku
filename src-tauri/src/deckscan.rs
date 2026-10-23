@@ -35,7 +35,7 @@ pub struct Image {
 }
 
 impl Image {
-    fn crop(&self, x: usize, y: usize, w: usize, h: usize) -> Image {
+    pub fn crop(&self, x: usize, y: usize, w: usize, h: usize) -> Image {
         let mut rgb = Vec::with_capacity(w * h * 3);
         for row in y..(y + h).min(self.h) {
             let from = (row * self.w + x) * 3;
@@ -53,7 +53,7 @@ impl Image {
         (mean, (self.rgb.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / n).sqrt())
     }
 
-    fn scaled(&self, k: f64) -> Image {
+    pub fn scaled(&self, k: f64) -> Image {
         let (w, h) = (((self.w as f64) * k) as usize, ((self.h as f64) * k) as usize);
         let mut rgb = vec![0u8; w * h * 3];
         for y in 0..h {
@@ -64,6 +64,15 @@ impl Image {
             }
         }
         Image { w, h, rgb }
+    }
+
+    // Another laid on this one, its top left at (x, y), what falls outside left out.
+    pub fn paste(&mut self, other: &Image, x: usize, y: usize) {
+        for row in 0..other.h.min(self.h.saturating_sub(y)) {
+            let n = other.w.min(self.w.saturating_sub(x)) * 3;
+            let to = ((y + row) * self.w + x) * 3;
+            self.rgb[to..to + n].copy_from_slice(&other.rgb[row * other.w * 3..row * other.w * 3 + n]);
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
@@ -130,7 +139,7 @@ const DIGITS: [[u8; 5]; 10] = [
     [0b111, 0b101, 0b111, 0b001, 0b111],
 ];
 
-fn put_number(sheet: &mut Image, x: usize, y: usize, n: usize) {
+pub fn put_number(sheet: &mut Image, x: usize, y: usize, n: usize) {
     let px = 4;
     for (i, ch) in n.to_string().chars().enumerate() {
         let d = DIGITS[ch.to_digit(10).unwrap_or(0) as usize];

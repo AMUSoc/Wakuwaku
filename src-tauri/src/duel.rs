@@ -168,12 +168,14 @@ fn look_with(sh: &Arc<Shared>, pid: u32, quiet: bool) {
     let taken = std::fs::create_dir_all(dir(sh).join("work")).is_ok()
         && os::capture_game(hwnd, rect).is_some_and(|(w, h, rgb)| {
             let saved = save_png(&picture, w, h, &rgb).is_ok();
-            // Closer: the opponent's half, and my hand along the bottom.
+            // Closer: the opponent's zones one by one, and my hand along the bottom.
             let work = dir(sh).join("work");
-            let (top, low) = (h * 52 / 100, h * 80 / 100);
-            let _ = save_png(&work.join("top.png"), w, top, &rows(w, &rgb, 0, top));
+            let low = h * 80 / 100;
             let _ = save_png(&work.join("hand.png"), w, h - low, &rows(w, &rgb, low, h));
-            *FULL.lock().unwrap_or_else(|e| e.into_inner()) = Some(crate::deckscan::Image { w, h, rgb });
+            let full = crate::deckscan::Image { w, h, rgb };
+            let zones = zone_sheet(&full);
+            let _ = save_png(&work.join("zones.png"), zones.w, zones.h, &zones.rgb);
+            *FULL.lock().unwrap_or_else(|e| e.into_inner()) = Some(full);
             saved
         });
     if !taken {
@@ -206,7 +208,9 @@ fn look_with(sh: &Arc<Shared>, pid: u32, quiet: bool) {
         let guess = match_guess().or_else(last_guess);
         let mut prompt = prompt_of(&hand_of(&sh), &deck_of(&sh), guess.as_ref(), &match_known());
         prompt.push_str(&card_notes(&sh));
-        let answer = run(&sh, &prompt, TIMEOUT, false).and_then(|text| answer_in(&text).ok_or_else(|| text.chars().take(120).collect()));
+        let work = dir(&sh).join("work");
+        let pictures = [work.join("shot.png"), work.join("zones.png"), work.join("hand.png")];
+        let answer = see(&sh, &prompt, &pictures, TIMEOUT).and_then(|text| answer_in(&text).ok_or_else(|| text.chars().take(120).collect()));
         let took = crate::now_ms().saturating_sub(started);
         match answer {
             // The watch on the deck editor: nothing to do there.
@@ -229,11 +233,17 @@ fn look_with(sh: &Arc<Shared>, pid: u32, quiet: bool) {
                 scan_deck(&sh, &theme, Vec::new(), true);
                 return;
             }
-            Ok(found) => {
+            Ok(mut found) => {
+                let guessed = MATCH.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|m| m.deck.clone()).unwrap_or_default();
+                crate::cards::with_cards(&sh.dir, |all| settle(all, &mut found, &guessed));
                 sh.log(&format!("duel: {} in {} s", found["deck"].as_str().unwrap_or("?"), took / 1000));
                 *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((found.clone(), crate::now_ms()));
                 take_in(&sh, &found);
-                publish(&sh, json!({ "state": "ready", "found": found, "took": took, "at": crate::now_ms(), "quiet": quiet }));
+                let at = crate::now_ms();
+                publish(&sh, json!({ "state": "ready", "found": found, "took": took, "at": at, "quiet": quiet, "more": true }));
+                LOOKING.store(false, Ordering::SeqCst);
+                more(&sh, found, at);
+                return;
             }
             // The watch not answered: the last answer stays.
             Err(why) if quiet && has_answer => {
@@ -248,6 +258,133 @@ fn look_with(sh: &Arc<Shared>, pid: u32, quiet: bool) {
         }
         LOOKING.store(false, Ordering::SeqCst);
     });
+}
+
+// The rest of a look, from its first answer: how to play on, what to
+// watch, a tip, the four's lines; laid into the answer shown while it is
+// still that one.
+const REST: [&str; 4] = ["me", "watch", "tip", "crew"];
+
+fn more(sh: &Arc<Shared>, found: Value, at: u64) {
+    let mut core = found;
+    if let Some(o) = core.as_object_mut() {
+        for k in ["screen", "deckAlt", "fresh"] {
+            o.remove(k);
+        }
+    }
+    let prompt = prompt_more(&core, &deck_of(sh), &card_notes(sh));
+    let got = see(sh, &prompt, &[], TIMEOUT).ok().and_then(|t| answer_of(&t));
+    let took = crate::now_ms().saturating_sub(at);
+    {
+        let mut view = VIEW.lock().unwrap_or_else(|e| e.into_inner());
+        if view["at"].as_u64() != Some(at) {
+            return;
+        }
+        view.as_object_mut().map(|v| v.remove("more"));
+        if let Some(got) = &got {
+            for k in REST {
+                if !got[k].is_null() {
+                    view["found"][k] = got[k].clone();
+                }
+            }
+        }
+    }
+    if let Some(got) = &got {
+        if let Some((v, _)) = LAST.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            for k in REST {
+                v[k] = got[k].clone();
+            }
+        }
+    }
+    sh.log(&format!("duel: the rest {} in {} s more", if got.is_some() { "came" } else { "did not come" }, took / 1000));
+    push(sh);
+}
+
+// Names as the card database writes them; a monster named wrong, or not
+// named, put right by what the picture shows of it (ATK, DEF, level) when
+// one card of those numbers fits (among the deck guessed's cards, this
+// look's or the duel's before, else of all). Such an entry says so ("by": "stats").
+pub fn settle(all: &[crate::cards::Card], found: &mut Value, guessed: &str) {
+    let deck = found["deck"].as_str().filter(|d| !d.is_empty()).unwrap_or(guessed).to_string();
+    let theme: Vec<String> = if deck.is_empty() { Vec::new() } else { crate::cards::theme_cards(all, &deck) };
+    if let Some(field) = found["field"].as_array_mut() {
+        for f in field.iter_mut() {
+            let said = f["name"].as_str().unwrap_or("").trim().to_string();
+            if said == "蓋牌" {
+                continue;
+            }
+            let known = (!said.is_empty())
+                .then(|| crate::cards::info(all, None, &said).or_else(|| crate::cards::best_match(all, &said).and_then(|n| crate::cards::info(all, None, &n))))
+                .flatten();
+            let fits = |i: &Value| ["atk", "def", "level"].iter().all(|k| f[*k].as_i64().is_none_or(|v| i[*k].as_i64() == Some(v)));
+            let by_numbers = by_stats(all, f, &theme);
+            match (known, by_numbers) {
+                (Some(i), _) if fits(&i) => f["name"] = i["name"].clone(),
+                // Its numbers say another card (they may be changed by an effect: one card of those numbers, else as said).
+                (_, Some(n)) => {
+                    f["name"] = json!(n);
+                    f["by"] = json!("stats");
+                }
+                (Some(i), None) => f["name"] = i["name"].clone(),
+                (None, None) => {}
+            }
+        }
+    }
+    // Every card named as the database names it; the field's among those seen.
+    let fix = |v: &mut Value| {
+        if let Some(n) = v.as_str().and_then(|s| crate::cards::best_match(all, s)) {
+            *v = json!(n);
+        }
+    };
+    for k in ["seen", "myHand", "mySet", "used"] {
+        if let Some(a) = found[k].as_array_mut() {
+            a.iter_mut().for_each(fix);
+        }
+    }
+    let named: Vec<Value> = found["field"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f["name"].as_str())
+        .filter(|n| !n.is_empty() && *n != "蓋牌" && !n.starts_with(['?', '？']))
+        .map(|n| json!(n))
+        .collect();
+    if !found["seen"].is_array() {
+        found["seen"] = json!([]);
+    }
+    if let Some(seen) = found["seen"].as_array_mut() {
+        for n in named {
+            if !seen.contains(&n) {
+                seen.push(n);
+            }
+        }
+    }
+    // A card to stop that is on the field: framed where the field was read
+    // to hold it (Claude once wrote M3 for the card it had read on M4, 2026-10-23).
+    let on_field: Vec<(String, String)> = found["field"].as_array().into_iter().flatten().filter_map(|f| Some((f["name"].as_str()?.to_string(), f["zone"].as_str()?.to_string()))).collect();
+    if let Some(stops) = found["stop"].as_array_mut() {
+        for s in stops.iter_mut() {
+            fix(&mut s["card"]);
+            let card = s["card"].as_str().unwrap_or("");
+            let zones: Vec<&String> = on_field.iter().filter(|(n, _)| n == card).map(|(_, z)| z).collect();
+            let elsewhere = matches!(s["zone"].as_str(), Some("hand" | "gy" | "ban"));
+            if zones.len() == 1 && !elsewhere {
+                s["zone"] = json!(zones[0]);
+            }
+        }
+    }
+}
+
+// The one card with these numbers: among the deck guessed's when any are, else of all.
+fn by_stats(all: &[crate::cards::Card], f: &Value, theme: &[String]) -> Option<String> {
+    let (atk, def) = (f["atk"].as_i64()?, f["def"].as_i64()?);
+    let fit = crate::cards::by_stats(all, atk as i32, def as i32, f["level"].as_u64().map(|l| l as u32));
+    let ours: Vec<&&crate::cards::Card> = fit.iter().filter(|c| theme.contains(&c.name)).collect();
+    match (ours.len(), fit.len()) {
+        (1, _) => Some(ours[0].name.clone()),
+        (0, 1) => Some(fit[0].name.clone()),
+        _ => None,
+    }
 }
 
 // --- Watching the duel (盯場: she asked for it to keep looking through the
@@ -570,32 +707,41 @@ fn hand_of(sh: &Shared) -> String {
     sh.setting("duelHand").as_str().unwrap_or("").trim().chars().take(300).collect()
 }
 
+// What the look asks first, all that a duel cannot wait for: whose turn,
+// my hand, the opponent's cards zone by zone, its deck, the chain asked
+// about, what to stop (2026-10-23: one look took 21 to 47 s, most of it
+// Claude thinking and writing the four's lines and the plans for later;
+// those come after, from `prompt_more`, the panel showing this meanwhile).
+// The pictures are in the question, in this order: the game whole, the
+// opponent's zones cut out larger, my hand.
 pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>, known: &str) -> String {
     let mut p = String::from(
-        "你是遊戲王 Master Duel 的對戰助手。先用 Read 讀這張遊戲截圖：shot.png（在目前資料夾，就是遊戲畫面本身）。\
-         對戰畫面時再讀兩張放大的：top.png（畫面上半，對手那邊）、hand.png（畫面最下面，我的手牌）：認卡、看數字以放大的為準。\n\n\
+        "你是遊戲王 Master Duel 的對戰助手。附了三張圖：\n\
+         圖 1：遊戲畫面整張。\n\
+         圖 2：對手那半場一格一格切出來放大的（看卡、看數字以這張為準）：上面一排 6 直行，前 5 行上面有黃色編號 1～5，\
+         每一行的上半是對手的魔法陷阱區（S1～S5），下半是它的怪獸區（M1～M5），怪獸上方的白色數字是「攻擊力/守備力」、星星旁的數字是星數；\
+         第 6 行（沒有編號）是場地區 F。下面一排左邊是中間左邊的額外怪獸區 EL，右邊是 ER。\n\
+         圖 3：畫面最下面，我的手牌。\n\n\
          【如果這是牌組編輯畫面】（上面主要牌組、下面額外牌組的卡片格子）：只回 {\"screen\":\"deck\"}，不用認卡（之後會一張一張切出來再認）。\n\n\
          【如果這是對戰畫面】先搞清楚誰是誰（曾把我自己的卡全當成對手的，整場判斷都錯）：\n\
          - 我：左下角的頭像、名字和 LP；對手：右上角的頭像、名字和 LP。畫面上半是對手的場地，下半是我的。\n\
          - 誰的回合：右邊中間的六角形寫著「Turn 數字」和階段（Draw、Standby、Main1、Battle、Main2、End）。藍色、金邊的是我的回合，紅色的是對手的回合。\n\
          - 畫面下方跳出的選擇視窗（「選擇…」「釋放…」「請選擇要發動的…」「從牌組加入手牌」）是我正在操作：裡面的卡都是我的。\n\
          - 左邊的卡片說明只是游標指著的那張，可能是我的也可能是對手的：看那張卡在哪一半場；在我的牌組清單裡、又不在對手那半場的，當成我的。\n\
+         - 右邊打開著的決鬥紀錄（一條一條的卡名和「發動」「特殊召喚」「加入」）寫著卡名：認卡以它為準；每條旁邊的頭像是誰做的。\n\
          - 「「某卡」已發動，是否連鎖」是在問我要不要回應，那張卡可能是任何一方發動的：我的回合、又是我牌組裡的卡，多半是我自己發動的。\n\
          - 畫面中間的大卡片特寫和 CHAIN 數字是正在發動的卡，誰發動的要照上面的方式判斷。\n\
-         - 只有確定是對手的卡（在上半場、在對手的墓地或除外、或確定是對手發動的）才能寫進 seen、拿來判斷對手的牌組。看不出是誰的就不要算。\n\
-         左邊可能打開著某張卡的說明，中間可能正跳出「是否連鎖」。\n\
-         對手的格子這樣叫（照畫面上的左右）：上面那排魔法陷阱區 S1～S5（左到右），下一排怪獸區 M1～M5（左到右），\
-         對手怪獸區右邊那格場地區 F，中間兩格額外怪獸區 EL（左）、ER（右）。在手牌、墓地、除外或連鎖中的寫 hand、gy、ban、chain。\n\
-         畫面最下面一排是我的手牌（我看得到牌面）；我場上蓋著的魔法陷阱我也知道是什麼。\n\
+         - 只有確定是對手的卡（在上半場、在對手的墓地或除外、或確定是對手發動的）才能寫進 seen、field，拿來判斷對手的牌組。看不出是誰的就不要算。\n\
+         對手的格子：魔法陷阱區 S1～S5、怪獸區 M1～M5（左到右，和圖 2 的編號一樣）、場地區 F、額外怪獸區 EL、ER；在手牌、墓地、除外或連鎖中的寫 hand、gy、ban、chain。\n\
          請：\n\
-         0. 先認出我現在手上的每一張牌（myHand），和我場上蓋著、能用的卡。認不出的寫「?」，不要用牌組清單去猜。\n\
-         1. 認出看得到的對手的卡（卡名用台灣 Master Duel 的繁體中文官方譯名；左邊或上方有卡片說明時以說明為準；不確定就寫日文或英文名）。\n\
+         0. 認出我現在手上的每一張牌（myHand，看圖 3），和我場上蓋著、能用的卡。認不出的寫「?」，不要用牌組清單去猜。\n\
+         1. 一格一格認對手場上表側的卡（field，看圖 2）：卡名用台灣 Master Duel 的繁體中文官方譯名（不確定就寫日文或英文名），\
+         怪獸照抄白色的攻擊力、守備力和星數（看不清楚就不寫）。蓋著的卡寫 \"蓋牌\"。\n\
          2. 判斷對手是什麼牌組，憑你自己對 Master Duel 的了解（不能上網，要快：玩家正在等）。\n\
          3. 告訴我要斷哪裡：關鍵展開點、哪張卡的哪個效果、什麼時機、在哪一格。\
          「用什麼斷」（with）只能寫我現在手上或場上真的有的卡（第 0 步認出來的）；\
-         我手上沒有能斷它的，with 寫「手上沒有」，why 說我這回合怎麼撐過去或下回合怎麼反打。絕對不要叫我用手上沒有的卡。\n\
-         4. 正在問「是否連鎖」時：說要不要連鎖、用哪張——同樣只能用我手上或場上有的。\n\
-         5. 我這邊：對上這個牌組先攻、後攻各該怎麼打；看得到我的手牌時，照我手上這幾張，這回合具體怎麼做（幾個步驟）。\n",
+         我手上沒有能斷它的，with 寫「手上沒有」，why 說我這回合怎麼撐過去。絕對不要叫我用手上沒有的卡。\n\
+         4. 正在問「是否連鎖」時：說要不要連鎖、用哪張——同樣只能用我手上或場上有的。\n",
     );
     if !deck.is_empty() {
         p.push_str(&format!("\n我的牌組（認手牌時用來對卡名；牌組裡有不代表現在手上有）：\n{deck}\n"));
@@ -614,29 +760,53 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>, known: &str) -> S
         ));
     }
     p.push_str(
-        "\n對戰畫面只回一個 JSON，不要其他文字：\n\
-         {\"screen\":\"duel\",\"turn\":\"theirs|mine|?\",\"turnNo\":3,\"used\":[\"這回合我已經發動過效果的卡\"],\"fresh\":false,\"myHand\":[\"我手上的牌，認不出寫?\"],\"mySet\":[\"我場上蓋著能用的卡\"],\"deck\":\"對手牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的對手卡名\"],\"plan\":\"它想做什麼，一句話\",\
+        "\n對戰畫面只回一個 JSON，不要其他文字，每個字串都短：\n\
+         {\"screen\":\"duel\",\"turn\":\"theirs|mine|?\",\"turnNo\":3,\"used\":[\"這回合我已經發動過效果的卡\"],\"fresh\":false,\"myHand\":[\"我手上的牌，認不出寫?\"],\"mySet\":[\"我場上蓋著能用的卡\"],\
+         \"field\":[{\"zone\":\"M3\",\"name\":\"卡名\",\"atk\":3200,\"def\":800,\"level\":8}],\
+         \"deck\":\"對手牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的對手卡名\"],\"plan\":\"它想做什麼，一句話\",\
          \"chain\":{\"card\":\"對手正在發動的卡\",\"answer\":\"要不要連鎖、用哪張，一句話\"},\
-         \"stop\":[{\"card\":\"要斷的卡\",\"zone\":\"M3|S1|F|EL|hand|gy|chain…\",\"effect\":\"哪個效果\",\"with\":\"用什麼斷\",\"when\":\"時機\",\"why\":\"為什麼，20字內\"}],\
-         \"me\":{\"first\":\"先攻怎麼打，一句\",\"second\":\"後攻怎麼打，一句\",\"now\":[\"這回合第一步\",\"第二步\"]},\
-         \"watch\":[\"要小心它的什麼，15字內\"],\"tip\":\"一句建議\",\
-         \"crew\":{\"claude\":\"總指揮：現在最該做的一件事\",\"codex\":\"算數字：生命值、打點、還差多少傷害或資源張數\",\"grok\":\"看對手：它可能還藏著什麼（蓋牌、手坑、墓地效果）\",\"agy\":\"查環境：這牌組在目前環境的地位、常帶的卡\"}}\n\
-         turnNo 是六角形上的回合數字。used：這回合我已經發動過效果的卡（看連鎖、我的墓地、場上和下面附的紀錄）。\
+         \"stop\":[{\"card\":\"要斷的卡\",\"zone\":\"M3|S1|F|EL|hand|gy|chain…\",\"effect\":\"哪個效果\",\"with\":\"用什麼斷\",\"when\":\"時機\",\"why\":\"為什麼，20字內\"}]}\n\
+         turnNo 是六角形上的回合數字。used：這回合我已經發動過效果的卡（看連鎖、我的墓地、場上、決鬥紀錄和下面附的紀錄）。\
          一回合一次的規則：卡名寫著「這個卡名…1回合只能使用1次」的，這回合我已經用過一張，手上同名的另一張這回合就不能再發動同一個效果，絕對不要建議；\
          只寫「1回合1次」沒寫卡名的，另一張可以。\
          斷點：照下面附的對手卡效果原文，斷它真正的展開效果（檢索、從牌組特召、送墓的那個），說清楚是第幾個效果、在哪個時機發動。\
-         turn 是現在輪到誰（看畫面上的回合、階段標示和誰在動作）：對手的回合 theirs、我的回合 mine、看不出來 ?。\
+         turn 是現在輪到誰：對手的回合 theirs、我的回合 mine、看不出來 ?。\
          fresh：這張看起來是一場剛開始的對決（第 1 回合、雙方 8000 分、場上幾乎沒卡）寫 true。\
-         crew 是四位軍師各說一句、各 25 字內、口氣像隊友在旁邊講話；看不出來的那位就說她要你注意什麼。\
-         沒在問連鎖時 chain 寫 null；看不到我的手牌時 now 寫 []。stop 最多 3 個，照重要程度排；now 最多 4 步；watch 最多 3 個。\
+         field 只寫對手場上有卡的格子；沒在問連鎖時 chain 寫 null；stop 最多 3 個，照重要程度排。\
          看不出對手的卡時 deck 寫空字串、plan 說看到了什麼。全部繁體中文、台灣用語。\n",
     );
     p
 }
 
-// A look, or a deck read (`web`: it may search the web, for a theme's card
-// list; a look may not: it took 20 s and more, and a duel does not wait,
-// 2026-10-23 — the meta is Antigravity's part among the four).
+// What comes after the first answer, from it alone (no pictures, so quick):
+// how she plays on (going first, second, this turn's steps), what to watch,
+// a tip, the four's lines.
+pub fn prompt_more(found: &Value, deck: &str, notes: &str) -> String {
+    let mut p = String::from(
+        "你是遊戲王 Master Duel 的對戰助手。另一位助手剛看了遊戲截圖，整理成下面的 JSON（myHand 是我手上的牌、field 和 seen 是對手的卡、stop 是要斷的地方）。\
+         不要使用任何工具，照這些資料和你對 Master Duel 的了解補上：\n\
+         1. 我這邊：對上這個牌組先攻、後攻各該怎麼打；看得到我的手牌時，照我手上這幾張，這回合具體怎麼做（幾個步驟，只能用我手上或場上有的卡）。\n\
+         2. 要小心它的什麼、一句建議。\n\
+         3. 四位軍師各說一句。\n",
+    );
+    p.push_str(&format!("\n=== 剛看到的 ===\n{found}\n"));
+    if !deck.is_empty() {
+        p.push_str(&format!("\n=== 我的牌組 ===\n{deck}\n"));
+    }
+    p.push_str(notes);
+    p.push_str(
+        "\n只回一個 JSON，不要其他文字：\n\
+         {\"me\":{\"first\":\"先攻怎麼打，一句\",\"second\":\"後攻怎麼打，一句\",\"now\":[\"這回合第一步\",\"第二步\"]},\
+         \"watch\":[\"要小心它的什麼，15字內\"],\"tip\":\"一句建議\",\
+         \"crew\":{\"claude\":\"總指揮：現在最該做的一件事\",\"codex\":\"算數字：生命值、打點、還差多少傷害或資源張數\",\"grok\":\"看對手：它可能還藏著什麼（蓋牌、手坑、墓地效果）\",\"agy\":\"查環境：這牌組在目前環境的地位、常帶的卡\"}}\n\
+         一回合一次的規則：卡名寫著「這個卡名…1回合只能使用1次」的，這回合已經用過一張的，同名的另一張不能再發動同一個效果，步驟裡絕對不要用。\
+         crew 是四位軍師各說一句、各 25 字內、口氣像隊友在旁邊講話。看不到我的手牌時 now 寫 []。now 最多 4 步；watch 最多 3 個。全部繁體中文、台灣用語。\n",
+    );
+    p
+}
+
+// A deck read: Claude reads the sheet itself and may search the web (a
+// theme's card list).
 fn run(sh: &Shared, prompt: &str, timeout: Duration, web: bool) -> Result<String, String> {
     run_in(sh, "work", prompt, timeout, web)
 }
@@ -646,13 +816,50 @@ fn run_in(sh: &Shared, sub: &str, prompt: &str, timeout: Duration, web: bool) ->
     let _ = std::fs::create_dir_all(&folder);
     let prompt_file = folder.join("prompt.txt");
     std::fs::write(&prompt_file, prompt).map_err(|e| e.to_string())?;
+    let tools: &[&str] = if web { &["-p", "--allowedTools", "Read", "WebSearch", "WebFetch"] } else { &["-p", "--allowedTools", "Read"] };
+    let text = claude(&folder, tools, &prompt_file, timeout)?;
+    if text.is_empty() {
+        return Err("no answer".into());
+    }
+    Ok(text)
+}
+
+// A look: the pictures in the question itself (stream-json, base64), no
+// tools, little thinking. Read one by one with Read it was a turn each,
+// and Claude thought at length: 34 s for one shot, 20 s so (and one turn),
+// measured 2026-10-23 on a shot of her duel.
+fn see(sh: &Shared, prompt: &str, images: &[PathBuf], timeout: Duration) -> Result<String, String> {
+    let folder = dir(sh).join("work");
+    let _ = std::fs::create_dir_all(&folder);
+    let _ = std::fs::write(folder.join(if images.is_empty() { "more.txt" } else { "prompt.txt" }), prompt);
+    let mut content: Vec<Value> = images
+        .iter()
+        .filter_map(|p| std::fs::read(p).ok())
+        .map(|png| json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": base64(&png) } }))
+        .collect();
+    content.push(json!({ "type": "text", "text": prompt }));
+    let input = folder.join(if images.is_empty() { "more.jsonl" } else { "in.jsonl" });
+    let line = json!({ "type": "user", "message": { "role": "user", "content": content } });
+    std::fs::write(&input, format!("{line}\n")).map_err(|e| e.to_string())?;
+    let out = claude(&folder, &["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--tools", "", "--effort", "low"], &input, timeout)?;
+    // The last line says how it went and holds the answer.
+    let result = out.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|v| v["type"] == "result").ok_or("no answer")?;
+    let text = result["result"].as_str().unwrap_or("").trim().to_string();
+    if result["is_error"] == true || text.is_empty() {
+        return Err(text.lines().next().unwrap_or("no answer").chars().take(120).collect());
+    }
+    Ok(text)
+}
+
+// Claude asked, its words on its input from a file, never on a command line
+// (claude is a .cmd shim); what it wrote, whole.
+fn claude(folder: &std::path::Path, args: &[&str], input: &std::path::Path, timeout: Duration) -> Result<String, String> {
     let exe = crate::run::find("claude").ok_or("claude not found")?;
     let mut cmd = std::process::Command::new(&exe);
-    // The words on its input, never on a command line (claude is a .cmd shim).
-    cmd.args(if web { &["-p", "--allowedTools", "Read", "WebSearch", "WebFetch"][..] } else { &["-p", "--allowedTools", "Read"][..] })
-        .args(crate::run::quiet(&folder))
-        .current_dir(&folder)
-        .stdin(std::fs::File::open(&prompt_file).map_err(|e| e.to_string())?)
+    cmd.args(args)
+        .args(crate::run::quiet(folder))
+        .current_dir(folder)
+        .stdin(std::fs::File::open(input).map_err(|e| e.to_string())?)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
     for mark in crate::run::SESSION_MARKS {
@@ -679,15 +886,27 @@ fn run_in(sh: &Shared, sub: &str, prompt: &str, timeout: Duration, web: bool) ->
                 let _ = child.kill();
                 return Err("timeout".into());
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(300)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(200)),
             Err(e) => return Err(e.to_string()),
         }
     };
     let text = reader.join().unwrap_or_default().trim().to_string();
-    if !ok || text.is_empty() {
+    if !ok {
         return Err(text.lines().next().unwrap_or("no answer").chars().take(120).collect());
     }
     Ok(text)
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= c.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
 }
 
 // --- The picture ---------------------------------------------------------------------
@@ -736,6 +955,46 @@ pub fn shrink(w: usize, h: usize, rgb: &[u8], most: usize) -> (usize, usize, Vec
 // Rows y0..y1 of a picture, whole width.
 fn rows(w: usize, rgb: &[u8], y0: usize, y1: usize) -> Vec<u8> {
     rgb[y0 * w * 3..y1 * w * 3].to_vec()
+}
+
+// The opponent's side cut out zone by zone, larger (zones.png): its five
+// columns (the back row over the monster zones, the ATK/DEF and stars over
+// each monster), numbered 1 to 5 above, then the field zone; under them
+// the two extra monster zones. As parts of the game's inside, from the
+// frames' zones (src/duel/frames.js). A card on the field is some 60 px
+// wide in the picture of the whole game Claude sees: its name, its numbers
+// too small to read (2026-10-23).
+const COLUMNS: [(f64, f64); 6] = [(0.284, 0.373), (0.370, 0.458), (0.456, 0.544), (0.542, 0.630), (0.628, 0.715), (0.713, 0.785)];
+const COLUMN_Y: (f64, f64) = (0.10, 0.378);
+const EXTRA: [(f64, f64, f64, f64); 2] = [(0.365, 0.38, 0.458, 0.54), (0.542, 0.38, 0.635, 0.54)];
+
+pub fn zone_sheet(game: &crate::deckscan::Image) -> crate::deckscan::Image {
+    use crate::deckscan::Image;
+    let (gw, gh) = (game.w as f64, game.h as f64);
+    let cut = |l: f64, t: f64, r: f64, b: f64| game.crop((l * gw) as usize, (t * gh) as usize, ((r - l) * gw) as usize, ((b - t) * gh) as usize);
+    // A column some 240 px wide.
+    let k = (240.0 / ((COLUMNS[0].1 - COLUMNS[0].0) * gw)).clamp(1.0, 3.0);
+    let (gap, label) = (10, 26);
+    let columns: Vec<Image> = COLUMNS.iter().map(|&(l, r)| cut(l, COLUMN_Y.0, r, COLUMN_Y.1).scaled(k)).collect();
+    let extras: Vec<Image> = EXTRA.iter().map(|&(l, t, r, b)| cut(l, t, r, b).scaled(k)).collect();
+    let w = columns.iter().map(|c| c.w + gap).sum::<usize>();
+    let top = columns.iter().map(|c| c.h).max().unwrap_or(0);
+    let low = extras.iter().map(|c| c.h).max().unwrap_or(0);
+    let mut out = Image { w, h: label + top + gap + label + low, rgb: vec![18; w * (label + top + gap + label + low) * 3] };
+    let mut x = 0;
+    for (i, c) in columns.iter().enumerate() {
+        if i < 5 {
+            crate::deckscan::put_number(&mut out, x + c.w / 2 - 6, 3, i + 1);
+        }
+        out.paste(c, x, label);
+        x += c.w + gap;
+    }
+    // EL under the second column, ER under the fourth, as on the field.
+    let under = |n: usize| columns[..n].iter().map(|c| c.w + gap).sum::<usize>();
+    for (e, n) in extras.iter().zip([1, 3]) {
+        out.paste(e, under(n), label + top + gap + label);
+    }
+    out
 }
 
 #[cfg(windows)]
@@ -1157,7 +1416,24 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>, fre
                 .filter(|(slot, _)| !kept.iter().any(|(s, _)| s == slot))
                 .filter_map(|(slot, img)| crate::deckscan::recall(&memory, &crate::deckscan::print(img)).map(|k| (slot.clone(), k.name.clone(), k.id)))
                 .collect();
-            let known_names: Vec<(String, String)> = kept.iter().cloned().chain(recalled.iter().map(|(s, n, _)| (s.clone(), n.clone()))).collect();
+            // The rest told by the official pictures when plainly one of the cards
+            // likely here (art.rs): her decks', the theme's, the hand traps.
+            let looks: Vec<Vec<f32>> = cards.iter().map(|(_, img)| crate::deckscan::print(img)).collect();
+            let pool = crate::art::looks(&sh.dir, &likely_cards(&sh, &theme));
+            let by_art: Vec<(String, String, u64)> = cards
+                .iter()
+                .enumerate()
+                .filter(|(_, (slot, _))| !kept.iter().any(|(s, _)| s == slot) && !recalled.iter().any(|(s, _, _)| s == slot))
+                .filter_map(|(i, (slot, _))| crate::art::which(&looks[i], &pool).map(|(id, _)| (slot.clone(), id)))
+                .filter_map(|(slot, id)| Some((slot, name_of(&sh, id)?, id)))
+                .collect();
+            sh.log(&format!("duel: {} of {} cards told by their pictures ({} pictured)", by_art.len(), cards.len(), pool.len()));
+            let known_names: Vec<(String, String)> = kept
+                .iter()
+                .cloned()
+                .chain(recalled.iter().map(|(s, n, _)| (s.clone(), n.clone())))
+                .chain(by_art.iter().map(|(s, n, _)| (s.clone(), n.clone())))
+                .collect();
             let numbered: Vec<(usize, String)> = known_names.iter().filter_map(|(slot, name)| cards.iter().position(|(s, _)| s == slot).map(|i| (i + 1, name.clone()))).collect();
             // The theme's cards from the card database, when it has any: picked among, no web search.
             let theme_cards = if theme.is_empty() { Vec::new() } else { crate::cards::with_cards(&sh.dir, |all| crate::cards::theme_cards(all, &theme)).unwrap_or_default() };
@@ -1169,6 +1445,46 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>, fre
                 let text = run(&sh, &prompt, DECK_TIMEOUT, true)?;
                 answer_in(&text).ok_or_else(|| text.chars().take(120).collect::<String>())?
             };
+            // Claude's names as the database writes them, each checked against its
+            // pictures: alike, sure; plainly another of the theme it named, that one;
+            // else unsure (it was sure of names whose pictures were nothing alike).
+            let said: Vec<(usize, String, bool)> = found["cards"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|c| {
+                    let n = c["n"].as_u64()? as usize;
+                    let name = c["name"].as_str().unwrap_or("");
+                    let name = crate::cards::with_cards(&sh.dir, |all| crate::cards::best_match(all, name)).flatten().unwrap_or_else(|| name.to_string());
+                    Some((n, name, c["sure"] != false))
+                })
+                .collect();
+            let named: Vec<(u64, String)> = crate::cards::with_cards(&sh.dir, |all| {
+                said.iter().filter_map(|(_, name, _)| crate::cards::info(all, None, name)).filter_map(|i| Some((i["id"].as_u64()?, i["en"].as_str().unwrap_or("").to_string()))).collect()
+            })
+            .unwrap_or_default();
+            let named_looks = crate::art::looks(&sh.dir, &named);
+            let found_theme = found["theme"].as_str().unwrap_or("").to_string();
+            let theme_pool = if found_theme.is_empty() || found_theme == theme {
+                std::collections::HashMap::new()
+            } else {
+                crate::art::looks(&sh.dir, &likely_cards(&sh, &found_theme))
+            };
+            let checked: Vec<(usize, String, bool)> = said
+                .into_iter()
+                .map(|(n, name, sure)| {
+                    let Some(look) = looks.get(n.wrapping_sub(1)) else { return (n, name, sure) };
+                    let id = crate::cards::with_cards(&sh.dir, |all| crate::cards::info(all, None, &name).and_then(|i| i["id"].as_u64())).flatten();
+                    match id.and_then(|id| named_looks.get(&id)).map(|arts| crate::art::score(look, arts)) {
+                        Some(score) if score >= crate::art::SURE => (n, name, true),
+                        alike => match crate::art::which(look, &theme_pool).and_then(|(id, _)| name_of(&sh, id)) {
+                            Some(other) => (n, other, true),
+                            // Its pictures not had: as Claude said.
+                            None => (n, name, sure && alike.is_none()),
+                        },
+                    }
+                })
+                .collect();
             let read: Vec<Value> = cards
                 .iter()
                 .enumerate()
@@ -1179,11 +1495,13 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>, fre
                     if let Some((_, name, id)) = recalled.iter().find(|(s, _, _)| s == slot) {
                         return json!({ "slot": slot, "name": name, "id": id, "sure": false, "remembered": true });
                     }
-                    let c = found["cards"].as_array().and_then(|a| a.iter().find(|c| c["n"].as_u64() == Some(i as u64 + 1)));
-                    let said = c.and_then(|c| c["name"].as_str()).unwrap_or("");
-                    // As the card database names it, when it names it so (English, Japanese, a "?").
-                    let name = crate::cards::with_cards(&sh.dir, |all| crate::cards::best_match(all, said)).flatten().unwrap_or_else(|| said.to_string());
-                    json!({ "slot": slot, "name": name, "sure": c.is_some_and(|c| c["sure"] != false) })
+                    if let Some((_, name, id)) = by_art.iter().find(|(s, _, _)| s == slot) {
+                        return json!({ "slot": slot, "name": name, "id": id, "sure": true, "art": true });
+                    }
+                    match checked.iter().find(|(n, _, _)| *n == i + 1) {
+                        Some((_, name, sure)) => json!({ "slot": slot, "name": name, "sure": sure }),
+                        None => json!({ "slot": slot, "name": "", "sure": false }),
+                    }
                 })
                 .collect();
             let theme = if theme.is_empty() { found["theme"].as_str().unwrap_or("").to_string() } else { theme.clone() };
@@ -1205,6 +1523,33 @@ pub fn scan_deck(sh: &Arc<Shared>, theme: &str, kept: Vec<(String, String)>, fre
         view["error"] = json!(done.err());
         let _ = sh.app.emit_to(DECK, "duel:deck", view);
     });
+}
+
+// The cards likely in her deck, to tell its slots by their pictures:
+// those of her saved decks, the theme's, the hand traps (passcode, English name).
+fn likely_cards(sh: &Shared, theme: &str) -> Vec<(u64, String)> {
+    let d = dir(sh);
+    let mut names: Vec<String> = Vec::new();
+    let decks = std::fs::read_dir(decks_dir(sh)).into_iter().flatten().flatten().map(|e| e.path().join("deck.json")).chain([crate::deckscan::deck_path(&d)]);
+    for file in decks {
+        let deck: Value = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        names.extend(deck["cards"].as_array().into_iter().flatten().filter_map(|c| c["name"].as_str()).map(str::to_string));
+    }
+    crate::cards::with_cards(&sh.dir, |all| {
+        if !theme.is_empty() {
+            names.extend(crate::cards::theme_cards(all, theme));
+        }
+        let mut out: Vec<(u64, String)> = names.iter().filter_map(|n| crate::cards::info(all, None, n)).filter_map(|i| Some((i["id"].as_u64()?, i["en"].as_str().unwrap_or("").to_string()))).collect();
+        out.extend(all.iter().filter(|c| c.hand).map(|c| (c.id, c.en.clone())));
+        out.sort();
+        out.dedup();
+        out
+    })
+    .unwrap_or_default()
+}
+
+fn name_of(sh: &Shared, id: u64) -> Option<String> {
+    crate::cards::with_cards(&sh.dir, |all| all.iter().find(|c| c.id == id).map(|c| c.name.clone())).flatten()
 }
 
 // --- Her deck, to look over ---------------------------------------------------------------
@@ -1335,8 +1680,11 @@ pub fn search_cards(sh: &Shared, q: &str) -> Value {
 }
 
 // Every picture of a card, its alternate arts too.
+// Every picture of a card (its alternate arts too: Master Duel has them,
+// and its cards with art over the frame, the user's word, 2026-10-22).
 pub fn card_arts(sh: &Shared, id: u64) -> Value {
-    json!(crate::cards::with_cards(&sh.dir, |all| crate::cards::arts(all, id)).unwrap_or_default())
+    let en = crate::cards::with_cards(&sh.dir, |all| all.iter().find(|c| c.id == id).map(|c| c.en.clone())).flatten().unwrap_or_default();
+    json!(crate::art::ids(&sh.dir, id, &en).into_iter().map(crate::cards::picture).collect::<Vec<_>>())
 }
 
 pub fn deck_ready(sh: &Arc<Shared>) {
@@ -1710,7 +2058,8 @@ mod tests {
     #[test]
     fn what_claude_is_asked() {
         let p = prompt_of("", "", None, "");
-        assert!(p.contains("shot.png") && p.contains("top.png") && p.contains("hand.png") && p.contains("\"stop\"") && !p.contains("我的牌組帶的"));
+        assert!(p.contains("圖 2") && p.contains("圖 3") && p.contains("\"stop\"") && p.contains("\"field\"") && !p.contains("我的牌組帶的"));
+        assert!(!p.contains("\"crew\"") && !p.contains("\"me\""), "those come after");
         let last = json!({ "deck": "蛇眼", "seen": ["蛇眼灰燼", "原罪寶-蛇眼"] });
         let p = prompt_of("灰流麗、增殖的G", "巳劍：天叢雲之巳劍×2", Some(&last), "{\"deck\":\"蛇眼\"}");
         assert!(p.contains("剛上網查的") && p.contains("\"turn\"") && p.contains("fresh"));
@@ -1719,6 +2068,74 @@ mod tests {
         assert!(p.contains("我的牌組帶的手坑／斷點卡：灰流麗、增殖的G。只有我現在手上"));
         assert!(p.contains("\"myHand\"") && p.contains("手上沒有"));
         assert!(p.contains("可能是「蛇眼」（到目前看過的對手卡：蛇眼灰燼、原罪寶-蛇眼）"));
+        let m = prompt_more(&json!({ "myHand": ["灰流麗"] }), "巳劍", "\n這回合用過：x\n");
+        assert!(m.contains("\"crew\"") && m.contains("\"now\"") && m.contains("灰流麗") && m.contains("這回合用過：x") && m.contains("不要使用任何工具"));
+    }
+
+    #[test]
+    fn pictures_in_the_question() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64(&[0xff, 0xfe]), "//4=");
+    }
+
+    #[test]
+    fn the_opponent_s_zones_cut_out_larger() {
+        let (w, h) = (2048, 1152);
+        let game = crate::deckscan::Image { w, h, rgb: vec![90; w * h * 3] };
+        let z = zone_sheet(&game);
+        // Five columns and the field zone some 240 px each, two rows.
+        assert!(z.w > 1300 && z.w < 1700, "{}", z.w);
+        assert!(z.h > 500 && z.h < 900, "{}", z.h);
+        assert_eq!(z.rgb.len(), z.w * z.h * 3);
+        // A small game: no smaller than it is.
+        let small = crate::deckscan::Image { w: 1280, h: 720, rgb: vec![90; 1280 * 720 * 3] };
+        assert!(zone_sheet(&small).w >= 1300);
+    }
+
+    #[test]
+    fn names_put_right_by_the_database() {
+        let all = crate::cards::parse(
+            &json!({
+                "1": { "id": 14558127, "md_name": "灰流丽", "en_name": "Ash Blossom & Joyous Spring", "data": { "type": 4129, "atk": 0, "def": 1800, "level": 3 } },
+                "2": { "id": 19899073, "md_name": "天丛云之巳剑", "en_name": "Ame no Murakumo no Mitsurugi", "data": { "type": 161, "atk": 3200, "def": 800, "level": 8 } },
+                "3": { "id": 1, "md_name": "别的巳剑", "en_name": "Other Mitsurugi", "data": { "type": 33, "atk": 1600, "def": 400, "level": 4 } },
+                "4": { "id": 2, "md_name": "路人", "en_name": "Someone", "data": { "type": 33, "atk": 1600, "def": 400, "level": 4 } }
+            })
+            .to_string(),
+        );
+        let mut found = json!({
+            "deck": "巳劍",
+            "seen": ["Ash Blossom & Joyous Spring"],
+            "field": [
+                { "zone": "M3", "name": "天雲之劍", "atk": 3200, "def": 800, "level": 8 },
+                { "zone": "M4", "name": "?", "atk": 1600, "def": 400, "level": 4 },
+                { "zone": "S2", "name": "蓋牌" },
+                { "zone": "M5", "name": "灰流麗", "atk": 3000, "def": 0 }
+            ],
+            "stop": [{ "card": "Ame no Murakumo no Mitsurugi", "zone": "M2" }, { "card": "別的巳劍", "zone": "gy" }]
+        });
+        settle(&all, &mut found, "");
+
+        let f = &found["field"];
+        assert_eq!((f[0]["name"].as_str(), f[0]["by"].as_str()), (Some("天叢雲之巳劍"), Some("stats")), "only one card is 3200/800 ★8");
+        assert_eq!(f[1]["name"], "別的巳劍", "two cards are 1600/400 ★4: the deck's one");
+        assert_eq!(f[2]["name"], "蓋牌");
+        assert_eq!(f[3]["name"], "灰流麗", "numbers no card has (changed by an effect): as said");
+        assert_eq!(found["stop"][0]["card"], "天叢雲之巳劍");
+        assert_eq!(found["stop"][0]["zone"], "M3", "where the field was read to hold it");
+        assert_eq!(found["stop"][1]["zone"], "gy", "another copy, in the graveyard");
+        assert_eq!(found["seen"], json!(["灰流麗", "天叢雲之巳劍", "別的巳劍"]));
+        // No deck this look: the duel's guess before.
+        let mut found = json!({ "deck": "", "field": [{ "zone": "M1", "name": "?", "atk": 1600, "def": 400, "level": 4 }] });
+        settle(&all, &mut found, "巳劍");
+        assert_eq!(found["field"][0]["name"], "別的巳劍");
+        let mut found = json!({ "deck": "", "field": [{ "zone": "M1", "name": "?", "atk": 1600, "def": 400, "level": 4 }] });
+        settle(&all, &mut found, "");
+        assert_eq!(found["field"][0]["name"], "?", "two cards fit, nothing to choose by");
     }
 
     #[test]
