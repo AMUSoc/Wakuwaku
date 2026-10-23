@@ -111,7 +111,9 @@ pub fn parse(json_text: &str) -> Vec<Card> {
             if name.is_empty() && en.is_empty() {
                 return None;
             }
-            let key = format!("{}\n{}\n{}\n{}", name, sc, jp, en).to_lowercase();
+            // The other Chinese name too (增殖的G for Master Duel's 增殖的Z), Traditional.
+            let cn = traditional(&s(v, "cn_name"), &map);
+            let key = format!("{}\n{}\n{}\n{}\n{}", name, sc, jp, en, cn).to_lowercase();
             let n = |k: &str| v["data"][k].as_i64().unwrap_or(0);
             let kind = n("type") as u32;
             let text = &v["text"];
@@ -260,6 +262,8 @@ pub fn info(cards: &[Card], id: Option<u64>, name: &str) -> Option<Value> {
     let c = id
         .and_then(|id| cards.iter().find(|c| c.id == id))
         .or_else(|| (!name.is_empty()).then(|| cards.iter().find(|c| c.name.to_lowercase() == name || c.jp.to_lowercase() == name || c.en.to_lowercase() == name)).flatten())
+        // By another of its names (增殖的G, Master Duel's 增殖的Z).
+        .or_else(|| (!name.is_empty()).then(|| cards.iter().find(|c| c.key.lines().any(|k| k == name))).flatten())
         // Written a little otherwise ("I:P偽裝舞會蓮" for "I：P偽裝舞會蓮"): its spaces and dots aside.
         .or_else(|| {
             let bare = |t: &str| t.to_lowercase().chars().filter(|c| !c.is_whitespace() && !"・·.:：-－「」\"".contains(*c)).collect::<String>();
@@ -286,6 +290,22 @@ fn info_of(c: &Card) -> Value {
         "hand": c.hand,
         "img": picture(c.id),
     })
+}
+
+// A card's "once a turn by name" line ("這個卡名的效果1回合只能使用1次",
+// "這個卡名的①②效果1回合各能使用1次"…): another copy cannot do it again that
+// turn (she was told to throw a second one the same turn, 2026-10-23).
+pub fn once_by_name(desc: &str) -> Option<String> {
+    // "這個卡名的" lines are the limits by name, whatever the wording ("在1回合只能發動1張", "各能選擇1次", "在決鬥中只能").
+    let line = desc.lines().find(|l| l.contains("卡名") && (l.contains("1回合") || l.contains("決鬥中只能")))?;
+    Some(line.trim().chars().take(70).collect())
+}
+
+// What a card does, by its name: its text cut short, for the helper's prompt.
+pub fn text_of(cards: &[Card], name: &str, most: usize) -> Option<String> {
+    let i = info(cards, None, name)?;
+    let desc = i["desc"].as_str()?.replace('\n', " ");
+    Some(desc.chars().take(most).collect())
 }
 
 // The deck window's card list, as the game's: the cards whose name or text
@@ -387,7 +407,7 @@ mod tests {
     fn db() -> Vec<Card> {
         parse(
             &json!({
-                "1": { "id": 14558127, "md_name": "灰流丽", "jp_name": "灰流うらら", "en_name": "Ash Blossom & Joyous Spring",
+                "1": { "id": 14558127, "md_name": "灰流丽", "cn_name": "灰流丽丽", "jp_name": "灰流うらら", "en_name": "Ash Blossom & Joyous Spring",
                        "text": { "desc": "①：包含以下其中任意种效果的魔法·陷阱·怪兽的效果发动时，把这张卡从手卡丢弃才能发动。那个效果无效。" },
                        "data": { "type": 4129, "atk": 0, "def": 1800, "level": 3, "race": 16, "attribute": 4 } },
                 "2": { "id": "8633261", "md_name": "冰燃・雷热涡炉", "jp_name": "アイス・ライゼオル", "en_name": "Ice Ryzeal" },
@@ -422,7 +442,18 @@ mod tests {
         let ash = info(&cards, Some(14558127), "").unwrap();
         assert_eq!((ash["kind"].as_u64(), ash["hand"].as_bool()), (Some(4129), Some(true)));
         assert!(info(&cards, None, "沒有這張").is_none());
+        assert_eq!(info(&cards, None, "灰流麗麗").unwrap()["id"], 14558127, "by its other name");
         assert_eq!(info(&cards, None, "冰燃雷熱渦爐").unwrap()["id"], 8633261);
+    }
+
+    #[test]
+    fn a_card_once_a_turn_by_its_name() {
+        assert_eq!(once_by_name("這個卡名的效果1回合只能使用1次。\n①：…").as_deref(), Some("這個卡名的效果1回合只能使用1次。"));
+        assert!(once_by_name("這個卡名的①②效果1回合各能使用1次。").is_some());
+        assert!(once_by_name("①：1回合1次，可以發動。").is_none(), "once a turn, not by name: another copy may");
+        assert!(once_by_name("這個卡名的卡在1回合只能發動1張。").is_some());
+        let cards = db();
+        assert!(text_of(&cards, "灰流麗", 20).unwrap().chars().count() <= 20);
     }
 
     #[test]
@@ -468,3 +499,4 @@ mod tests {
         assert_eq!(unzip_first(&z), Some(b"{}".to_vec()));
     }
 }
+

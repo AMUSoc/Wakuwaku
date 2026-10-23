@@ -202,8 +202,10 @@ fn look_with(sh: &Arc<Shared>, pid: u32, quiet: bool) {
     }
     let sh = sh.clone();
     crate::spawn_named("duel", move || {
-        let guess = if WATCH.load(Ordering::SeqCst) { match_guess() } else { None }.or_else(last_guess);
-        let prompt = prompt_of(&hand_of(&sh), &deck_of(&sh), guess.as_ref(), &match_known());
+        tidy_match();
+        let guess = match_guess().or_else(last_guess);
+        let mut prompt = prompt_of(&hand_of(&sh), &deck_of(&sh), guess.as_ref(), &match_known());
+        prompt.push_str(&card_notes(&sh));
         let answer = run(&sh, &prompt, TIMEOUT, false).and_then(|text| answer_in(&text).ok_or_else(|| text.chars().take(120).collect()));
         let took = crate::now_ms().saturating_sub(started);
         match answer {
@@ -274,6 +276,20 @@ struct Match {
     frame: Vec<u8>,
     // The deck looked up: its name, and what was found (null while looking).
     research: Option<(String, Value)>,
+    // The turn's number, the cards she has used this turn, and her hand as last read.
+    turn: i64,
+    used: Vec<String>,
+    hand: Vec<String>,
+    // When an answer last came in: 20 minutes on, another duel.
+    at: u64,
+}
+
+// An old duel forgotten (no look for 20 minutes).
+fn tidy_match() {
+    let mut m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
+    if m.as_ref().is_some_and(|m| m.at > 0 && crate::now_ms().saturating_sub(m.at) > GUESS_MS) {
+        *m = Some(Match::default());
+    }
 }
 
 pub fn watch(sh: &Arc<Shared>, on: bool) {
@@ -347,6 +363,51 @@ fn match_guess() -> Option<Value> {
     Some(json!({ "deck": if m.deck.is_empty() { "?" } else { m.deck.as_str() }, "seen": m.seen }))
 }
 
+// What the cards say, for the look (2026-10-23: told to throw a second
+// copy of a card used once by name that turn, and stops guessed from art):
+// the cards she has used this turn; her deck's cards that are once a turn
+// by name; the texts of the opponent's cards seen and of her hand.
+fn card_notes(sh: &Shared) -> String {
+    let (turn, used, seen, hand) = {
+        let m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
+        m.as_ref().map(|m| (m.turn, m.used.clone(), m.seen.clone(), m.hand.clone())).unwrap_or_default()
+    };
+    let mine: Vec<String> = {
+        let deck = crate::deckscan::read_deck(&dir(sh));
+        let mut names: Vec<String> = deck["cards"].as_array().into_iter().flatten().filter_map(|c| c["name"].as_str()).map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+        names.sort();
+        names.dedup();
+        names
+    };
+    crate::cards::with_cards(&sh.dir, |all| {
+        let mut out = String::new();
+        if !used.is_empty() {
+            out.push_str(&format!("\n這回合（第 {turn} 回合）我已經發動過效果的卡：{}。\n", used.join("、")));
+        }
+        let once: Vec<String> = mine
+            .iter()
+            .filter_map(|n| crate::cards::info(all, None, n).and_then(|i| crate::cards::once_by_name(i["desc"].as_str()?)).map(|rule| format!("{n}（{rule}）")))
+            .collect();
+        if !once.is_empty() {
+            out.push_str(&format!(
+                "\n我牌組裡「這個卡名一回合只能用一次」的卡（同名的另一張這回合也不能再發動同一個效果）：\n{}\n",
+                once.join("\n")
+            ));
+        }
+        let texts = |names: &[String], most: usize| names.iter().take(most).filter_map(|n| crate::cards::text_of(all, n, 260).map(|t| format!("・{n}：{t}"))).collect::<Vec<_>>().join("\n");
+        let theirs = texts(&seen, 10);
+        if !theirs.is_empty() {
+            out.push_str(&format!("\n對手這場出現過的卡的效果原文（斷點照這個判斷）：\n{theirs}\n"));
+        }
+        let held = texts(&hand, 7);
+        if !held.is_empty() {
+            out.push_str(&format!("\n我手上的牌（上一張畫面認的）的效果原文：\n{held}\n"));
+        }
+        out
+    })
+    .unwrap_or_default()
+}
+
 fn match_known() -> String {
     let m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
     m.as_ref().and_then(|m| m.research.as_ref()).filter(|(_, v)| v.is_object()).map(|(_, v)| v.to_string()).unwrap_or_default()
@@ -358,7 +419,8 @@ fn take_in(sh: &Arc<Shared>, found: &Value) {
     let deck = found["deck"].as_str().unwrap_or("").trim().to_string();
     let look_up = {
         let mut m = MATCH.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(m) = m.as_mut() else { return };
+        let m = m.get_or_insert_with(Match::default);
+        m.at = crate::now_ms();
         if found["fresh"] == true && !m.seen.is_empty() {
             let frame = std::mem::take(&mut m.frame);
             *m = Match { frame, looked: m.looked, ..Match::default() };
@@ -370,6 +432,23 @@ fn take_in(sh: &Arc<Shared>, found: &Value) {
             }
         }
         m.mine = found["turn"] == "mine";
+        // A new turn: nothing used in it yet.
+        if let Some(n) = found["turnNo"].as_i64().filter(|n| *n > 0) {
+            if n != m.turn {
+                m.turn = n;
+                m.used.clear();
+            }
+        }
+        for c in found["used"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            let c = c.trim();
+            if !c.is_empty() && !c.starts_with('?') && !m.used.iter().any(|u| u == c) {
+                m.used.push(c.to_string());
+            }
+        }
+        let hand: Vec<String> = found["myHand"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|c| !c.starts_with('?')).map(str::to_string).collect();
+        if !hand.is_empty() {
+            m.hand = hand;
+        }
         let sure = found["sure"] != "低";
         if !deck.is_empty() && sure {
             m.deck = deck.clone();
@@ -536,12 +615,16 @@ pub fn prompt_of(hand: &str, deck: &str, last: Option<&Value>, known: &str) -> S
     }
     p.push_str(
         "\n對戰畫面只回一個 JSON，不要其他文字：\n\
-         {\"screen\":\"duel\",\"turn\":\"theirs|mine|?\",\"fresh\":false,\"myHand\":[\"我手上的牌，認不出寫?\"],\"mySet\":[\"我場上蓋著能用的卡\"],\"deck\":\"對手牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的對手卡名\"],\"plan\":\"它想做什麼，一句話\",\
+         {\"screen\":\"duel\",\"turn\":\"theirs|mine|?\",\"turnNo\":3,\"used\":[\"這回合我已經發動過效果的卡\"],\"fresh\":false,\"myHand\":[\"我手上的牌，認不出寫?\"],\"mySet\":[\"我場上蓋著能用的卡\"],\"deck\":\"對手牌組名（繁中）\",\"deckAlt\":\"日文或英文名\",\"sure\":\"高|中|低\",\"seen\":[\"看到的對手卡名\"],\"plan\":\"它想做什麼，一句話\",\
          \"chain\":{\"card\":\"對手正在發動的卡\",\"answer\":\"要不要連鎖、用哪張，一句話\"},\
          \"stop\":[{\"card\":\"要斷的卡\",\"zone\":\"M3|S1|F|EL|hand|gy|chain…\",\"effect\":\"哪個效果\",\"with\":\"用什麼斷\",\"when\":\"時機\",\"why\":\"為什麼，20字內\"}],\
          \"me\":{\"first\":\"先攻怎麼打，一句\",\"second\":\"後攻怎麼打，一句\",\"now\":[\"這回合第一步\",\"第二步\"]},\
          \"watch\":[\"要小心它的什麼，15字內\"],\"tip\":\"一句建議\",\
          \"crew\":{\"claude\":\"總指揮：現在最該做的一件事\",\"codex\":\"算數字：生命值、打點、還差多少傷害或資源張數\",\"grok\":\"看對手：它可能還藏著什麼（蓋牌、手坑、墓地效果）\",\"agy\":\"查環境：這牌組在目前環境的地位、常帶的卡\"}}\n\
+         turnNo 是六角形上的回合數字。used：這回合我已經發動過效果的卡（看連鎖、我的墓地、場上和下面附的紀錄）。\
+         一回合一次的規則：卡名寫著「這個卡名…1回合只能使用1次」的，這回合我已經用過一張，手上同名的另一張這回合就不能再發動同一個效果，絕對不要建議；\
+         只寫「1回合1次」沒寫卡名的，另一張可以。\
+         斷點：照下面附的對手卡效果原文，斷它真正的展開效果（檢索、從牌組特召、送墓的那個），說清楚是第幾個效果、在哪個時機發動。\
          turn 是現在輪到誰（看畫面上的回合、階段標示和誰在動作）：對手的回合 theirs、我的回合 mine、看不出來 ?。\
          fresh：這張看起來是一場剛開始的對決（第 1 回合、雙方 8000 分、場上幾乎沒卡）寫 true。\
          crew 是四位軍師各說一句、各 25 字內、口氣像隊友在旁邊講話；看不出來的那位就說她要你注意什麼。\
@@ -1631,6 +1714,7 @@ mod tests {
         let last = json!({ "deck": "蛇眼", "seen": ["蛇眼灰燼", "原罪寶-蛇眼"] });
         let p = prompt_of("灰流麗、增殖的G", "巳劍：天叢雲之巳劍×2", Some(&last), "{\"deck\":\"蛇眼\"}");
         assert!(p.contains("剛上網查的") && p.contains("\"turn\"") && p.contains("fresh"));
+        assert!(p.contains("\"turnNo\"") && p.contains("\"used\"") && p.contains("同名的另一張這回合就不能再發動"));
         assert!(p.contains("牌組裡有不代表現在手上有") && p.contains("天叢雲之巳劍×2") && p.contains("\"zone\""));
         assert!(p.contains("我的牌組帶的手坑／斷點卡：灰流麗、增殖的G。只有我現在手上"));
         assert!(p.contains("\"myHand\"") && p.contains("手上沒有"));
