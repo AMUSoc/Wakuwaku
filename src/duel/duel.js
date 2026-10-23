@@ -133,7 +133,25 @@
     return parts
   }
   // Where a card to stop is (the frame on the game bears its number).
-  const ZONE_WORD = { M1: 'duel.zoneM', M2: 'duel.zoneM', M3: 'duel.zoneM', M4: 'duel.zoneM', M5: 'duel.zoneM', S1: 'duel.zoneS', S2: 'duel.zoneS', S3: 'duel.zoneS', S4: 'duel.zoneS', S5: 'duel.zoneS', F: 'duel.zoneF', EL: 'duel.zoneEL', ER: 'duel.zoneER', hand: 'duel.zoneHand', gy: 'duel.zoneGy', chain: 'duel.zoneChain' }
+  const ZONE_WORD = { M1: 'duel.zoneM', M2: 'duel.zoneM', M3: 'duel.zoneM', M4: 'duel.zoneM', M5: 'duel.zoneM', S1: 'duel.zoneS', S2: 'duel.zoneS', S3: 'duel.zoneS', S4: 'duel.zoneS', S5: 'duel.zoneS', F: 'duel.zoneF', EL: 'duel.zoneEL', ER: 'duel.zoneER', hand: 'duel.zoneHand', gy: 'duel.zoneGy', ban: 'duel.zoneBan', chain: 'duel.zoneChain' }
+
+  // Where it is, drawn: the opponent's side as the game lays it (back row,
+  // monsters with the field zone at the right, the two extra zones in the
+  // middle), its zone lit with the number its frame on the game bears (she
+  // could not tell "怪獸區 3" on the screen, 2026-10-23).
+  const MAP = [
+    ['S1', 'S2', 'S3', 'S4', 'S5', ''],
+    ['M1', 'M2', 'M3', 'M4', 'M5', 'F'],
+    ['', 'EL', '', 'ER', '', ''],
+  ]
+  function miniMap(zone, n) {
+    if (!MAP.flat().includes(zone)) return null
+    return el(
+      'div',
+      'mini',
+      MAP.flat().map(z => el('i', z ? `cell${z === zone ? ' on' : ''}${z === 'F' ? ' f' : ''}` : 'gap', z === zone ? String(n) : '')),
+    )
+  }
 
   function draw() {
     clearInterval(timer)
@@ -198,7 +216,7 @@
             el(
               'div',
               'stop',
-              el('div', 'n', String(i + 1)),
+              miniMap(s.zone, i + 1) || el('div', 'n', String(i + 1)),
               el(
                 'div',
                 'what',

@@ -758,3 +758,38 @@ pre.mine {
   border: 0;
   border-top: 1px solid var(--line);
 }
+
+/* Where a card to stop is: the opponent's side in small, its zone lit. */
+.mini {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(6, 14px);
+  grid-auto-rows: 19px;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  align-self: flex-start;
+}
+
+.mini .cell {
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  display: grid;
+  place-items: center;
+}
+
+.mini .cell.f {
+  background: rgba(79, 216, 143, 0.12);
+}
+
+.mini .cell.on {
+  background: var(--claude);
+  border-color: #ffb27a;
+  box-shadow: 0 0 6px rgba(232, 115, 42, 0.8);
+}
