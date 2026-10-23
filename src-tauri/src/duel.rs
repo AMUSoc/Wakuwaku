@@ -1917,6 +1917,9 @@ pub fn frames_ready(sh: &Arc<Shared>) {
 const FRAMES_FOR: u64 = 120_000;
 static FRAMES_ON: AtomicBool = AtomicBool::new(false);
 static FRAMES_WATCH: AtomicBool = AtomicBool::new(false);
+// The bar put away while another window is in front (it is on top of
+// everything: it sat over her other windows, 2026-10-23), back with the game.
+static AWAY: AtomicBool = AtomicBool::new(false);
 
 // The game in front (or one of her own windows, typed in): else the frames
 // would sit over whatever is.
@@ -1928,8 +1931,9 @@ fn game_in_front(sh: &Shared) -> bool {
     [LABEL, DECK].iter().filter_map(|l| sh.app.get_webview_window(l)).filter_map(|w| w.hwnd().ok()).any(|h| h.0 as isize == front)
 }
 
-// Every second while she has the bar up: the frames off once stale or with
-// the game not in front, back when it is; the bar away with the game gone.
+// Every second while she has the bar up: the bar and the frames away with
+// the game not in front, back when it is; the frames off once stale; the
+// bar gone with the game.
 fn watch_frames(sh: &Arc<Shared>) {
     if FRAMES_WATCH.swap(true, Ordering::SeqCst) {
         return;
@@ -1943,6 +1947,10 @@ fn watch_frames(sh: &Arc<Shared>) {
         if game_pid().is_none() {
             show(&sh, false);
             continue;
+        }
+        let away = !game_in_front(&sh);
+        if AWAY.swap(away, Ordering::SeqCst) != away {
+            apply(&sh);
         }
         let want = FLY.load(Ordering::SeqCst);
         if FRAMES_ON.load(Ordering::SeqCst) != (want && frames_fresh(&sh)) {
@@ -2001,7 +2009,7 @@ fn apply(sh: &Arc<Shared>) {
         return;
     }
     if let Some(win) = window(sh) {
-        if want {
+        if want && !AWAY.load(Ordering::SeqCst) {
             if let Some((pos, size, _)) = rect(sh) {
                 lay(&win, pos, size);
                 // Onto a display of another scale, Windows sizes it again a
@@ -2031,7 +2039,10 @@ fn apply(sh: &Arc<Shared>) {
 
 pub fn show(sh: &Arc<Shared>, on: bool) {
     SHOWN.store(on, Ordering::SeqCst);
-    if !on {
+    if on {
+        // Asked for from the game: in front now.
+        AWAY.store(false, Ordering::SeqCst);
+    } else {
         WATCH.store(false, Ordering::SeqCst);
     }
     apply(sh);
